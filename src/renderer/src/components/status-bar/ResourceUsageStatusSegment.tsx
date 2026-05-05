@@ -861,9 +861,25 @@ export function ResourceUsageStatusSegment({
     void runSleepWorktree(id)
   }, [])
 
-  const handleKillSession = useCallback((session: UnifiedSessionRow): void => {
-    setKillConfirm(session)
-  }, [])
+  const handleKillSession = useCallback(
+    (session: UnifiedSessionRow): void => {
+      // Why: orphan sessions have no tab in this Orca instance, so there's
+      // no "unsaved work in that pane" the user could lose by killing them.
+      // Skip the confirm dialog for orphans and fire the kill straight away
+      // (with optimistic removal) — same UX as a one-off kill from the
+      // bulk "Kill orphan terminals" button. Bound sessions still confirm.
+      if (!session.bound) {
+        setSessions((prev) => prev.filter((s) => s.id !== session.sessionId))
+        void window.api.pty.kill(session.sessionId).catch(() => {
+          /* already dead */
+        })
+        void refreshSessions()
+        return
+      }
+      setKillConfirm(session)
+    },
+    [refreshSessions]
+  )
 
   const handleKillOrphans = useCallback(async () => {
     if (!workspaceSessionReady) {
