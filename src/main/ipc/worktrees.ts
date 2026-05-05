@@ -37,6 +37,9 @@ import { rebuildAuthorizedRootsCache, ensureAuthorizedRootsCache } from './files
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 import { killAllProcessesForWorktree } from '../runtime/worktree-teardown'
 import { getLocalPtyProvider } from './pty'
+import { removeWorktreeSymlinks } from './worktree-symlinks'
+import { track } from '../telemetry/client'
+import { workspaceSourceSchema, type WorkspaceSource } from '../../shared/telemetry-events'
 
 // Why: worktrees discovered on disk (not created via Orca's UI) have no
 // persisted WorktreeMeta, so mergeWorktree falls back to `lastActivityAt: 0`.
@@ -156,11 +159,26 @@ export function registerWorktreeHandlers(
       }
 
       // Remote repos route all git operations through the relay
-      if (repo.connectionId) {
-        return createRemoteWorktree(args, repo, store, mainWindow)
-      }
+      const result = repo.connectionId
+        ? await createRemoteWorktree(args, repo, store, mainWindow)
+        : await createLocalWorktree(args, repo, store, mainWindow, runtime)
 
-      return createLocalWorktree(args, repo, store, mainWindow, runtime)
+      // Why: emit `workspace_created` only after the underlying create has
+      // resolved (the helpers throw on failure, so reaching this line means
+      // git-add succeeded — we deliberately do not also emit a separate
+      // `workspace_initialized`, see telemetry-plan.md§Deferred events).
+      // `from_existing_branch` is true iff the caller specified a non-empty
+      // baseBranch; an unspecified baseBranch means "branch from default
+      // HEAD", which is the not-from-existing-branch case. We never send
+      // the branch name itself.
+      const sourceParse = workspaceSourceSchema.safeParse(args.telemetrySource)
+      const source: WorkspaceSource = sourceParse.success ? sourceParse.data : 'unknown'
+      track('workspace_created', {
+        source,
+        from_existing_branch: typeof args.baseBranch === 'string' && args.baseBranch.length > 0
+      })
+
+      return result
     }
   )
 
@@ -324,6 +342,15 @@ export function registerWorktreeHandlers(
         if (!result.success) {
           console.error(`[hooks] archive hook failed for ${worktreePath}:`, result.output)
         }
+      }
+
+      // Why: `git worktree remove` (non-force) refuses to delete a worktree
+      // that has untracked files, and a symlink pointing into the primary
+      // checkout looks untracked to git. Unlink the user-configured symlinks
+      // first so the normal delete path keeps working — otherwise every
+      // deletion would require the Force Delete toast once the feature is on.
+      if (repo.symlinkPaths && repo.symlinkPaths.length > 0) {
+        await removeWorktreeSymlinks(worktreePath, repo.symlinkPaths)
       }
 
       try {
