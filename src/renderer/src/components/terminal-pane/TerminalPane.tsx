@@ -76,7 +76,6 @@ export default function TerminalPane({
   const paneMode2031Ref = useRef<Map<number, boolean>>(new Map())
   const paneLastThemeModeRef = useRef<Map<number, 'dark' | 'light'>>(new Map())
   const panePtyBindingsRef = useRef<Map<number, IDisposable>>(new Map())
-  const pendingWritesRef = useRef<Map<number, string>>(new Map())
   // Why: tracks panes currently replaying recorded PTY bytes into xterm
   // (cold-restore, daemon snapshot, scrollback restore, eager-buffer flush).
   // While non-zero, pty-connection.ts drops xterm onData so auto-replies to
@@ -468,7 +467,6 @@ export default function TerminalPane({
     paneMode2031Ref,
     paneLastThemeModeRef,
     panePtyBindingsRef,
-    pendingWritesRef,
     replayingPanesRef,
     isActiveRef,
     isVisibleRef,
@@ -534,7 +532,6 @@ export default function TerminalPane({
         cwd,
         startup: { command: 'codex' },
         paneTransportsRef,
-        pendingWritesRef,
         replayingPanesRef,
         isActiveRef,
         isVisibleRef,
@@ -634,7 +631,6 @@ export default function TerminalPane({
     managerRef,
     containerRef,
     paneTransportsRef,
-    pendingWritesRef,
     isActiveRef,
     isVisibleRef,
     toggleExpandPane
@@ -823,15 +819,9 @@ export default function TerminalPane({
       if (panes.length === 0) {
         return
       }
-      // Flush pending background PTY output into terminals before serializing.
-      // terminal.write() is async so some trailing bytes may be lost — best effort.
-      for (const pane of panes) {
-        const pending = pendingWritesRef.current.get(pane.id)
-        if (pending) {
-          pane.terminal.write(pending)
-          pendingWritesRef.current.set(pane.id, '')
-        }
-      }
+      // No renderer-side pending writes to flush — PTY output writes live
+      // into xterm regardless of visibility, so the SerializeAddon already
+      // sees the freshest possible state at this point.
       const buffers: Record<string, string> = {}
       for (const pane of panes) {
         try {
