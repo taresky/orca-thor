@@ -11,6 +11,11 @@ import {
   writeManagedScript,
   type HookDefinition
 } from '../agent-hooks/installer-utils'
+import {
+  upsertHookTrustEntries,
+  type CodexEventLabel,
+  type CodexTrustEntry
+} from './config-toml-trust'
 
 // Why: PreToolUse/PostToolUse give the dashboard a live readout of the
 // in-flight tool (name + input preview) between UserPromptSubmit and Stop.
@@ -29,6 +34,22 @@ const CODEX_EVENTS = [
 
 function getConfigPath(): string {
   return join(homedir(), '.codex', 'hooks.json')
+}
+
+function getCodexConfigTomlPath(): string {
+  return join(homedir(), '.codex', 'config.toml')
+}
+
+// Why: Codex's hash key uses the snake_case event label (see
+// codex-rs/hooks/src/lib.rs::hook_event_key_label). Our hooks.json uses the
+// PascalCase serde-rename. Map between them at one place so the trust-write
+// path can't drift from the install path.
+const CODEX_EVENT_LABEL: Record<(typeof CODEX_EVENTS)[number], CodexEventLabel> = {
+  SessionStart: 'session_start',
+  UserPromptSubmit: 'user_prompt_submit',
+  PreToolUse: 'pre_tool_use',
+  PostToolUse: 'post_tool_use',
+  Stop: 'stop'
 }
 
 function getManagedScriptFileName(): string {
@@ -191,6 +212,11 @@ export class CodexHookService {
       }
     }
 
+    // Why: Codex 0.129+ requires a per-hook trust entry in config.toml or the
+    // hook sits in the "review required" pile. We compute the trust hash for
+    // each managed entry as we install it and persist it alongside hooks.json
+    // so the user does not have to /hooks-approve after every install.
+    const trustEntries: CodexTrustEntry[] = []
     for (const eventName of CODEX_EVENTS) {
       const current = Array.isArray(nextHooks[eventName]) ? nextHooks[eventName] : []
       const cleaned = removeManagedCommands(current, isManagedCommand)
@@ -198,11 +224,27 @@ export class CodexHookService {
         hooks: [{ type: 'command', command }]
       }
       nextHooks[eventName] = [...cleaned, definition]
+      // Why: our managed definition is appended after `cleaned`, so its
+      // group index in the resulting hooks.json is `cleaned.length`. The
+      // handler is always the first (and only) entry in the group, so
+      // handler index is 0. Codex's hook_key uses these positional indices.
+      trustEntries.push({
+        sourcePath: configPath,
+        eventLabel: CODEX_EVENT_LABEL[eventName],
+        groupIndex: cleaned.length,
+        handlerIndex: 0,
+        command
+      })
     }
 
     config.hooks = nextHooks
     writeManagedScript(scriptPath, getManagedScript())
     writeHooksJson(configPath, config)
+    // Why: write trust entries AFTER hooks.json so a partial install (script
+    // written, hooks.json not) cannot leave a trust hash pointing at a hook
+    // that does not exist. The reverse order would be benign but this keeps
+    // the invariant clear.
+    upsertHookTrustEntries(getCodexConfigTomlPath(), trustEntries)
     return this.getStatus()
   }
 
