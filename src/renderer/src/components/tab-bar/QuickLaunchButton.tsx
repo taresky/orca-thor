@@ -96,8 +96,8 @@ function QuickLaunchAgentMenuItemsInner({
       // Why: the watchdog guards against "queued startup command never ran" —
       // e.g. shell failed to spawn. Suppress the toast if the tab has been
       // closed or the worktree has been navigated away from before the
-      // deadline (see §States: Launch failure handling).
-      const hasPrompt = (prompt ?? '').trim().length > 0
+      // deadline (see §States: Launch failure handling). Bracketed-paste
+      // failures have their own toast in launch-agent-in-new-tab.ts.
       void waitForAgentReady(result.tabId, result.startupPlan.expectedProcess, {
         timeoutMs: 5000
       }).then((ready) => {
@@ -114,11 +114,7 @@ function QuickLaunchAgentMenuItemsInner({
         if (state.activeWorktreeId !== worktreeId) {
           return
         }
-        toast.message(
-          hasPrompt
-            ? `Couldn't send notes to ${label} — the terminal is still open.`
-            : `Couldn't launch ${label} — the terminal is still open.`
-        )
+        toast.message(`Couldn't launch ${label} — the terminal is still open.`)
       })
     },
     [worktreeId, groupId, onFocusTerminal, prompt, launchSource]

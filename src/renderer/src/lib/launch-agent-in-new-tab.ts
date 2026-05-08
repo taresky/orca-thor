@@ -1,3 +1,4 @@
+import { toast } from 'sonner'
 import { useAppStore } from '@/store'
 import {
   buildAgentDraftLaunchPlan,
@@ -6,7 +7,7 @@ import {
 } from '@/lib/tui-agent-startup'
 import { CLIENT_PLATFORM } from '@/lib/new-workspace'
 import { reconcileTabOrder } from '@/components/tab-bar/reconcile-order'
-import { tuiAgentToAgentKind } from '@/lib/telemetry'
+import { track, tuiAgentToAgentKind } from '@/lib/telemetry'
 import { pasteDraftWhenAgentReady } from '@/lib/agent-paste-draft'
 import { TUI_AGENT_CONFIG } from '../../../shared/tui-agent-config'
 import type { TuiAgent } from '../../../shared/types'
@@ -144,10 +145,35 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
   // for agents with a `draftPromptFlag`, so calling it on the followup path
   // is safe even when the draft was already injected via the native flag.
   if (pasteDraftAfterLaunch !== null) {
+    // Why: surface silent paste failures — without onTimeout, a stalled agent
+    // readiness wait drops the user's notes with no feedback. Suppress when
+    // the user closed the tab or switched worktrees so the toast/telemetry
+    // don't fire for user-initiated cancellation (mirrors the 5s launch
+    // watchdog in QuickLaunchButton).
+    const tabId = tab.id
     void pasteDraftWhenAgentReady({
-      tabId: tab.id,
+      tabId,
       content: pasteDraftAfterLaunch,
-      agent
+      agent,
+      onTimeout: () => {
+        const state = useAppStore.getState()
+        const stillOpen = Object.values(state.tabsByWorktree).some((tabs) =>
+          tabs.some((t) => t.id === tabId)
+        )
+        if (!stillOpen) {
+          return
+        }
+        if (state.activeWorktreeId !== worktreeId) {
+          return
+        }
+        toast.message(
+          "Agent took too long to start. Your notes weren't sent — paste them in once the agent is idle."
+        )
+        track('agent_error', {
+          error_class: 'unknown',
+          agent_kind: tuiAgentToAgentKind(agent)
+        })
+      }
     })
   }
 

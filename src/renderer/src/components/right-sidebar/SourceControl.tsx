@@ -230,6 +230,10 @@ function SourceControlInner(): React.JSX.Element {
     }
     return map
   }, [diffCommentsForActive])
+  const diffCommentsPrompt = useMemo(
+    () => formatDiffComments(diffCommentsForActive),
+    [diffCommentsForActive]
+  )
   const [diffCommentsExpanded, setDiffCommentsExpanded] = useState(false)
   const [diffCommentsCopied, setDiffCommentsCopied] = useState(false)
 
@@ -237,15 +241,14 @@ function SourceControlInner(): React.JSX.Element {
     if (diffCommentsForActive.length === 0) {
       return
     }
-    const text = formatDiffComments(diffCommentsForActive)
     try {
-      await window.api.ui.writeClipboardText(text)
+      await window.api.ui.writeClipboardText(diffCommentsPrompt)
       setDiffCommentsCopied(true)
     } catch {
       // Why: swallow — clipboard write can fail when the window isn't focused.
       // No dedicated error surface is warranted for a best-effort copy action.
     }
-  }, [diffCommentsForActive])
+  }, [diffCommentsForActive, diffCommentsPrompt])
 
   // Why: auto-dismiss the "copied" indicator so the button returns to its
   // default icon after a brief confirmation window.
@@ -1294,7 +1297,7 @@ function SourceControlInner(): React.JSX.Element {
                       worktreeId={activeWorktreeId}
                       groupId={activeWorktreeId}
                       onFocusTerminal={focusTerminalTabSurface}
-                      prompt={formatDiffComments(diffCommentsForActive)}
+                      prompt={diffCommentsPrompt}
                       launchSource="diff_notes_send"
                     />
                   </DropdownMenuContent>
