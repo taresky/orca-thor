@@ -1,3 +1,8 @@
+/* eslint-disable max-lines -- Why: this is the relay's single git RPC entry
+   point, registering and implementing handlers for ~14 git methods. Splitting
+   would scatter related handlers without a clean boundary; addWorktree's
+   --no-track + push.autoSetupRemote probe-and-write mirror state required to
+   stay in step with the local addWorktree path tipped this over the threshold. */
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { existsSync } from 'fs'
@@ -307,7 +312,6 @@ export class GitHandler {
     const targetDir = params.targetDir as string
     this.context.validatePath(targetDir)
     const base = params.base as string | undefined
-    const track = params.track as boolean | undefined
 
     // Why: a branchName starting with '-' would be interpreted as a git flag,
     // potentially changing the command's semantics (e.g. "--detach").
@@ -315,16 +319,46 @@ export class GitHandler {
       throw new Error('Branch name and base ref must not start with "-"')
     }
 
-    const args = ['worktree', 'add']
-    if (track) {
-      args.push('--track')
-    }
-    args.push('-b', branchName, targetDir)
+    // Why: --no-track + push.autoSetupRemote=true mirrors the local
+    // addWorktree path (src/main/git/worktree.ts). Keeping the SSH path in
+    // sync prevents a transport-only divergence where "Orca creates a
+    // worktree" produces a different `git status` / `git push` UX based on
+    // whether the repo is local or SSH-mounted. See full design rationale
+    // (state machine, common-dir scope, old-git fallback) in the comments
+    // around src/main/git/worktree.ts addWorktree — those invariants apply
+    // identically here.
+    const args = ['worktree', 'add', '--no-track', '-b', branchName, targetDir]
     if (base) {
       args.push(base)
     }
 
     await this.git(args, repoPath)
+
+    // Why: best-effort write so a deliberate user value (any scope) is
+    // preserved and a real read failure is not silently overwritten. Final
+    // catch is warn-only — old git (<2.37) ignores the value and the user
+    // falls back to `git push -u` once. Mirrors local addWorktree exactly.
+    try {
+      let alreadySet = false
+      try {
+        await this.git(['config', '--get', 'push.autoSetupRemote'], targetDir)
+        alreadySet = true
+      } catch (readError) {
+        // Why: `git config --get` exits 1 only when the key is unset at every
+        // scope. Any other code is a real read failure (corrupt config,
+        // locked file) — surface it via the outer catch instead of falling
+        // through to overwrite the user's actual value.
+        const code = (readError as { code?: unknown })?.code
+        if (code !== 1) {
+          throw readError
+        }
+      }
+      if (!alreadySet) {
+        await this.git(['config', '--local', 'push.autoSetupRemote', 'true'], targetDir)
+      }
+    } catch (error) {
+      console.warn(`relay addWorktree: failed to set push.autoSetupRemote for ${targetDir}`, error)
+    }
   }
 
   private async removeWorktree(params: Record<string, unknown>) {
