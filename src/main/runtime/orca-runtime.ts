@@ -10,7 +10,7 @@ import type { AgentStatus } from '../../shared/agent-detection'
 import { gitExecFileAsync } from '../git/runner'
 import { isWslPath, parseWslPath, getWslHome } from '../wsl'
 import { randomUUID } from 'crypto'
-import { join } from 'path'
+import { join, posix, win32 } from 'path'
 import { rm } from 'fs/promises'
 import { OrchestrationDb } from './orchestration/db'
 import { formatMessagesForInjection } from './orchestration/formatter'
@@ -56,6 +56,8 @@ import type {
   RuntimeMobileSessionMarkdownTab,
   RuntimeMobileSessionTabsResult,
   RuntimeMobileSessionTabsSnapshot,
+  RuntimeFileListResult,
+  RuntimeFileOpenResult,
   RuntimeSyncWindowGraph,
   RuntimeWorktreeListResult,
   BrowserSnapshotResult,
@@ -119,6 +121,7 @@ import {
   getRecentDriftSubjects
 } from '../git/repo'
 import { listWorktrees, addWorktree, removeWorktree } from '../git/worktree'
+import { listQuickOpenFiles } from '../ipc/filesystem-list-files'
 import {
   createSetupRunnerScript,
   getEffectiveHooks,
@@ -148,6 +151,7 @@ import { HeadlessEmulator } from '../daemon/headless-emulator'
 import { killAllProcessesForWorktree } from './worktree-teardown'
 import { MOBILE_SUBSCRIBE_SCROLLBACK_ROWS } from './scrollback-limits'
 import type { IPtyProvider } from '../providers/types'
+import { getSshFilesystemProvider } from '../providers/ssh-filesystem-dispatch'
 import type { ClaudeAccountService } from '../claude-accounts/service'
 import type { CodexAccountService } from '../codex-accounts/service'
 import type { RateLimitService } from '../rate-limits/service'
@@ -269,6 +273,24 @@ type RuntimePtyController = {
   getSize?(ptyId: string): { cols: number; rows: number } | null
 }
 
+const MOBILE_FILE_LIST_LIMIT = 5000
+const MOBILE_BINARY_EXTENSIONS = new Set([
+  '.avif',
+  '.bmp',
+  '.gif',
+  '.heic',
+  '.ico',
+  '.jpeg',
+  '.jpg',
+  '.mov',
+  '.mp3',
+  '.mp4',
+  '.pdf',
+  '.png',
+  '.webp',
+  '.zip'
+])
+
 type RuntimeNotifier = {
   worktreesChanged(repoId: string): void
   worktreeBaseStatus?(event: WorktreeBaseStatusEvent): void
@@ -296,6 +318,7 @@ type RuntimeNotifier = {
   renameTerminal(tabId: string, title: string | null): void
   focusTerminal(tabId: string, worktreeId: string): void
   focusEditorTab?(tabId: string, worktreeId: string): void
+  openFile?(worktreeId: string, filePath: string, relativePath: string): void
   readMobileMarkdownTab?(worktreeId: string, tabId: string): Promise<RuntimeMarkdownReadTabResult>
   saveMobileMarkdownTab?(
     worktreeId: string,
@@ -921,6 +944,70 @@ export class OrcaRuntimeService {
       throw new Error('renderer_unavailable')
     }
     return await this.notifier.saveMobileMarkdownTab(worktreeId, tabId, baseVersion, content)
+  }
+
+  async listMobileFiles(worktreeSelector: string): Promise<RuntimeFileListResult> {
+    if (!this.store) {
+      throw new Error('runtime_unavailable')
+    }
+    const worktree = await this.resolveWorktreeSelector(worktreeSelector)
+    const repo = this.store.getRepo(worktree.repoId)
+    const connectionId = repo?.connectionId ?? undefined
+    const files = connectionId
+      ? await this.listRemoteMobileFiles(worktree.path, connectionId)
+      : await listQuickOpenFiles(worktree.path, this.store as unknown as Store)
+    const entries = files
+      .filter((relativePath) => isSafeMobileRelativePath(relativePath))
+      .sort((a, b) => a.localeCompare(b))
+      .slice(0, MOBILE_FILE_LIST_LIMIT)
+      .map((relativePath) => ({
+        relativePath,
+        basename: basenameFromRelativePath(relativePath),
+        kind: isMobileBinaryPath(relativePath) ? ('binary' as const) : ('text' as const)
+      }))
+
+    return {
+      worktree: worktree.id,
+      rootPath: worktree.path,
+      files: entries,
+      totalCount: files.length,
+      truncated: files.length > MOBILE_FILE_LIST_LIMIT
+    }
+  }
+
+  async openMobileFile(
+    worktreeSelector: string,
+    relativePath: string
+  ): Promise<RuntimeFileOpenResult> {
+    if (!this.store) {
+      throw new Error('runtime_unavailable')
+    }
+    const worktree = await this.resolveWorktreeSelector(worktreeSelector)
+    if (!isSafeMobileRelativePath(relativePath)) {
+      throw new Error('invalid_relative_path')
+    }
+    const kind = isMobileBinaryPath(relativePath)
+      ? 'binary'
+      : isMobileMarkdownPath(relativePath)
+        ? 'markdown'
+        : 'text'
+    if (kind === 'binary') {
+      return { worktree: worktree.id, relativePath, kind, opened: false }
+    }
+    if (!this.notifier?.openFile) {
+      throw new Error('renderer_unavailable')
+    }
+    const filePath = joinWorktreeRelativePath(worktree.path, relativePath)
+    this.notifier.openFile(worktree.id, filePath, relativePath)
+    return { worktree: worktree.id, relativePath, kind, opened: true }
+  }
+
+  private async listRemoteMobileFiles(rootPath: string, connectionId: string): Promise<string[]> {
+    const provider = getSshFilesystemProvider(connectionId)
+    if (!provider) {
+      return []
+    }
+    return provider.listFiles(rootPath)
   }
 
   onMobileSessionTabsChanged(
@@ -4995,7 +5082,7 @@ export class OrcaRuntimeService {
   ): RuntimeMobileSessionTabsResult {
     const tabs: RuntimeMobileSessionClientTab[] = []
     for (const tab of snapshot.tabs) {
-      if (tab.type === 'markdown') {
+      if (tab.type === 'markdown' || tab.type === 'file') {
         tabs.push(tab)
         continue
       }
@@ -7238,6 +7325,40 @@ function maxTimestamp(left: number | null, right: number | null): number | null 
     return left
   }
   return Math.max(left, right)
+}
+
+function isSafeMobileRelativePath(relativePath: string): boolean {
+  if (!relativePath || relativePath.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(relativePath)) {
+    return false
+  }
+  const parts = relativePath.replace(/\\/g, '/').split('/')
+  return parts.every((part) => part !== '' && part !== '.' && part !== '..')
+}
+
+function isMobileMarkdownPath(relativePath: string): boolean {
+  return /\.(md|mdx|markdown)$/i.test(relativePath)
+}
+
+function isMobileBinaryPath(relativePath: string): boolean {
+  const basename = basenameFromRelativePath(relativePath)
+  const dotIndex = basename.lastIndexOf('.')
+  if (dotIndex <= 0) {
+    return false
+  }
+  return MOBILE_BINARY_EXTENSIONS.has(basename.slice(dotIndex).toLowerCase())
+}
+
+function basenameFromRelativePath(relativePath: string): string {
+  const normalized = relativePath.replace(/\\/g, '/')
+  return normalized.slice(normalized.lastIndexOf('/') + 1)
+}
+
+function joinWorktreeRelativePath(rootPath: string, relativePath: string): string {
+  const normalizedRelativePath = relativePath.replace(/\\/g, '/')
+  if (/^[a-zA-Z]:[\\/]/.test(rootPath) || rootPath.startsWith('\\\\')) {
+    return win32.join(rootPath, ...normalizedRelativePath.split('/'))
+  }
+  return posix.join(rootPath, ...normalizedRelativePath.split('/'))
 }
 
 function compareWorktreePs(

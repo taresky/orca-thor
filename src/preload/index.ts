@@ -1946,6 +1946,16 @@ const api = {
       ipcRenderer.on('ui:focusEditorTab', listener)
       return () => ipcRenderer.removeListener('ui:focusEditorTab', listener)
     },
+    onOpenFileFromMobile: (
+      callback: (data: { worktreeId: string; filePath: string; relativePath: string }) => void
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: { worktreeId: string; filePath: string; relativePath: string }
+      ) => callback(data)
+      ipcRenderer.on('ui:openFileFromMobile', listener)
+      return () => ipcRenderer.removeListener('ui:openFileFromMobile', listener)
+    },
     onMobileMarkdownRequest: (
       callback: (request: RuntimeMobileMarkdownRequest) => void
     ): (() => void) => {

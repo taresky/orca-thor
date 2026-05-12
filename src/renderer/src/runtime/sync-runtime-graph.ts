@@ -3,6 +3,7 @@ import { warnTerminalLifecycleAnomaly } from '@/components/terminal-pane/termina
 import type { PaneManager } from '@/lib/pane-manager/pane-manager'
 import type { AppState } from '@/store/types'
 import type {
+  RuntimeMobileSessionFileTab,
   RuntimeMobileSessionMarkdownTab,
   RuntimeMobileSessionSnapshotTab,
   RuntimeMobileSessionTabsSnapshot,
@@ -213,6 +214,8 @@ function buildMobileSessionTabSnapshots(state: AppState): RuntimeMobileSessionTa
         const markdown = file ? buildMobileMarkdownTab(state, file.id, item.tabId) : null
         if (markdown) {
           tabs.push(markdown)
+        } else if (file) {
+          tabs.push(buildMobileFileTab(state, file.id, item.tabId))
         }
       }
     }
@@ -274,6 +277,30 @@ function buildMobileMarkdownTab(
     sourceRelativePath: sourceFile.relativePath,
     documentVersion:
       draftContent !== undefined ? stableHashString(draftContent) : `file:${sourceFile.id}`
+  }
+}
+
+function buildMobileFileTab(
+  state: AppState,
+  fileId: string,
+  unifiedTabId?: string
+): RuntimeMobileSessionFileTab {
+  const file = state.openFiles.find((candidate) => candidate.id === fileId)!
+  const title = file.relativePath.split(/[\\/]/).pop() || file.relativePath || 'File'
+
+  return {
+    type: 'file',
+    id: unifiedTabId ?? file.id,
+    title,
+    filePath: file.filePath,
+    relativePath: file.relativePath,
+    language: file.language,
+    isDirty: file.isDirty,
+    isActive: unifiedTabId
+      ? state.groupsByWorktree[file.worktreeId]?.some(
+          (group) => group.activeTabId === unifiedTabId
+        ) === true
+      : state.activeFileId === file.id
   }
 }
 

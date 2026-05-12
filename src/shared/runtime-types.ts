@@ -94,9 +94,21 @@ export type RuntimeMobileSessionMarkdownTab = {
   documentVersion: string
 }
 
+export type RuntimeMobileSessionFileTab = {
+  type: 'file'
+  id: string
+  title: string
+  filePath: string
+  relativePath: string
+  language: string
+  isDirty: boolean
+  isActive: boolean
+}
+
 export type RuntimeMobileSessionSnapshotTab =
   | RuntimeMobileSessionTerminalTab
   | RuntimeMobileSessionMarkdownTab
+  | RuntimeMobileSessionFileTab
 
 export type RuntimeMobileSessionTerminalClientTab = Omit<
   RuntimeMobileSessionTerminalTab,
@@ -108,13 +120,14 @@ export type RuntimeMobileSessionTerminalClientTab = Omit<
 export type RuntimeMobileSessionClientTab =
   | RuntimeMobileSessionTerminalClientTab
   | RuntimeMobileSessionMarkdownTab
+  | RuntimeMobileSessionFileTab
 
 export type RuntimeMobileSessionTabsSnapshot = {
   worktree: string
   snapshotVersion: number
   activeGroupId: string | null
   activeTabId: string | null
-  activeTabType: 'terminal' | 'markdown' | null
+  activeTabType: 'terminal' | 'markdown' | 'file' | null
   tabs: RuntimeMobileSessionSnapshotTab[]
 }
 
@@ -123,8 +136,29 @@ export type RuntimeMobileSessionTabsResult = {
   snapshotVersion: number
   activeGroupId: string | null
   activeTabId: string | null
-  activeTabType: 'terminal' | 'markdown' | null
+  activeTabType: 'terminal' | 'markdown' | 'file' | null
   tabs: RuntimeMobileSessionClientTab[]
+}
+
+export type RuntimeFileListEntry = {
+  relativePath: string
+  basename: string
+  kind: 'text' | 'binary'
+}
+
+export type RuntimeFileListResult = {
+  worktree: string
+  rootPath: string
+  files: RuntimeFileListEntry[]
+  totalCount: number
+  truncated: boolean
+}
+
+export type RuntimeFileOpenResult = {
+  worktree: string
+  relativePath: string
+  kind: 'markdown' | 'text' | 'binary'
+  opened: boolean
 }
 
 export type RuntimeTerminalSummary = {

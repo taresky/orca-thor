@@ -276,6 +276,8 @@ function registerRuntimeWindowLifecycle(
     renameTerminal: (tabId, title) => send('ui:renameTerminal', { tabId, title }),
     focusTerminal: (tabId, worktreeId) => send('ui:focusTerminal', { tabId, worktreeId }),
     focusEditorTab: (tabId, worktreeId) => send('ui:focusEditorTab', { tabId, worktreeId }),
+    openFile: (worktreeId, filePath, relativePath) =>
+      send('ui:openFileFromMobile', { worktreeId, filePath, relativePath }),
     readMobileMarkdownTab: (worktreeId, tabId) =>
       requestMobileMarkdownFromRenderer(mainWindow, {
         operation: 'read',

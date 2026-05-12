@@ -21,6 +21,8 @@ import {
   ArrowUp,
   ChevronLeft,
   Eraser,
+  Folder,
+  File,
   FileText,
   Monitor,
   Plus,
@@ -79,13 +81,22 @@ type MobileSessionTab =
       isActive: boolean
       documentVersion: string
     }
+  | {
+      type: 'file'
+      id: string
+      title: string
+      filePath: string
+      relativePath: string
+      isDirty: boolean
+      isActive: boolean
+    }
 
 type SessionTabsResult = {
   worktree: string
   snapshotVersion: number
   tabs: MobileSessionTab[]
   activeTabId: string | null
-  activeTabType: 'terminal' | 'markdown' | null
+  activeTabType: 'terminal' | 'markdown' | 'file' | null
 }
 
 type MarkdownDocState =
@@ -397,7 +408,7 @@ export default function SessionScreen() {
   // and may not render reliably.
   const webReadyHandlesRef = useRef<Set<string>>(new Set())
   const activeHandleRef = useRef<string | null>(null)
-  const activeSessionTabTypeRef = useRef<'terminal' | 'markdown' | null>(null)
+  const activeSessionTabTypeRef = useRef<'terminal' | 'markdown' | 'file' | null>(null)
   const pendingActiveSessionTabIdRef = useRef<string | null>(null)
   const markdownSaveSeqRef = useRef<Map<string, number>>(new Map())
   const markdownSaveInFlightRef = useRef<Set<string>>(new Set())
@@ -886,7 +897,7 @@ export default function SessionScreen() {
         activeHandleRef.current = active.terminal
         setActiveHandle(active.terminal)
         subscribeToTerminal(active.terminal)
-      } else if (active?.type === 'markdown') {
+      } else if (active) {
         const previous = activeHandleRef.current
         if (previous) {
           unsubscribeTerminal(previous)
@@ -1399,7 +1410,7 @@ export default function SessionScreen() {
 
       triggerSelection()
       pendingActiveSessionTabIdRef.current = tab.id
-      activeSessionTabTypeRef.current = 'markdown'
+      activeSessionTabTypeRef.current = tab.type
       setActiveSessionTabId(tab.id)
       const prev = activeHandleRef.current
       if (prev) {
@@ -1415,6 +1426,9 @@ export default function SessionScreen() {
             tabId: tab.id
           })
           .catch(() => {})
+      }
+      if (tab.type === 'file') {
+        return
       }
       const cached = markdownDocs.get(tab.id)
       if (cached?.status === 'ready' && cached.isDirty) {
@@ -1840,6 +1854,7 @@ export default function SessionScreen() {
           isActive: terminal.handle === activeHandle
         }))
   const activeMarkdownTab = activeSessionTab?.type === 'markdown' ? activeSessionTab : null
+  const activeFileTab = activeSessionTab?.type === 'file' ? activeSessionTab : null
   const showLoadingState = connState === 'connected' && !terminalsLoaded && visibleTabs.length === 0
   const showEmptyState =
     connState === 'connected' && terminalsLoaded && visibleTabs.length === 0 && !activeHandle
@@ -1904,6 +1919,19 @@ export default function SessionScreen() {
                 </Text>
               </View>
             </View>
+            <Pressable
+              style={({ pressed }) => [styles.filesButton, pressed && styles.filesButtonPressed]}
+              onPress={() =>
+                router.push({
+                  pathname: '/h/[hostId]/files/[worktreeId]',
+                  params: { hostId, worktreeId, name: worktreeName || name || '' }
+                })
+              }
+              hitSlop={8}
+              accessibilityLabel="Open file explorer"
+            >
+              <Folder size={18} color={colors.textSecondary} strokeWidth={2.1} />
+            </Pressable>
           </View>
 
           {visibleTabs.length > 0 && (
@@ -1932,7 +1960,7 @@ export default function SessionScreen() {
                           title: t.title,
                           isActive: t.terminal === activeHandle
                         })
-                      } else {
+                      } else if (t.type === 'markdown') {
                         setMarkdownActionTarget(t)
                       }
                     }}
@@ -1941,6 +1969,9 @@ export default function SessionScreen() {
                     <View style={styles.tabLabelRow}>
                       {t.type === 'markdown' && (
                         <FileText size={13} color={colors.textSecondary} strokeWidth={2.1} />
+                      )}
+                      {t.type === 'file' && (
+                        <File size={13} color={colors.textSecondary} strokeWidth={2.1} />
                       )}
                       <Text
                         style={[
@@ -2010,6 +2041,16 @@ export default function SessionScreen() {
               </Animated.View>
             )}
           </View>
+        ) : activeFileTab ? (
+          <View style={styles.fileTabFrame}>
+            <File size={28} color={colors.textSecondary} strokeWidth={1.8} />
+            <Text style={styles.fileTabTitle} numberOfLines={1}>
+              {activeFileTab.title || 'File'}
+            </Text>
+            <Text style={styles.fileTabMeta} numberOfLines={2}>
+              Opened on desktop
+            </Text>
+          </View>
         ) : (
           <View
             style={styles.terminalFrame}
@@ -2046,7 +2087,7 @@ export default function SessionScreen() {
 
         {/* Why: translate instead of resizing so keyboard open/close does not
             trigger a server-side PTY viewport change. */}
-        {!activeMarkdownTab && (
+        {!activeMarkdownTab && !activeFileTab && (
           <View
             style={[
               styles.commandDock,
@@ -2385,6 +2426,17 @@ const styles = StyleSheet.create({
   backButtonPressed: {
     backgroundColor: colors.bgRaised
   },
+  filesButton: {
+    width: 36,
+    height: 36,
+    borderRadius: radii.button,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: spacing.xs
+  },
+  filesButtonPressed: {
+    backgroundColor: colors.bgRaised
+  },
   sessionTitleBlock: {
     flex: 1,
     minWidth: 0
@@ -2479,6 +2531,25 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0,
     backgroundColor: colors.bgBase
+  },
+  fileTabFrame: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    backgroundColor: colors.bgBase
+  },
+  fileTabTitle: {
+    color: colors.textPrimary,
+    fontSize: typography.bodySize,
+    fontWeight: '600',
+    maxWidth: '100%'
+  },
+  fileTabMeta: {
+    color: colors.textSecondary,
+    fontSize: typography.metaSize,
+    textAlign: 'center'
   },
   markdownEditor: {
     flex: 1,

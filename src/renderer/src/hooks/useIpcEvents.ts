@@ -29,6 +29,7 @@ import { setFitOverride, hydrateOverrides } from '@/lib/pane-manager/mobile-fit-
 import { setDriverForPty } from '@/lib/pane-manager/mobile-driver-state'
 import { destroyPersistentWebview } from '@/components/browser-pane/webview-registry'
 import { attachMobileMarkdownBridge } from '@/runtime/mobile-markdown-bridge'
+import { detectLanguage } from '@/lib/language-detect'
 
 export { resolveZoomTarget } from './resolve-zoom-target'
 
@@ -364,6 +365,28 @@ export function useIpcEvents(): void {
         store.focusGroup(worktreeId, tab.groupId)
         store.activateTab(tab.id)
         store.setActiveFile(tab.entityId)
+        store.setActiveTabType('editor')
+        store.revealWorktreeInSidebar(worktreeId)
+      })
+    )
+
+    unsubs.push(
+      window.api.ui.onOpenFileFromMobile(({ worktreeId, filePath, relativePath }) => {
+        const store = useAppStore.getState()
+        const basename = relativePath.split(/[\\/]/).pop() || relativePath
+        store.setActiveWorktree(worktreeId)
+        store.markWorktreeVisited(worktreeId)
+        store.setActiveView('terminal')
+        // Why: mobile only sends a desktop-backed path. The renderer owns
+        // editor tab creation so grouped tab order and markdown bridges update
+        // through the same store path as desktop File Explorer.
+        store.openFile({
+          filePath,
+          relativePath,
+          worktreeId,
+          language: detectLanguage(basename),
+          mode: 'edit'
+        })
         store.setActiveTabType('editor')
         store.revealWorktreeInSidebar(worktreeId)
       })

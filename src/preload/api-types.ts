@@ -1127,6 +1127,9 @@ export type PreloadApi = {
     onFocusEditorTab: (
       callback: (data: { tabId: string; worktreeId: string }) => void
     ) => () => void
+    onOpenFileFromMobile: (
+      callback: (data: { worktreeId: string; filePath: string; relativePath: string }) => void
+    ) => () => void
     onMobileMarkdownRequest: (
       callback: (request: RuntimeMobileMarkdownRequest) => void
     ) => () => void
