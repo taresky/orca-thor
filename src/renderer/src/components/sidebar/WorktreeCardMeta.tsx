@@ -7,7 +7,7 @@
 import React from 'react'
 import { Badge } from '@/components/ui/badge'
 import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card'
-import { CircleDot, LoaderCircle, PauseCircle } from 'lucide-react'
+import { CircleDot, Clock3, LoaderCircle, PauseCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import CommentMarkdown from './CommentMarkdown'
 import { PullRequestIcon, prStateLabel, checksLabel } from './WorktreeCardHelpers'
@@ -103,7 +103,9 @@ export function PrSection({
       : refreshState?.status === 'queued'
         ? 'Refresh queued'
         : refreshState?.status === 'paused'
-          ? 'Refresh paused'
+          ? refreshState.pausedUntil
+            ? `Refresh paused until ${new Date(refreshState.pausedUntil).toLocaleTimeString()}`
+            : 'Refresh paused'
           : null
   return (
     <HoverCard openDelay={300}>
@@ -138,6 +140,8 @@ export function PrSection({
             <span className="shrink-0 text-muted-foreground" aria-label={refreshLabel}>
               {refreshState?.status === 'paused' ? (
                 <PauseCircle className="size-3" />
+              ) : refreshState?.status === 'queued' ? (
+                <Clock3 className="size-3" />
               ) : (
                 <LoaderCircle className="size-3 animate-spin" />
               )}

@@ -1283,7 +1283,8 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
           linkedPRNumber,
           cachedFetchedAt: cached?.fetchedAt ?? null
         }
-        const outcome = window.api.gh.refreshPRNow
+        const usesRefreshCoordinator = Boolean(window.api.gh.refreshPRNow)
+        const outcome = usesRefreshCoordinator
           ? await window.api.gh.refreshPRNow({ candidate })
           : await window.api.gh
               .prForBranch({ repoPath, branch, linkedPRNumber })
@@ -1294,7 +1295,7 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
               )
         const pr: PRInfo | null =
           outcome.kind === 'found' ? outcome.pr : outcome.kind === 'no-pr' ? null : null
-        if (prRequestGenerations.get(cacheKey) === generation) {
+        if (!usesRefreshCoordinator && prRequestGenerations.get(cacheKey) === generation) {
           if (outcome.kind !== 'upstream-error') {
             set((s) => ({
               prCache: { ...s.prCache, [cacheKey]: { data: pr, fetchedAt: outcome.fetchedAt } }

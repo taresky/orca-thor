@@ -7,9 +7,9 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import {
   AlertTriangle,
   Bell,
+  Clock3,
   GitMerge,
   LoaderCircle,
-  PauseCircle,
   CircleCheck,
   CircleX,
   Server,
@@ -279,6 +279,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
   )
 
   const showIssue = cardProps.includes('issue')
+  const showPRMeta = cardProps.includes('pr') && Boolean(pr)
 
   // Same rationale for issues: once that section is hidden, polling only burns
   // GitHub calls and keeps stale-but-invisible data warm for no user benefit.
@@ -505,21 +506,24 @@ const WorktreeCard = React.memo(function WorktreeCard({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="inline-flex items-center opacity-80 hover:opacity-100 transition-opacity">
-                    {prRefreshState?.status === 'in-flight' && (
+                    {!showPRMeta && prRefreshState?.status === 'queued' && (
+                      <Clock3 className="size-3.5 text-muted-foreground" />
+                    )}
+                    {!showPRMeta && prRefreshState?.status === 'in-flight' && (
                       <LoaderCircle className="size-3.5 text-muted-foreground animate-spin" />
                     )}
-                    {prRefreshState?.status === 'paused' && (
-                      <PauseCircle className="size-3.5 text-muted-foreground" />
-                    )}
-                    {!['in-flight', 'paused'].includes(prRefreshState?.status ?? '') &&
+                    {(showPRMeta ||
+                      !['queued', 'in-flight'].includes(prRefreshState?.status ?? '')) &&
                       pr.checksStatus === 'success' && (
                         <CircleCheck className="size-3.5 text-emerald-500" />
                       )}
-                    {!['in-flight', 'paused'].includes(prRefreshState?.status ?? '') &&
+                    {(showPRMeta ||
+                      !['queued', 'in-flight'].includes(prRefreshState?.status ?? '')) &&
                       pr.checksStatus === 'failure' && (
                         <CircleX className="size-3.5 text-rose-500" />
                       )}
-                    {!['in-flight', 'paused'].includes(prRefreshState?.status ?? '') &&
+                    {(showPRMeta ||
+                      !['queued', 'in-flight'].includes(prRefreshState?.status ?? '')) &&
                       pr.checksStatus === 'pending' && (
                         <LoaderCircle className="size-3.5 text-amber-500 animate-spin" />
                       )}
@@ -527,11 +531,13 @@ const WorktreeCard = React.memo(function WorktreeCard({
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
                   <span>
-                    {prRefreshState?.status === 'in-flight'
-                      ? 'Refreshing CI checks'
-                      : prRefreshState?.status === 'paused'
-                        ? 'CI refresh paused'
-                        : `CI checks ${checksLabel(pr.checksStatus).toLowerCase()}`}
+                    {!showPRMeta && prRefreshState?.status === 'queued'
+                      ? 'CI refresh queued'
+                      : !showPRMeta && prRefreshState?.status === 'in-flight'
+                        ? 'Refreshing CI checks'
+                        : prRefreshState?.status === 'paused'
+                          ? `CI checks ${checksLabel(pr.checksStatus).toLowerCase()} (refresh paused)`
+                          : `CI checks ${checksLabel(pr.checksStatus).toLowerCase()}`}
                   </span>
                 </TooltipContent>
               </Tooltip>
