@@ -7,11 +7,11 @@
 import React from 'react'
 import { Badge } from '@/components/ui/badge'
 import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card'
-import { CircleDot } from 'lucide-react'
+import { CircleDot, LoaderCircle, PauseCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import CommentMarkdown from './CommentMarkdown'
 import { PullRequestIcon, prStateLabel, checksLabel } from './WorktreeCardHelpers'
-import type { PRInfo, IssueInfo } from '../../../../shared/types'
+import type { PRInfo, IssueInfo, GitHubPRRefreshReason } from '../../../../shared/types'
 
 // ── Issue section ────────────────────────────────────────────────────
 
@@ -83,10 +83,28 @@ export function IssueSection({ issue, onClick }: IssueSectionProps): React.JSX.E
 
 type PrSectionProps = {
   pr: PRInfo
+  refreshState?: {
+    status: 'queued' | 'in-flight' | 'paused' | 'skipped'
+    reason: GitHubPRRefreshReason
+    updatedAt: number
+    pausedUntil?: number
+  }
   onClick: (e: React.MouseEvent) => void
 }
 
-export function PrSection({ pr, onClick: _onClick }: PrSectionProps): React.JSX.Element {
+export function PrSection({
+  pr,
+  refreshState,
+  onClick: _onClick
+}: PrSectionProps): React.JSX.Element {
+  const refreshLabel =
+    refreshState?.status === 'in-flight'
+      ? 'Refreshing'
+      : refreshState?.status === 'queued'
+        ? 'Refresh queued'
+        : refreshState?.status === 'paused'
+          ? 'Refresh paused'
+          : null
   return (
     <HoverCard openDelay={300}>
       <HoverCardTrigger asChild>
@@ -116,6 +134,15 @@ export function PrSection({ pr, onClick: _onClick }: PrSectionProps): React.JSX.
               {pr.title}
             </span>
           </div>
+          {refreshLabel && (
+            <span className="shrink-0 text-muted-foreground" aria-label={refreshLabel}>
+              {refreshState?.status === 'paused' ? (
+                <PauseCircle className="size-3" />
+              ) : (
+                <LoaderCircle className="size-3 animate-spin" />
+              )}
+            </span>
+          )}
         </a>
       </HoverCardTrigger>
       <HoverCardContent side="right" align="start" className="w-72 p-3 text-xs space-y-1.5">
@@ -126,6 +153,7 @@ export function PrSection({ pr, onClick: _onClick }: PrSectionProps): React.JSX.
           <span>State: {prStateLabel(pr.state)}</span>
           {pr.checksStatus !== 'neutral' && <span>Checks: {checksLabel(pr.checksStatus)}</span>}
         </div>
+        {refreshLabel && <div className="text-muted-foreground">{refreshLabel}</div>}
         <a
           href={pr.url}
           target="_blank"

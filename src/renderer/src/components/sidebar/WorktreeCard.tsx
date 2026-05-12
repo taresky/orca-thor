@@ -64,7 +64,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
 }: WorktreeCardProps) {
   const openModal = useAppStore((s) => s.openModal)
   const updateWorktreeMeta = useAppStore((s) => s.updateWorktreeMeta)
-  const fetchPRForBranch = useAppStore((s) => s.fetchPRForBranch)
+  const enqueueGitHubPRRefresh = useAppStore((s) => s.enqueueGitHubPRRefresh)
   const fetchIssue = useAppStore((s) => s.fetchIssue)
   const cardProps = useAppStore((s) => s.worktreeCardProperties)
   const handleEditIssue = useCallback(
@@ -151,6 +151,9 @@ const WorktreeCard = React.memo(function WorktreeCard({
 
   // Subscribe to ONLY the specific cache entry, not entire prCache/issueCache
   const prEntry = useAppStore((s) => (prCacheKey ? s.prCache[prCacheKey] : undefined))
+  const prRefreshState = useAppStore((s) =>
+    prCacheKey ? s.prRefreshStates[prCacheKey] : undefined
+  )
   const issueEntry = useAppStore((s) => (issueCacheKey ? s.issueCache[issueCacheKey] : undefined))
 
   const pr: PRInfo | null | undefined = prEntry !== undefined ? prEntry.data : undefined
@@ -283,19 +286,20 @@ const WorktreeCard = React.memo(function WorktreeCard({
   // This preference is purely presentational, so background refreshes would
   // spend rate limit budget on data the user cannot see.
   useEffect(() => {
-    if (repo && !isFolder && !worktree.isBare && prCacheKey && (showPR || showCI)) {
+    if (repo && !isFolder && !worktree.isBare && prCacheKey && isActive && (showPR || showCI)) {
       // Why: pass linkedPR so worktrees created from a PR (whose new local
       // branch differs from the PR's head ref) still resolve their PR via
       // a number-based fallback in the main process.
-      fetchPRForBranch(repo.path, branch, { linkedPRNumber: worktree.linkedPR ?? null })
+      enqueueGitHubPRRefresh(worktree.id, 'active', 80)
     }
   }, [
     repo,
     isFolder,
     worktree.isBare,
+    worktree.id,
     worktree.linkedPR,
-    fetchPRForBranch,
-    branch,
+    enqueueGitHubPRRefresh,
+    isActive,
     prCacheKey,
     showPR,
     showCI
@@ -596,7 +600,9 @@ const WorktreeCard = React.memo(function WorktreeCard({
             {cardProps.includes('issue') && issueDisplay && (
               <IssueSection issue={issueDisplay} onClick={handleEditIssue} />
             )}
-            {cardProps.includes('pr') && pr && <PrSection pr={pr} onClick={handleEditIssue} />}
+            {cardProps.includes('pr') && pr && (
+              <PrSection pr={pr} refreshState={prRefreshState} onClick={handleEditIssue} />
+            )}
             {cardProps.includes('comment') && worktree.comment && (
               <CommentSection comment={worktree.comment} onDoubleClick={handleEditComment} />
             )}
