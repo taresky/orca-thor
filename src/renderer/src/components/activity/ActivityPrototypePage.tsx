@@ -4,9 +4,9 @@ which pieces become production modules. */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {
-  ArrowUpRight,
   BellDot,
   BellOff,
+  ExternalLink,
   MessageSquareText,
   Search,
   TerminalSquare
@@ -662,16 +662,15 @@ function ThreadRow({
               <Button
                 type="button"
                 variant="outline"
-                size="xs"
-                className="h-6 px-2 text-[11px]"
+                size="icon-xs"
+                aria-label="Jump to workspace"
                 onClick={(event) => {
                   event.stopPropagation()
                   onJump()
                 }}
                 onMouseDown={(event) => event.stopPropagation()}
               >
-                <ArrowUpRight className="size-3" />
-                Open
+                <ExternalLink className="size-3" />
               </Button>
             </TooltipTrigger>
             <TooltipContent side="left">Jump to workspace</TooltipContent>
