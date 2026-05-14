@@ -1,5 +1,5 @@
 /* eslint-disable max-lines -- Why: the worktree card centralizes sidebar card state (selection, drag, agent status, git info, context menu) in one cohesive component so sidebar rendering doesn't fan out across files. */
-import React, { useEffect, useMemo, useCallback, useState } from 'react'
+import React, { useEffect, useMemo, useCallback, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/store'
 import { Badge } from '@/components/ui/badge'
@@ -39,6 +39,7 @@ import {
   FilledBellIcon
 } from './WorktreeCardHelpers'
 import { IssueSection, PrSection, CommentSection } from './WorktreeCardMeta'
+import { getWorktreeCardPrDisplay } from './worktree-card-pr-display'
 import {
   selectLivePtyIdsForWorktree,
   selectRuntimePaneTitlesForWorktree
@@ -48,7 +49,11 @@ type WorktreeCardProps = {
   worktree: Worktree
   repo: Repo | undefined
   isActive: boolean
+  isMultiSelected?: boolean
+  selectedWorktrees?: readonly Worktree[]
   hideRepoBadge?: boolean
+  onSelectionGesture?: (event: React.MouseEvent<HTMLDivElement>, worktreeId: string) => boolean
+  onContextMenuSelect?: (event: React.MouseEvent<HTMLDivElement>) => readonly Worktree[]
 }
 
 function formatSparseDirectoryPreview(directories: string[]): string {
@@ -60,6 +65,10 @@ const WorktreeCard = React.memo(function WorktreeCard({
   worktree,
   repo,
   isActive,
+  isMultiSelected = false,
+  selectedWorktrees,
+  onSelectionGesture,
+  onContextMenuSelect,
   hideRepoBadge
 }: WorktreeCardProps) {
   const openModal = useAppStore((s) => s.openModal)
@@ -74,6 +83,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
         worktreeId: worktree.id,
         currentDisplayName: worktree.displayName,
         currentIssue: worktree.linkedIssue,
+        currentPR: worktree.linkedPR,
         currentComment: worktree.comment,
         focus: 'issue'
       })
@@ -88,12 +98,28 @@ const WorktreeCard = React.memo(function WorktreeCard({
         worktreeId: worktree.id,
         currentDisplayName: worktree.displayName,
         currentIssue: worktree.linkedIssue,
+        currentPR: worktree.linkedPR,
         currentComment: worktree.comment,
         focus: 'comment'
       })
     },
     [worktree, openModal]
   )
+
+  const handleEditPr = useCallback(() => {
+    openModal('edit-meta', {
+      worktreeId: worktree.id,
+      currentDisplayName: worktree.displayName,
+      currentIssue: worktree.linkedIssue,
+      currentPR: worktree.linkedPR,
+      currentComment: worktree.comment,
+      focus: 'pr'
+    })
+  }, [worktree, openModal])
+
+  const handleRemovePr = useCallback(() => {
+    updateWorktreeMeta(worktree.id, { linkedPR: null })
+  }, [worktree.id, updateWorktreeMeta])
 
   const deleteState = useAppStore((s) => s.deleteStateByWorktreeId[worktree.id])
   const conflictOperation = useAppStore((s) => s.gitConflictOperationByWorktree[worktree.id])
@@ -170,6 +196,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
           title: issue === null ? 'Issue details unavailable' : 'Loading issue...'
         }
       : null)
+  const prDisplay = getWorktreeCardPrDisplay(pr, worktree.linkedPR)
 
   const isDeleting = deleteState?.isDeleting ?? false
 
@@ -278,16 +305,27 @@ const WorktreeCard = React.memo(function WorktreeCard({
   const showPR = cardProps.includes('pr')
   const showCI = cardProps.includes('ci')
   const showIssue = cardProps.includes('issue')
+  const previousPrLookupRef = useRef<{ cacheKey: string; linkedPRNumber: number | null } | null>(
+    null
+  )
 
   // Skip GitHub fetches when the corresponding card sections are hidden.
   // This preference is purely presentational, so background refreshes would
   // spend rate limit budget on data the user cannot see.
   useEffect(() => {
     if (repo && !isFolder && !worktree.isBare && prCacheKey && (showPR || showCI)) {
+      const linkedPRNumber = worktree.linkedPR ?? null
+      const previousLookup = previousPrLookupRef.current
+      const linkedPRChanged =
+        previousLookup !== null &&
+        previousLookup.cacheKey === prCacheKey &&
+        previousLookup.linkedPRNumber !== linkedPRNumber
+      previousPrLookupRef.current = { cacheKey: prCacheKey, linkedPRNumber }
       // Why: pass linkedPR so worktrees created from a PR (whose new local
       // branch differs from the PR's head ref) still resolve their PR via
-      // a number-based fallback in the main process.
-      fetchPRForBranch(repo.path, branch, { linkedPRNumber: worktree.linkedPR ?? null })
+      // a number-based fallback in the main process. Force when that fallback
+      // changes so the branch cache stops showing stale linked-PR data.
+      fetchPRForBranch(repo.path, branch, { linkedPRNumber, force: linkedPRChanged })
     }
   }, [
     repo,
@@ -339,6 +377,12 @@ const WorktreeCard = React.memo(function WorktreeCard({
           return
         }
       }
+      const selectionOnly = onSelectionGesture?.(event, worktree.id) ?? false
+      if (selectionOnly) {
+        event.preventDefault()
+        event.stopPropagation()
+        return
+      }
       // Why: route sidebar clicks through the shared activation path so the
       // back/forward stack stays complete for the primary worktree navigation
       // surface instead of only recording palette-driven switches.
@@ -347,7 +391,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
         setShowDisconnectedDialog(true)
       }
     },
-    [worktree.id, isSshDisconnected]
+    [worktree.id, isSshDisconnected, onSelectionGesture]
   )
 
   const handleDoubleClick = useCallback(() => {
@@ -355,9 +399,17 @@ const WorktreeCard = React.memo(function WorktreeCard({
       worktreeId: worktree.id,
       currentDisplayName: worktree.displayName,
       currentIssue: worktree.linkedIssue,
+      currentPR: worktree.linkedPR,
       currentComment: worktree.comment
     })
-  }, [worktree.id, worktree.displayName, worktree.linkedIssue, worktree.comment, openModal])
+  }, [
+    worktree.id,
+    worktree.displayName,
+    worktree.linkedIssue,
+    worktree.linkedPR,
+    worktree.comment,
+    openModal
+  ])
 
   const handleToggleUnreadQuick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -378,10 +430,14 @@ const WorktreeCard = React.memo(function WorktreeCard({
   const cardBody = (
     <div
       className={cn(
-        'group relative flex items-start gap-1.5 px-2 py-2 rounded-lg cursor-pointer transition-all duration-200 outline-none select-none ml-1',
+        'group relative flex items-start gap-1.5 px-2 py-2 cursor-pointer transition-all duration-200 outline-none select-none ml-1',
+        isMultiSelected ? 'rounded-sm' : 'rounded-lg',
         isActive
           ? 'bg-black/[0.08] shadow-[0_1px_2px_rgba(0,0,0,0.04)] border border-black/[0.015] dark:bg-white/[0.10] dark:border-border/40 dark:shadow-[0_1px_2px_rgba(0,0,0,0.03)]'
-          : 'border border-transparent hover:bg-accent/40',
+          : isMultiSelected
+            ? 'border border-sidebar-ring/35 bg-sidebar-accent/70 ring-1 ring-sidebar-ring/30'
+            : 'border border-transparent hover:bg-sidebar-accent/40',
+        isActive && isMultiSelected && 'ring-1 ring-sidebar-ring/35',
         isDeleting && 'opacity-50 grayscale cursor-not-allowed',
         isSshDisconnected && !isDeleting && 'opacity-60'
       )}
@@ -590,13 +646,20 @@ const WorktreeCard = React.memo(function WorktreeCard({
              Layout coupling: spacing here is used to derive size estimates in
              WorktreeList's estimateSize. Update that function if changing spacing. */}
         {((cardProps.includes('issue') && issueDisplay) ||
-          (cardProps.includes('pr') && pr) ||
+          (cardProps.includes('pr') && prDisplay) ||
           (cardProps.includes('comment') && worktree.comment)) && (
           <div className="flex flex-col gap-[3px] mt-0.5">
             {cardProps.includes('issue') && issueDisplay && (
               <IssueSection issue={issueDisplay} onClick={handleEditIssue} />
             )}
-            {cardProps.includes('pr') && pr && <PrSection pr={pr} onClick={handleEditIssue} />}
+            {cardProps.includes('pr') && prDisplay && (
+              <PrSection
+                pr={prDisplay}
+                onClick={handleEditIssue}
+                onEdit={handleEditPr}
+                onRemove={handleRemovePr}
+              />
+            )}
             {cardProps.includes('comment') && worktree.comment && (
               <CommentSection comment={worktree.comment} onDoubleClick={handleEditComment} />
             )}
@@ -624,7 +687,13 @@ const WorktreeCard = React.memo(function WorktreeCard({
 
   return (
     <>
-      <WorktreeContextMenu worktree={worktree}>{cardBody}</WorktreeContextMenu>
+      <WorktreeContextMenu
+        worktree={worktree}
+        selectedWorktrees={selectedWorktrees}
+        onContextMenuSelect={onContextMenuSelect}
+      >
+        {cardBody}
+      </WorktreeContextMenu>
 
       {repo?.connectionId && (
         <SshDisconnectedDialog

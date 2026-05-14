@@ -1,5 +1,6 @@
 import { basename, join, resolve, relative, isAbsolute, posix, win32 } from 'path'
 import type { GitWorktreeInfo, Worktree, WorktreeMeta } from '../../shared/types'
+import { splitWorktreeId } from '../../shared/worktree-id'
 import { getWslHome, parseWslPath } from '../wsl'
 
 /**
@@ -192,6 +193,7 @@ export function mergeWorktree(
     sortOrder: meta?.sortOrder ?? 0,
     lastActivityAt: meta?.lastActivityAt ?? 0,
     ...(meta?.createdAt !== undefined ? { createdAt: meta.createdAt } : {}),
+    ...(meta?.createdWithAgent !== undefined ? { createdWithAgent: meta.createdWithAgent } : {}),
     ...(git.isSparse === true
       ? {
           sparseDirectories: meta?.sparseDirectories,
@@ -200,6 +202,7 @@ export function mergeWorktree(
         }
       : {}),
     ...(meta?.baseRef !== undefined ? { baseRef: meta.baseRef } : {}),
+    ...(meta?.pushTarget !== undefined ? { pushTarget: meta.pushTarget } : {}),
     // Why: diff comments are persisted on WorktreeMeta (see `WorktreeMeta` in
     // shared/types) and forwarded verbatim so the renderer store mirrors
     // on-disk state. `undefined` here means the worktree has no comments yet.
@@ -211,14 +214,11 @@ export function mergeWorktree(
  * Parse a composite worktreeId ("repoId::worktreePath") into its parts.
  */
 export function parseWorktreeId(worktreeId: string): { repoId: string; worktreePath: string } {
-  const sepIdx = worktreeId.indexOf('::')
-  if (sepIdx === -1) {
+  const parsed = splitWorktreeId(worktreeId)
+  if (!parsed) {
     throw new Error(`Invalid worktreeId: ${worktreeId}`)
   }
-  return {
-    repoId: worktreeId.slice(0, sepIdx),
-    worktreePath: worktreeId.slice(sepIdx + 2)
-  }
+  return parsed
 }
 
 /**

@@ -9,8 +9,10 @@ const {
   registerFeedbackHandlersMock,
   registerStatsHandlersMock,
   registerMemoryHandlersMock,
+  registerNotebookHandlersMock,
   registerNotificationHandlersMock,
   registerDeveloperPermissionHandlersMock,
+  registerComputerUsePermissionHandlersMock,
   registerSettingsHandlersMock,
   registerTelemetryHandlersMock,
   registerShellHandlersMock,
@@ -43,8 +45,10 @@ const {
   registerFeedbackHandlersMock: vi.fn(),
   registerStatsHandlersMock: vi.fn(),
   registerMemoryHandlersMock: vi.fn(),
+  registerNotebookHandlersMock: vi.fn(),
   registerNotificationHandlersMock: vi.fn(),
   registerDeveloperPermissionHandlersMock: vi.fn(),
+  registerComputerUsePermissionHandlersMock: vi.fn(),
   registerSettingsHandlersMock: vi.fn(),
   registerTelemetryHandlersMock: vi.fn(),
   registerShellHandlersMock: vi.fn(),
@@ -110,12 +114,20 @@ vi.mock('./memory', () => ({
   registerMemoryHandlers: registerMemoryHandlersMock
 }))
 
+vi.mock('./notebook', () => ({
+  registerNotebookHandlers: registerNotebookHandlersMock
+}))
+
 vi.mock('./notifications', () => ({
   registerNotificationHandlers: registerNotificationHandlersMock
 }))
 
 vi.mock('./developer-permissions', () => ({
   registerDeveloperPermissionHandlers: registerDeveloperPermissionHandlersMock
+}))
+
+vi.mock('./computer-use-permissions', () => ({
+  registerComputerUsePermissionHandlers: registerComputerUsePermissionHandlersMock
 }))
 
 vi.mock('./settings', () => ({
@@ -205,8 +217,10 @@ describe('registerCoreHandlers', () => {
     registerFeedbackHandlersMock.mockReset()
     registerStatsHandlersMock.mockReset()
     registerMemoryHandlersMock.mockReset()
+    registerNotebookHandlersMock.mockReset()
     registerNotificationHandlersMock.mockReset()
     registerDeveloperPermissionHandlersMock.mockReset()
+    registerComputerUsePermissionHandlersMock.mockReset()
     registerSettingsHandlersMock.mockReset()
     registerTelemetryHandlersMock.mockReset()
     registerShellHandlersMock.mockReset()
@@ -264,8 +278,10 @@ describe('registerCoreHandlers', () => {
     expect(registerFeedbackHandlersMock).toHaveBeenCalled()
     expect(registerStatsHandlersMock).toHaveBeenCalledWith(stats)
     expect(registerMemoryHandlersMock).toHaveBeenCalledWith(store)
+    expect(registerNotebookHandlersMock).toHaveBeenCalledWith(store)
     expect(registerNotificationHandlersMock).toHaveBeenCalledWith(store, runtime)
     expect(registerDeveloperPermissionHandlersMock).toHaveBeenCalled()
+    expect(registerComputerUsePermissionHandlersMock).toHaveBeenCalled()
     expect(registerSettingsHandlersMock).toHaveBeenCalledWith(store)
     expect(registerTelemetryHandlersMock).toHaveBeenCalledWith(store)
     expect(registerSessionHandlersMock).toHaveBeenCalledWith(store)

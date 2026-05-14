@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildWorkspaceSessionPayload } from './workspace-session'
 import type { AppState } from '../store'
+import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
 
 function createSnapshot(overrides: Partial<AppState> = {}): AppState {
   return {
@@ -77,8 +78,20 @@ function createSnapshot(overrides: Partial<AppState> = {}): AppState {
         }
       ]
     },
+    browserUrlHistory: [],
     ...overrides
   } as AppState
+}
+
+function createRepo(id: string, connectionId: string | null): AppState['repos'][number] {
+  return {
+    id,
+    path: `/${id}`,
+    displayName: id,
+    badgeColor: '#fff',
+    addedAt: 1,
+    connectionId
+  }
 }
 
 describe('buildWorkspaceSessionPayload', () => {
@@ -86,6 +99,43 @@ describe('buildWorkspaceSessionPayload', () => {
     const payload = buildWorkspaceSessionPayload(createSnapshot())
 
     expect(payload.activeWorktreeIdsOnShutdown).toEqual(['wt-1'])
+  })
+
+  it('persists floating terminal tabs for daemon reattach after restart', () => {
+    const payload = buildWorkspaceSessionPayload(
+      createSnapshot({
+        tabsByWorktree: {
+          [FLOATING_TERMINAL_WORKTREE_ID]: [
+            {
+              id: 'floating-tab-1',
+              title: 'Terminal 1',
+              ptyId: 'floating-pty-1',
+              worktreeId: FLOATING_TERMINAL_WORKTREE_ID
+            } as never
+          ]
+        },
+        terminalLayoutsByTabId: {
+          'floating-tab-1': {
+            root: null,
+            activeLeafId: null,
+            expandedLeafId: null,
+            buffersByLeafId: { 'pane:1': 'floating-scrollback' },
+            ptyIdsByLeafId: { 'pane:1': 'floating-pty-1' }
+          }
+        },
+        activeTabIdByWorktree: {
+          [FLOATING_TERMINAL_WORKTREE_ID]: 'floating-tab-1'
+        }
+      })
+    )
+
+    expect(payload.tabsByWorktree[FLOATING_TERMINAL_WORKTREE_ID]).toHaveLength(1)
+    expect(payload.activeTabIdByWorktree?.[FLOATING_TERMINAL_WORKTREE_ID]).toBe('floating-tab-1')
+    expect(payload.terminalLayoutsByTabId['floating-tab-1'].buffersByLeafId).toBeUndefined()
+    expect(payload.terminalLayoutsByTabId['floating-tab-1'].ptyIdsByLeafId).toEqual({
+      'pane:1': 'floating-pty-1'
+    })
+    expect(payload.activeWorktreeIdsOnShutdown).toEqual([FLOATING_TERMINAL_WORKTREE_ID])
   })
 
   it('persists only edit-mode files and resets browser loading state', () => {
@@ -105,6 +155,75 @@ describe('buildWorkspaceSessionPayload', () => {
     expect(payload.browserTabsByWorktree?.['wt-1'][0].loading).toBe(false)
   })
 
+  it('drops local terminal scrollback buffers from session payloads', () => {
+    const localWorktreeId = 'repo-1::/local/worktree'
+    const payload = buildWorkspaceSessionPayload(
+      createSnapshot({
+        tabsByWorktree: {
+          [localWorktreeId]: [
+            {
+              id: 'tab-local',
+              title: 'shell',
+              ptyId: 'pty-1',
+              worktreeId: localWorktreeId
+            } as never
+          ]
+        },
+        terminalLayoutsByTabId: {
+          'tab-local': {
+            root: null,
+            activeLeafId: null,
+            expandedLeafId: null,
+            buffersByLeafId: { 'pane:1': 'serialized-local-scrollback' },
+            ptyIdsByLeafId: { 'pane:1': 'pty-1' },
+            titlesByLeafId: { 'pane:1': 'build' }
+          }
+        },
+        repos: [createRepo('repo-1', null)]
+      })
+    )
+
+    expect(payload.terminalLayoutsByTabId['tab-local']).toEqual({
+      root: null,
+      activeLeafId: null,
+      expandedLeafId: null,
+      ptyIdsByLeafId: { 'pane:1': 'pty-1' },
+      titlesByLeafId: { 'pane:1': 'build' }
+    })
+  })
+
+  it('preserves SSH terminal scrollback buffers because relay teardown has no local history', () => {
+    const sshWorktreeId = 'repo-ssh::/remote/worktree'
+    const payload = buildWorkspaceSessionPayload(
+      createSnapshot({
+        tabsByWorktree: {
+          [sshWorktreeId]: [
+            {
+              id: 'tab-ssh',
+              title: 'remote',
+              ptyId: 'relay-pty-1',
+              worktreeId: sshWorktreeId
+            } as never
+          ]
+        },
+        terminalLayoutsByTabId: {
+          'tab-ssh': {
+            root: null,
+            activeLeafId: null,
+            expandedLeafId: null,
+            buffersByLeafId: { 'pane:1': 'serialized-remote-scrollback' },
+            ptyIdsByLeafId: { 'pane:1': 'relay-pty-1' }
+          }
+        },
+        repos: [createRepo('repo-ssh', 'conn-1')]
+      })
+    )
+
+    expect(payload.terminalLayoutsByTabId['tab-ssh'].buffersByLeafId).toEqual({
+      'pane:1': 'serialized-remote-scrollback'
+    })
+  })
+
   it('uses lastKnownRelayPtyIdByTabId fallback for SSH worktrees with null ptyIds', () => {
     const payload = buildWorkspaceSessionPayload(
       createSnapshot({
@@ -113,7 +232,7 @@ describe('buildWorkspaceSessionPayload', () => {
           'wt-ssh': [{ id: 'tab-ssh', title: 'remote', ptyId: null, worktreeId: 'wt-ssh' } as never]
         },
         lastKnownRelayPtyIdByTabId: { 'tab-ssh': 'relay-sess-42' },
-        repos: [{ id: 'repo-ssh', connectionId: 'conn-1' } as never],
+        repos: [createRepo('repo-ssh', 'conn-1')],
         worktreesByRepo: {
           'repo-ssh': [{ id: 'wt-ssh', repoId: 'repo-ssh' } as never]
         },

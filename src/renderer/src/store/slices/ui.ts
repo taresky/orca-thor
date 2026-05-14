@@ -193,15 +193,12 @@ export type UISlice = {
    *  without this, rows you'd already visited come back bold on relaunch. */
   acknowledgedAgentsByPaneKey: Record<string, number>
   acknowledgeAgents: (paneKeys: string[]) => void
-  /** Per-worktree collapsed state for the inline agents section shown inside
-   *  each workspace card. Session-only — a restart defaults back to expanded,
-   *  which matches the expected default (people rarely want agents hidden
-   *  across launches). */
-  collapsedInlineAgentsByWorktreeId: Record<string, boolean>
-  toggleInlineAgentsCollapsed: (worktreeId: string) => void
-  activeView: 'terminal' | 'settings' | 'tasks'
-  previousViewBeforeTasks: 'terminal' | 'settings'
-  previousViewBeforeSettings: 'terminal' | 'tasks'
+  unacknowledgeAgents: (paneKeys: string[]) => void
+  activeView: 'terminal' | 'settings' | 'tasks' | 'activity' | 'automations'
+  previousViewBeforeTasks: 'terminal' | 'settings' | 'activity' | 'automations'
+  previousViewBeforeSettings: 'terminal' | 'tasks' | 'activity' | 'automations'
+  previousViewBeforeActivity: 'terminal' | 'settings' | 'tasks' | 'automations'
+  previousViewBeforeAutomations: 'terminal' | 'settings' | 'tasks' | 'activity'
   setActiveView: (view: UISlice['activeView']) => void
   taskPageData: {
     preselectedRepoId?: string
@@ -231,6 +228,12 @@ export type UISlice = {
   } | null
   openTaskPage: (data?: UISlice['taskPageData']) => void
   closeTaskPage: () => void
+  openActivityPage: () => void
+  closeActivityPage: () => void
+  selectedAutomationId: string | null
+  setSelectedAutomationId: (id: string | null) => void
+  openAutomationsPage: () => void
+  closeAutomationsPage: () => void
   setNewWorkspaceDraft: (draft: NonNullable<UISlice['newWorkspaceDraft']>) => void
   clearNewWorkspaceDraft: () => void
   openSettingsPage: () => void
@@ -241,12 +244,14 @@ export type UISlice = {
       | 'browser'
       | 'appearance'
       | 'terminal'
+      | 'computer-use'
       | 'developer-permissions'
       | 'shortcuts'
       | 'repo'
       | 'agents'
       | 'accounts'
       | 'experimental'
+      | 'mobile'
       | 'ssh'
     repoId: string | null
     sectionId?: string
@@ -387,22 +392,28 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
       }
       return next ? { acknowledgedAgentsByPaneKey: next } : s
     }),
-  collapsedInlineAgentsByWorktreeId: {},
-  toggleInlineAgentsCollapsed: (worktreeId) =>
+  unacknowledgeAgents: (paneKeys) =>
     set((s) => {
-      const current = s.collapsedInlineAgentsByWorktreeId[worktreeId] === true
-      const next = { ...s.collapsedInlineAgentsByWorktreeId }
-      if (current) {
-        delete next[worktreeId]
-      } else {
-        next[worktreeId] = true
+      if (paneKeys.length === 0) {
+        return s
       }
-      return { collapsedInlineAgentsByWorktreeId: next }
+      let next: Record<string, number> | null = null
+      for (const key of paneKeys) {
+        if (s.acknowledgedAgentsByPaneKey[key] !== undefined) {
+          if (next === null) {
+            next = { ...s.acknowledgedAgentsByPaneKey }
+          }
+          delete next[key]
+        }
+      }
+      return next ? { acknowledgedAgentsByPaneKey: next } : s
     }),
 
   activeView: 'terminal',
   previousViewBeforeTasks: 'terminal',
   previousViewBeforeSettings: 'terminal',
+  previousViewBeforeActivity: 'terminal',
+  previousViewBeforeAutomations: 'terminal',
   setActiveView: (view) => set({ activeView: view }),
   taskPageData: {},
   taskResumeState: undefined,
@@ -494,6 +505,28 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         worktreeNavHistoryIndex: nextHistoryIndex
       }
     }),
+  openActivityPage: () =>
+    set((state) => ({
+      activeView: 'activity',
+      previousViewBeforeActivity:
+        state.activeView === 'activity' ? state.previousViewBeforeActivity : state.activeView
+    })),
+  closeActivityPage: () =>
+    set((state) => ({
+      activeView: state.previousViewBeforeActivity
+    })),
+  selectedAutomationId: null,
+  setSelectedAutomationId: (id) => set({ selectedAutomationId: id }),
+  openAutomationsPage: () =>
+    set((state) => ({
+      activeView: 'automations',
+      previousViewBeforeAutomations:
+        state.activeView === 'automations' ? state.previousViewBeforeAutomations : state.activeView
+    })),
+  closeAutomationsPage: () =>
+    set((state) => ({
+      activeView: state.previousViewBeforeAutomations
+    })),
   setNewWorkspaceDraft: (draft) => set({ newWorkspaceDraft: draft }),
   clearNewWorkspaceDraft: () => set({ newWorkspaceDraft: null }),
   openSettingsPage: () =>

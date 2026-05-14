@@ -111,6 +111,22 @@ describe('agent_started schema', () => {
   })
 })
 
+describe('agent_hook_unattributed schema', () => {
+  it('accepts the two bounded attribution failure reasons', () => {
+    for (const reason of ['empty_pane_key', 'unknown_tab_id'] as const) {
+      expect(eventSchemas.agent_hook_unattributed.safeParse({ reason }).success).toBe(true)
+    }
+  })
+
+  it('rejects extra payload fields via .strict()', () => {
+    const parsed = eventSchemas.agent_hook_unattributed.safeParse({
+      reason: 'unknown_tab_id',
+      pane_key: 'tab-secret:1'
+    })
+    expect(parsed.success).toBe(false)
+  })
+})
+
 describe('add_repo_setup_step_action schema', () => {
   it('accepts every Setup-step action declared in the schema', () => {
     for (const action of addRepoSetupStepActionSchema.options) {

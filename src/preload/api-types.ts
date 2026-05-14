@@ -19,6 +19,7 @@ import type {
   GitBranchCompareResult,
   GitConflictOperation,
   GitDiffResult,
+  GitPushTarget,
   GitStatusResult,
   GitUpstreamStatus,
   GitHubAssignableUser,
@@ -41,6 +42,7 @@ import type {
   LinearMember,
   LinearTeam,
   MarkdownDocument,
+  FloatingTerminalCwdRequest,
   GitHubIssueUpdate,
   GetRateLimitResult,
   NotificationDispatchRequest,
@@ -125,10 +127,19 @@ import type { AgentHookInstallStatus } from '../shared/agent-hook-types'
 import type { AgentStatusIpcPayload } from '../shared/agent-status-types'
 import type { RuntimeStatus, RuntimeSyncWindowGraph } from '../shared/runtime-types'
 import type {
+  RuntimeMobileMarkdownRequest,
+  RuntimeMobileMarkdownResponse
+} from '../shared/mobile-markdown-document'
+import type {
   DeveloperPermissionId,
   DeveloperPermissionRequestResult,
   DeveloperPermissionState
 } from '../shared/developer-permissions-types'
+import type {
+  ComputerUsePermissionId,
+  ComputerUsePermissionSetupResult,
+  ComputerUsePermissionStatusResult
+} from '../shared/computer-use-permissions-types'
 import type {
   ClaudeUsageBreakdownKind,
   ClaudeUsageBreakdownRow,
@@ -159,6 +170,14 @@ import type {
 } from '../shared/codex-usage-types'
 import type { TelemetryConsentState } from '../shared/telemetry-consent-types'
 import type { AgentKind, LaunchSource, RequestKind } from '../shared/telemetry-events'
+import type {
+  Automation,
+  AutomationCreateInput,
+  AutomationDispatchRequest,
+  AutomationDispatchResult,
+  AutomationRun,
+  AutomationUpdateInput
+} from '../shared/automations-types'
 
 export type BrowserApi = {
   registerGuest: (args: {
@@ -374,6 +393,8 @@ export type AppApi = {
   getKeyboardInputSourceId: () => Promise<string | null>
   /** Updates the macOS Dock unread badge. No-op on Windows/Linux. */
   setUnreadDockBadgeCount: (count: number) => Promise<void>
+  /** Resolves the launch directory for global Floating Terminal tabs. */
+  getFloatingTerminalCwd: (args?: FloatingTerminalCwdRequest) => Promise<string>
 }
 
 export type PreloadApi = {
@@ -447,7 +468,7 @@ export type PreloadApi = {
       prNumber: number
       headRefName?: string
       isCrossRepository?: boolean
-    }) => Promise<{ baseBranch: string } | { error: string }>
+    }) => Promise<{ baseBranch: string; pushTarget?: GitPushTarget } | { error: string }>
     remove: (args: { worktreeId: string; force?: boolean; skipArchive?: boolean }) => Promise<void>
     updateMeta: (args: { worktreeId: string; updates: Partial<WorktreeMeta> }) => Promise<Worktree>
     persistSortOrder: (args: { orderedIds: string[] }) => Promise<void>
@@ -512,6 +533,7 @@ export type PreloadApi = {
         opts?: { scrollbackRows?: number; altScreenForcesZeroRows?: boolean }
       }) => void
     ) => () => void
+    onClearBufferRequest: (callback: (data: { ptyId: string }) => void) => () => void
     sendSerializedBuffer: (
       requestId: string,
       snapshot: { data: string; cols: number; rows: number; lastTitle?: string } | null
@@ -779,6 +801,7 @@ export type PreloadApi = {
     codexStatus: () => Promise<AgentHookInstallStatus>
     geminiStatus: () => Promise<AgentHookInstallStatus>
     cursorStatus: () => Promise<AgentHookInstallStatus>
+    droidStatus: () => Promise<AgentHookInstallStatus>
   }
   agentTrust: {
     markTrusted: (args: { preset: 'cursor' | 'copilot'; workspacePath: string }) => Promise<void>
@@ -806,6 +829,12 @@ export type PreloadApi = {
     getStatus: () => Promise<DeveloperPermissionState[]>
     request: (args: { id: DeveloperPermissionId }) => Promise<DeveloperPermissionRequestResult>
     openSettings: (args: { id: DeveloperPermissionId }) => Promise<void>
+  }
+  computerUsePermissions: {
+    getStatus: () => Promise<ComputerUsePermissionStatusResult>
+    openSetup: (args?: {
+      id?: ComputerUsePermissionId
+    }) => Promise<ComputerUsePermissionSetupResult>
   }
   shell: {
     openPath: (path: string) => Promise<void>
@@ -870,6 +899,14 @@ export type PreloadApi = {
     dismissNudge: () => Promise<void>
     onStatus: (callback: (status: UpdateStatus) => void) => () => void
     onClearDismissal: (callback: () => void) => () => void
+  }
+  notebook: {
+    runPythonCell: (args: {
+      filePath: string
+      code: string
+      preamble?: string
+      connectionId?: string | null
+    }) => Promise<{ stdout: string; stderr: string; exitCode: number | null; error?: string }>
   }
   stats: StatsApi
   memory: MemoryApi
@@ -973,6 +1010,7 @@ export type PreloadApi = {
       worktreePath: string
       publish?: boolean
       connectionId?: string
+      pushTarget?: GitPushTarget
     }) => Promise<void>
     pull: (args: { worktreePath: string; connectionId?: string }) => Promise<void>
     branchDiff: (args: {
@@ -1031,6 +1069,7 @@ export type PreloadApi = {
     onToggleLeftSidebar: (callback: () => void) => () => void
     onToggleRightSidebar: (callback: () => void) => () => void
     onToggleWorktreePalette: (callback: () => void) => () => void
+    onToggleFloatingTerminal: (callback: () => void) => () => void
     onOpenQuickOpen: (callback: () => void) => () => void
     onOpenNewWorkspace: (callback: () => void) => () => void
     onJumpToWorktreeIndex: (callback: (index: number) => void) => () => void
@@ -1073,12 +1112,21 @@ export type PreloadApi = {
       }) => void
     ) => () => void
     onCreateTerminal: (
-      callback: (data: { worktreeId: string; command?: string; title?: string }) => void
+      callback: (data: {
+        requestId?: string
+        worktreeId: string
+        command?: string
+        title?: string
+        ptyId?: string
+        activate?: boolean
+        tabId?: string
+      }) => void
     ) => () => void
     onRequestTerminalCreate: (
       callback: (data: {
         requestId: string
         worktreeId?: string
+        afterTabId?: string
         command?: string
         title?: string
       }) => void
@@ -1100,7 +1148,22 @@ export type PreloadApi = {
     onRenameTerminal: (
       callback: (data: { tabId: string; title: string | null }) => void
     ) => () => void
-    onFocusTerminal: (callback: (data: { tabId: string; worktreeId: string }) => void) => () => void
+    onFocusTerminal: (
+      callback: (data: { tabId: string; worktreeId: string; leafId?: string | null }) => void
+    ) => () => void
+    onFocusEditorTab: (
+      callback: (data: { tabId: string; worktreeId: string }) => void
+    ) => () => void
+    onCloseSessionTab: (
+      callback: (data: { tabId: string; worktreeId: string }) => void
+    ) => () => void
+    onOpenFileFromMobile: (
+      callback: (data: { worktreeId: string; filePath: string; relativePath: string }) => void
+    ) => () => void
+    onMobileMarkdownRequest: (
+      callback: (request: RuntimeMobileMarkdownRequest) => void
+    ) => () => void
+    respondMobileMarkdownRequest: (response: RuntimeMobileMarkdownResponse) => void
     onCloseTerminal: (
       callback: (data: { tabId: string; paneRuntimeId?: number }) => void
     ) => () => void
@@ -1114,7 +1177,7 @@ export type PreloadApi = {
       callback: (
         data:
           | { paths: string[]; target: 'editor' }
-          | { paths: string[]; target: 'terminal' }
+          | { paths: string[]; target: 'terminal'; tabId?: string }
           | { paths: string[]; target: 'composer' }
           | { paths: string[]; target: 'file-explorer'; destinationDir: string }
       ) => void
@@ -1177,6 +1240,7 @@ export type PreloadApi = {
     importConfig: () => Promise<SshTarget[]>
     connect: (args: { targetId: string }) => Promise<SshConnectionState | null>
     disconnect: (args: { targetId: string }) => Promise<void>
+    terminateSessions: (args: { targetId: string }) => Promise<void>
     getState: (args: { targetId: string }) => Promise<SshConnectionState | null>
     needsPassphrasePrompt: (args: { targetId: string }) => Promise<boolean>
     testConnection: (args: {
@@ -1223,6 +1287,17 @@ export type PreloadApi = {
     ) => () => void
     onCredentialResolved: (callback: (data: { requestId: string }) => void) => () => void
     submitCredential: (args: { requestId: string; value: string | null }) => Promise<void>
+  }
+  automations: {
+    list: () => Promise<Automation[]>
+    listRuns: (args?: { automationId?: string }) => Promise<AutomationRun[]>
+    create: (input: AutomationCreateInput) => Promise<Automation>
+    update: (args: { id: string; updates: AutomationUpdateInput }) => Promise<Automation>
+    delete: (args: { id: string }) => Promise<void>
+    runNow: (args: { id: string }) => Promise<AutomationRun>
+    markDispatchResult: (result: AutomationDispatchResult) => Promise<AutomationRun>
+    rendererReady: () => Promise<void>
+    onDispatchRequested: (callback: (request: AutomationDispatchRequest) => void) => () => void
   }
   wsl: {
     isAvailable: () => Promise<boolean>

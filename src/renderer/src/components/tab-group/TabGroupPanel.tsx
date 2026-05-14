@@ -10,8 +10,6 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import TabBar from '../tab-bar/TabBar'
-import TerminalPane from '../terminal-pane/TerminalPane'
-import { browserSlotAnchorName } from '../browser-pane/browser-pane-slots'
 import { useTabGroupWorkspaceModel } from './useTabGroupWorkspaceModel'
 import TabGroupDropOverlay from './TabGroupDropOverlay'
 import { resolveGroupTabFromVisibleId } from './tab-group-visible-id'
@@ -20,13 +18,13 @@ import {
   type HoveredTabInsertion,
   type TabDropZone
 } from './useTabDragSplit'
+import { tabGroupBodyAnchorName } from './tab-group-body-anchor'
 
 const EditorPanel = lazy(() => import('../editor/EditorPanel'))
 
 export default function TabGroupPanel({
   groupId,
   worktreeId,
-  isWorktreeActive,
   isFocused,
   hasSplitGroups,
   touchesRightEdge,
@@ -39,7 +37,6 @@ export default function TabGroupPanel({
 }: {
   groupId: string
   worktreeId: string
-  isWorktreeActive: boolean
   isFocused: boolean
   hasSplitGroups: boolean
   touchesRightEdge: boolean
@@ -59,16 +56,7 @@ export default function TabGroupPanel({
   }, [])
 
   const model = useTabGroupWorkspaceModel({ groupId, worktreeId })
-  const {
-    activeTab,
-    browserItems,
-    commands,
-    editorItems,
-    runtimeTerminalTabById,
-    tabBarOrder,
-    terminalTabs,
-    worktreePath
-  } = model
+  const { activeTab, browserItems, commands, editorItems, tabBarOrder, terminalTabs } = model
   const { setNodeRef: setBodyDropRef } = useDroppable({
     id: getTabPaneBodyDroppableId(groupId),
     data: {
@@ -78,13 +66,14 @@ export default function TabGroupPanel({
     },
     disabled: !isTabDragActive
   })
-  // Why: browser panes for this worktree are rendered once at the worktree
+  // Why: browser and terminal panes for this worktree are rendered once at the worktree
   // level (BrowserPaneOverlayLayer) and positioned over the owning group's
   // body via CSS anchor positioning. Tagging this body with a per-group
   // `anchor-name` lets the overlay reference it via `position-anchor`;
   // moving a tab between groups only swaps which anchor-name the overlay
-  // targets, never reparenting the `<webview>` (which would reload it).
-  const bodyAnchorName = browserSlotAnchorName(groupId)
+  // targets. Browsers avoid `<webview>` reloads; terminals avoid remounting
+  // xterm and losing alt-screen TUI state.
+  const bodyAnchorName = tabGroupBodyAnchorName(groupId)
   // Why: memoize the style object so the literal isn't recreated on every
   // render. A fresh object every render would make the body `<div>` appear
   // to have a new `style` prop on every parent re-render, which defeats any
@@ -349,39 +338,6 @@ export default function TabGroupPanel({
         style={bodyAnchorStyle}
       >
         {activeDropZone ? <TabGroupDropOverlay zone={activeDropZone} /> : null}
-        {model.groupTabs
-          .filter((item) => item.contentType === 'terminal')
-          .map((item) => (
-            <TerminalPane
-              key={`${item.entityId}-${runtimeTerminalTabById.get(item.entityId)?.generation ?? 0}`}
-              tabId={item.entityId}
-              worktreeId={worktreeId}
-              cwd={worktreePath}
-              isActive={
-                isFocused && activeTab?.id === item.id && activeTab.contentType === 'terminal'
-              }
-              // Why: in multi-group splits, the active terminal in each group
-              // must remain visible (display:flex) so the user sees its output,
-              // but only the focused group's terminal should receive keyboard
-              // input. Hidden worktrees stay mounted offscreen, so `isVisible`
-              // must also respect worktree visibility or those detached panes
-              // keep their WebGL renderers alive and exhaust Chromium's context
-              // budget across worktrees.
-              isVisible={
-                isWorktreeActive &&
-                activeTab?.id === item.id &&
-                activeTab.contentType === 'terminal'
-              }
-              onPtyExit={(ptyId) => {
-                if (commands.consumeSuppressedPtyExit(ptyId)) {
-                  return
-                }
-                commands.closeItem(item.id)
-              }}
-              onCloseTab={() => commands.closeItem(item.id)}
-            />
-          ))}
-
         {activeTab &&
           activeTab.contentType !== 'terminal' &&
           activeTab.contentType !== 'browser' && (
@@ -404,12 +360,11 @@ export default function TabGroupPanel({
             </div>
           )}
 
-        {/* Why: browser panes are rendered at the worktree level by
-            BrowserPaneOverlayLayer and absolutely positioned over this body
-            element via the slot registered above. Rendering them per-group
-            here caused moving a browser tab between groups to unmount and
-            remount the pane, reparenting the Electron `<webview>` — which
-            destroys its guest contents and reloads the page. */}
+        {/* Why: terminal/browser panes are rendered at the worktree level by
+            overlay layers and absolutely positioned over this body element
+            via the slot registered above. Rendering them per-group caused
+            split moves to remount xterm or reparent Electron `<webview>`,
+            losing TUI state or reloading the page. */}
       </div>
     </div>
   )

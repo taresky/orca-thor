@@ -156,6 +156,7 @@ describe('useIpcEvents updater integration', () => {
           onToggleLeftSidebar: () => () => {},
           onToggleRightSidebar: () => () => {},
           onToggleWorktreePalette: () => () => {},
+          onToggleFloatingTerminal: () => () => {},
           onOpenQuickOpen: () => () => {},
           onOpenNewWorkspace: () => () => {},
           onJumpToWorktreeIndex: () => () => {},
@@ -167,6 +168,9 @@ describe('useIpcEvents updater integration', () => {
           onSplitTerminal: () => () => {},
           onRenameTerminal: () => () => {},
           onFocusTerminal: () => () => {},
+          onFocusEditorTab: () => () => {},
+          onCloseSessionTab: () => () => {},
+          onOpenFileFromMobile: () => () => {},
           onCloseTerminal: () => () => {},
           onSleepWorktree: () => () => {},
           onNewBrowserTab: () => () => {},
@@ -361,6 +365,7 @@ describe('useIpcEvents updater integration', () => {
           onToggleLeftSidebar: () => () => {},
           onToggleRightSidebar: () => () => {},
           onToggleWorktreePalette: () => () => {},
+          onToggleFloatingTerminal: () => () => {},
           onOpenQuickOpen: () => () => {},
           onOpenNewWorkspace: () => () => {},
           onJumpToWorktreeIndex: () => () => {},
@@ -372,6 +377,9 @@ describe('useIpcEvents updater integration', () => {
           onSplitTerminal: () => () => {},
           onRenameTerminal: () => () => {},
           onFocusTerminal: () => () => {},
+          onFocusEditorTab: () => () => {},
+          onCloseSessionTab: () => () => {},
+          onOpenFileFromMobile: () => () => {},
           onCloseTerminal: () => () => {},
           onSleepWorktree: () => () => {},
           onNewBrowserTab: () => () => {},
@@ -466,8 +474,56 @@ describe('useIpcEvents updater integration', () => {
     const revealWorktreeInSidebar = vi.fn()
     const setTabCustomTitle = vi.fn()
     const queueTabStartupCommand = vi.fn()
+    const replyTerminalCreate = vi.fn()
+    const storeState = {
+      setUpdateStatus: vi.fn(),
+      createTab,
+      setActiveView,
+      setActiveWorktree,
+      markWorktreeVisited: vi.fn(),
+      setActiveTabType,
+      setActiveTab,
+      revealWorktreeInSidebar,
+      setTabCustomTitle,
+      queueTabStartupCommand,
+      tabsByWorktree: {} as Record<string, { id: string; ptyId?: string | null; title?: string }[]>,
+      ptyIdsByTabId: {} as Record<string, string[]>,
+      fetchRepos: vi.fn(),
+      fetchWorktrees: vi.fn(),
+      activeModal: null,
+      closeModal: vi.fn(),
+      openModal: vi.fn(),
+      activeWorktreeId: 'wt-1',
+      activeView: 'terminal',
+      setActiveRepo: vi.fn(),
+      setIsFullScreen: vi.fn(),
+      updateBrowserPageState: vi.fn(),
+      activeTabType: 'terminal',
+      editorFontZoomLevel: 0,
+      setEditorFontZoomLevel: vi.fn(),
+      setRateLimitsFromPush: vi.fn(),
+      setSshConnectionState: vi.fn(),
+      setSshTargetLabels: vi.fn(),
+      setPortForwards: vi.fn(),
+      clearPortForwards: vi.fn(),
+      setDetectedPorts: vi.fn(),
+      enqueueSshCredentialRequest: vi.fn(),
+      removeSshCredentialRequest: vi.fn(),
+      clearTabPtyId: vi.fn(),
+      settings: { terminalFontSize: 13 }
+    }
     const createTerminalListenerRef: {
-      current: ((data: { worktreeId: string; command?: string; title?: string }) => void) | null
+      current:
+        | ((data: {
+            requestId?: string
+            worktreeId: string
+            command?: string
+            title?: string
+            ptyId?: string
+            activate?: boolean
+            tabId?: string
+          }) => void)
+        | null
     } = { current: null }
 
     vi.resetModules()
@@ -486,41 +542,7 @@ describe('useIpcEvents updater integration', () => {
     vi.doMock('../store', () => ({
       useAppStore: {
         subscribe: vi.fn(() => () => {}),
-        getState: () => ({
-          setUpdateStatus: vi.fn(),
-          createTab,
-          setActiveView,
-          setActiveWorktree,
-          markWorktreeVisited: vi.fn(),
-          setActiveTabType,
-          setActiveTab,
-          revealWorktreeInSidebar,
-          setTabCustomTitle,
-          queueTabStartupCommand,
-          fetchRepos: vi.fn(),
-          fetchWorktrees: vi.fn(),
-          activeModal: null,
-          closeModal: vi.fn(),
-          openModal: vi.fn(),
-          activeWorktreeId: 'wt-1',
-          activeView: 'terminal',
-          setActiveRepo: vi.fn(),
-          setIsFullScreen: vi.fn(),
-          updateBrowserPageState: vi.fn(),
-          activeTabType: 'terminal',
-          editorFontZoomLevel: 0,
-          setEditorFontZoomLevel: vi.fn(),
-          setRateLimitsFromPush: vi.fn(),
-          setSshConnectionState: vi.fn(),
-          setSshTargetLabels: vi.fn(),
-          setPortForwards: vi.fn(),
-          clearPortForwards: vi.fn(),
-          setDetectedPorts: vi.fn(),
-          enqueueSshCredentialRequest: vi.fn(),
-          removeSshCredentialRequest: vi.fn(),
-          clearTabPtyId: vi.fn(),
-          settings: { terminalFontSize: 13 }
-        })
+        getState: () => storeState
       }
     }))
 
@@ -560,22 +582,34 @@ describe('useIpcEvents updater integration', () => {
           onToggleLeftSidebar: () => () => {},
           onToggleRightSidebar: () => () => {},
           onToggleWorktreePalette: () => () => {},
+          onToggleFloatingTerminal: () => () => {},
           onOpenQuickOpen: () => () => {},
           onOpenNewWorkspace: () => () => {},
           onJumpToWorktreeIndex: () => () => {},
           onActivateWorktree: () => () => {},
           onWorktreeHistoryNavigate: () => () => {},
           onCreateTerminal: (
-            listener: (data: { worktreeId: string; command?: string; title?: string }) => void
+            listener: (data: {
+              requestId?: string
+              worktreeId: string
+              command?: string
+              title?: string
+              ptyId?: string
+              activate?: boolean
+              tabId?: string
+            }) => void
           ) => {
             createTerminalListenerRef.current = listener
             return () => {}
           },
           onRequestTerminalCreate: () => () => {},
-          replyTerminalCreate: () => {},
+          replyTerminalCreate,
           onSplitTerminal: () => () => {},
           onRenameTerminal: () => () => {},
           onFocusTerminal: () => () => {},
+          onFocusEditorTab: () => () => {},
+          onCloseSessionTab: () => () => {},
+          onOpenFileFromMobile: () => () => {},
           onCloseTerminal: () => () => {},
           onSleepWorktree: () => () => {},
           onNewBrowserTab: () => () => {},
@@ -657,6 +691,67 @@ describe('useIpcEvents updater integration', () => {
     expect(revealWorktreeInSidebar).toHaveBeenCalledWith('wt-2')
     expect(setTabCustomTitle).toHaveBeenCalledWith('tab-new', 'Runner')
     expect(queueTabStartupCommand).toHaveBeenCalledWith('tab-new', { command: 'opencode' })
+
+    createTab.mockClear()
+    createTerminalListenerRef.current({
+      worktreeId: 'wt-2',
+      ptyId: 'pty-bg'
+    })
+
+    expect(createTab).toHaveBeenCalledWith('wt-2', undefined, undefined, {
+      initialPtyId: 'pty-bg',
+      activate: true
+    })
+
+    createTab.mockClear()
+    setActiveView.mockClear()
+    setActiveWorktree.mockClear()
+    setActiveTabType.mockClear()
+    setActiveTab.mockClear()
+    revealWorktreeInSidebar.mockClear()
+    createTerminalListenerRef.current({
+      worktreeId: 'wt-2',
+      ptyId: 'pty-bg-2',
+      activate: false,
+      tabId: 'tab-cli-bg'
+    })
+
+    expect(createTab).toHaveBeenCalledWith('wt-2', undefined, undefined, {
+      initialPtyId: 'pty-bg-2',
+      activate: false,
+      id: 'tab-cli-bg'
+    })
+    expect(setActiveView).not.toHaveBeenCalled()
+    expect(setActiveWorktree).not.toHaveBeenCalled()
+    expect(setActiveTabType).not.toHaveBeenCalled()
+    expect(setActiveTab).not.toHaveBeenCalled()
+    expect(revealWorktreeInSidebar).not.toHaveBeenCalled()
+
+    storeState.tabsByWorktree = {
+      'wt-2': [{ id: 'tab-existing', ptyId: 'pty-bg', title: 'Terminal 1' }]
+    }
+    storeState.ptyIdsByTabId = { 'tab-existing': ['pty-bg'] }
+    createTab.mockClear()
+    setActiveTab.mockClear()
+    createTerminalListenerRef.current({
+      worktreeId: 'wt-2',
+      ptyId: 'pty-bg'
+    })
+
+    expect(createTab).not.toHaveBeenCalled()
+    expect(setActiveTab).toHaveBeenCalledWith('tab-existing')
+
+    createTerminalListenerRef.current({
+      requestId: 'req-reveal',
+      worktreeId: 'wt-2',
+      ptyId: 'pty-bg'
+    })
+
+    expect(replyTerminalCreate).toHaveBeenCalledWith({
+      requestId: 'req-reveal',
+      tabId: 'tab-existing',
+      title: 'Terminal 1'
+    })
   })
 })
 
@@ -771,6 +866,7 @@ describe('useIpcEvents browser tab close routing', () => {
           onToggleLeftSidebar: () => () => {},
           onToggleRightSidebar: () => () => {},
           onToggleWorktreePalette: () => () => {},
+          onToggleFloatingTerminal: () => () => {},
           onOpenQuickOpen: () => () => {},
           onOpenNewWorkspace: () => () => {},
           onJumpToWorktreeIndex: () => () => {},
@@ -782,6 +878,9 @@ describe('useIpcEvents browser tab close routing', () => {
           onSplitTerminal: () => () => {},
           onRenameTerminal: () => () => {},
           onFocusTerminal: () => () => {},
+          onFocusEditorTab: () => () => {},
+          onCloseSessionTab: () => () => {},
+          onOpenFileFromMobile: () => () => {},
           onCloseTerminal: () => () => {},
           onSleepWorktree: () => () => {},
           onNewBrowserTab: () => () => {},
@@ -971,6 +1070,7 @@ describe('useIpcEvents browser tab close routing', () => {
           onToggleLeftSidebar: () => () => {},
           onToggleRightSidebar: () => () => {},
           onToggleWorktreePalette: () => () => {},
+          onToggleFloatingTerminal: () => () => {},
           onOpenQuickOpen: () => () => {},
           onOpenNewWorkspace: () => () => {},
           onJumpToWorktreeIndex: () => () => {},
@@ -982,6 +1082,9 @@ describe('useIpcEvents browser tab close routing', () => {
           onSplitTerminal: () => () => {},
           onRenameTerminal: () => () => {},
           onFocusTerminal: () => () => {},
+          onFocusEditorTab: () => () => {},
+          onCloseSessionTab: () => () => {},
+          onOpenFileFromMobile: () => () => {},
           onCloseTerminal: () => () => {},
           onSleepWorktree: () => () => {},
           onNewBrowserTab: () => () => {},
@@ -1166,6 +1269,7 @@ describe('useIpcEvents browser tab close routing', () => {
           onToggleLeftSidebar: () => () => {},
           onToggleRightSidebar: () => () => {},
           onToggleWorktreePalette: () => () => {},
+          onToggleFloatingTerminal: () => () => {},
           onOpenQuickOpen: () => () => {},
           onOpenNewWorkspace: () => () => {},
           onJumpToWorktreeIndex: () => () => {},
@@ -1177,6 +1281,9 @@ describe('useIpcEvents browser tab close routing', () => {
           onSplitTerminal: () => () => {},
           onRenameTerminal: () => () => {},
           onFocusTerminal: () => () => {},
+          onFocusEditorTab: () => () => {},
+          onCloseSessionTab: () => () => {},
+          onOpenFileFromMobile: () => () => {},
           onCloseTerminal: () => () => {},
           onSleepWorktree: () => () => {},
           onNewBrowserTab: () => () => {},
@@ -1370,6 +1477,7 @@ describe('useIpcEvents CLI-created worktree activation', () => {
           onToggleLeftSidebar: () => () => {},
           onToggleRightSidebar: () => () => {},
           onToggleWorktreePalette: () => () => {},
+          onToggleFloatingTerminal: () => () => {},
           onOpenQuickOpen: () => () => {},
           onOpenNewWorkspace: () => () => {},
           onJumpToWorktreeIndex: () => () => {},
@@ -1390,6 +1498,9 @@ describe('useIpcEvents CLI-created worktree activation', () => {
           onSplitTerminal: () => () => {},
           onRenameTerminal: () => () => {},
           onFocusTerminal: () => () => {},
+          onFocusEditorTab: () => () => {},
+          onCloseSessionTab: () => () => {},
+          onOpenFileFromMobile: () => () => {},
           onCloseTerminal: () => () => {},
           onSleepWorktree: () => () => {},
           onNewBrowserTab: () => () => {},
@@ -1499,6 +1610,7 @@ describe('useIpcEvents agent status snapshot integration', () => {
     toolInput?: string
     lastAssistantMessage?: string
     interrupted?: boolean
+    connectionId?: string | null
     receivedAt: number
     stateStartedAt: number
   }
@@ -1539,6 +1651,8 @@ describe('useIpcEvents agent status snapshot integration', () => {
       removeSshCredentialRequest: vi.fn(),
       clearTabPtyId: vi.fn(),
       runtimePaneTitlesByTabId: {},
+      repos: [],
+      worktreesByRepo: {},
       tabsByWorktree: {},
       workspaceSessionReady: false,
       settings: { terminalFontSize: 13 },
@@ -1564,6 +1678,7 @@ describe('useIpcEvents agent status snapshot integration', () => {
           onToggleLeftSidebar: () => () => {},
           onToggleRightSidebar: () => () => {},
           onToggleWorktreePalette: () => () => {},
+          onToggleFloatingTerminal: () => () => {},
           onOpenQuickOpen: () => () => {},
           onOpenNewWorkspace: () => () => {},
           onJumpToWorktreeIndex: () => () => {},
@@ -1575,6 +1690,9 @@ describe('useIpcEvents agent status snapshot integration', () => {
           onSplitTerminal: () => () => {},
           onRenameTerminal: () => () => {},
           onFocusTerminal: () => () => {},
+          onFocusEditorTab: () => () => {},
+          onCloseSessionTab: () => () => {},
+          onOpenFileFromMobile: () => () => {},
           onCloseTerminal: () => () => {},
           onSleepWorktree: () => () => {},
           onNewBrowserTab: () => () => {},
@@ -1764,6 +1882,64 @@ describe('useIpcEvents agent status snapshot integration', () => {
     )
   })
 
+  it('tracks ready push events whose paneKey does not resolve to a renderer tab', async () => {
+    const setAgentStatus = vi.fn()
+    const track = vi.fn()
+    const onSetListenerRef: { current: ((data: AgentStatusSetData) => void) | null } = {
+      current: null
+    }
+
+    const storeState: StoreLike = buildStoreState({
+      setAgentStatus,
+      tabsByWorktree: {
+        'wt-1': [{ id: 'tab-known', ptyId: 'pty-1', worktreeId: 'wt-1', title: 'Known' }]
+      },
+      workspaceSessionReady: true
+    })
+
+    stubReactSyncEffect()
+    vi.doMock('../store', () => ({
+      useAppStore: {
+        subscribe: vi.fn(() => () => {}),
+        getState: () => storeState
+      }
+    }))
+    stubAuxiliaryModules()
+    vi.doMock('@/lib/telemetry', () => ({ track }))
+    vi.stubGlobal(
+      'window',
+      buildWindowApi({
+        onSet: (cb) => {
+          onSetListenerRef.current = cb
+          return () => {}
+        }
+      })
+    )
+
+    const { useIpcEvents } = await import('./useIpcEvents')
+
+    useIpcEvents()
+    await Promise.resolve()
+
+    if (typeof onSetListenerRef.current !== 'function') {
+      throw new Error('Expected agentStatus.onSet listener to be registered')
+    }
+
+    onSetListenerRef.current({
+      paneKey: 'tab-missing:0',
+      state: 'working',
+      prompt: 'p',
+      agentType: 'claude',
+      receivedAt: 1_700_000_000_100,
+      stateStartedAt: 1_699_999_999_100
+    })
+
+    expect(setAgentStatus).not.toHaveBeenCalled()
+    expect(track).toHaveBeenCalledWith('agent_hook_unattributed', {
+      reason: 'unknown_tab_id'
+    })
+  })
+
   it('pulls the snapshot once workspace session is ready even before settings load', async () => {
     const setAgentStatus = vi.fn()
     const getSnapshot = vi.fn(() => Promise.resolve([]))
@@ -1851,5 +2027,195 @@ describe('useIpcEvents agent status snapshot integration', () => {
     await Promise.resolve()
 
     expect(setAgentStatus).not.toHaveBeenCalled()
+  })
+
+  it('forwards events whose connectionId matches the live repo connection', async () => {
+    const setAgentStatus = vi.fn()
+    const onSetListenerRef: { current: ((data: AgentStatusSetData) => void) | null } = {
+      current: null
+    }
+    const storeState: StoreLike = buildStoreState({
+      setAgentStatus,
+      workspaceSessionReady: true,
+      repos: [{ id: 'repo-1', connectionId: 'conn-1' }],
+      worktreesByRepo: {
+        'repo-1': [{ id: 'wt-1', repoId: 'repo-1' }]
+      },
+      tabsByWorktree: {
+        'wt-1': [{ id: 'tab-1', ptyId: 'pty-1', worktreeId: 'wt-1', title: 'Terminal 1' }]
+      }
+    })
+
+    stubReactSyncEffect()
+    vi.doMock('../store', () => ({
+      useAppStore: { subscribe: vi.fn(() => () => {}), getState: () => storeState }
+    }))
+    stubAuxiliaryModules()
+    vi.stubGlobal(
+      'window',
+      buildWindowApi({
+        onSet: (cb) => {
+          onSetListenerRef.current = cb
+          return () => {}
+        }
+      })
+    )
+
+    const { useIpcEvents } = await import('./useIpcEvents')
+    useIpcEvents()
+    await Promise.resolve()
+
+    onSetListenerRef.current?.({
+      paneKey: 'tab-1:0',
+      connectionId: 'conn-1',
+      state: 'working',
+      receivedAt: 1_700_000_000_100,
+      stateStartedAt: 1_699_999_999_100
+    })
+
+    expect(setAgentStatus).toHaveBeenCalledWith(
+      'tab-1:0',
+      expect.objectContaining({ state: 'working' }),
+      'Terminal 1',
+      { updatedAt: 1_700_000_000_100, stateStartedAt: 1_699_999_999_100 }
+    )
+  })
+
+  it('drops events whose connectionId no longer matches the live local repo', async () => {
+    const setAgentStatus = vi.fn()
+    const onSetListenerRef: { current: ((data: AgentStatusSetData) => void) | null } = {
+      current: null
+    }
+    const storeState: StoreLike = buildStoreState({
+      setAgentStatus,
+      workspaceSessionReady: true,
+      repos: [{ id: 'repo-1', connectionId: null }],
+      worktreesByRepo: {
+        'repo-1': [{ id: 'wt-1', repoId: 'repo-1' }]
+      },
+      tabsByWorktree: {
+        'wt-1': [{ id: 'tab-1', ptyId: 'pty-1', worktreeId: 'wt-1', title: 'Terminal 1' }]
+      }
+    })
+
+    stubReactSyncEffect()
+    vi.doMock('../store', () => ({
+      useAppStore: { subscribe: vi.fn(() => () => {}), getState: () => storeState }
+    }))
+    stubAuxiliaryModules()
+    vi.stubGlobal(
+      'window',
+      buildWindowApi({
+        onSet: (cb) => {
+          onSetListenerRef.current = cb
+          return () => {}
+        }
+      })
+    )
+
+    const { useIpcEvents } = await import('./useIpcEvents')
+    useIpcEvents()
+    await Promise.resolve()
+
+    onSetListenerRef.current?.({
+      paneKey: 'tab-1:0',
+      connectionId: 'conn-stale',
+      state: 'working',
+      receivedAt: 1_700_000_000_100,
+      stateStartedAt: 1_699_999_999_100
+    })
+
+    expect(setAgentStatus).not.toHaveBeenCalled()
+  })
+
+  it('drops remote-stamped events when the owning worktree is no longer in worktreesByRepo', async () => {
+    const setAgentStatus = vi.fn()
+    const onSetListenerRef: { current: ((data: AgentStatusSetData) => void) | null } = {
+      current: null
+    }
+    const storeState: StoreLike = buildStoreState({
+      setAgentStatus,
+      workspaceSessionReady: true,
+      repos: [{ id: 'repo-1', connectionId: 'conn-1' }],
+      worktreesByRepo: { 'repo-1': [] },
+      tabsByWorktree: {
+        'wt-1': [{ id: 'tab-1', ptyId: 'pty-1', worktreeId: 'wt-1', title: 'Terminal 1' }]
+      }
+    })
+
+    stubReactSyncEffect()
+    vi.doMock('../store', () => ({
+      useAppStore: { subscribe: vi.fn(() => () => {}), getState: () => storeState }
+    }))
+    stubAuxiliaryModules()
+    vi.stubGlobal(
+      'window',
+      buildWindowApi({
+        onSet: (cb) => {
+          onSetListenerRef.current = cb
+          return () => {}
+        }
+      })
+    )
+
+    const { useIpcEvents } = await import('./useIpcEvents')
+    useIpcEvents()
+    await Promise.resolve()
+
+    onSetListenerRef.current?.({
+      paneKey: 'tab-1:0',
+      connectionId: 'conn-other',
+      state: 'working',
+      receivedAt: 1_700_000_000_100,
+      stateStartedAt: 1_699_999_999_100
+    })
+
+    expect(setAgentStatus).not.toHaveBeenCalled()
+  })
+
+  it('accepts events without a stamped connectionId for preload compatibility', async () => {
+    const setAgentStatus = vi.fn()
+    const onSetListenerRef: { current: ((data: AgentStatusSetData) => void) | null } = {
+      current: null
+    }
+    const storeState: StoreLike = buildStoreState({
+      setAgentStatus,
+      workspaceSessionReady: true,
+      repos: [{ id: 'repo-1', connectionId: 'conn-1' }],
+      worktreesByRepo: {
+        'repo-1': [{ id: 'wt-1', repoId: 'repo-1' }]
+      },
+      tabsByWorktree: {
+        'wt-1': [{ id: 'tab-1', ptyId: 'pty-1', worktreeId: 'wt-1', title: 'Terminal 1' }]
+      }
+    })
+
+    stubReactSyncEffect()
+    vi.doMock('../store', () => ({
+      useAppStore: { subscribe: vi.fn(() => () => {}), getState: () => storeState }
+    }))
+    stubAuxiliaryModules()
+    vi.stubGlobal(
+      'window',
+      buildWindowApi({
+        onSet: (cb) => {
+          onSetListenerRef.current = cb
+          return () => {}
+        }
+      })
+    )
+
+    const { useIpcEvents } = await import('./useIpcEvents')
+    useIpcEvents()
+    await Promise.resolve()
+
+    onSetListenerRef.current?.({
+      paneKey: 'tab-1:0',
+      state: 'working',
+      receivedAt: 1_700_000_000_100,
+      stateStartedAt: 1_699_999_999_100
+    })
+
+    expect(setAgentStatus).toHaveBeenCalledTimes(1)
   })
 })

@@ -599,11 +599,23 @@ function SourceControlInner(): React.JSX.Element {
       const connectionId = getConnectionId(activeWorktreeId) ?? undefined
       try {
         if (kind === 'publish') {
-          await pushBranch(activeWorktreeId, worktreePath, true, connectionId)
+          await pushBranch(
+            activeWorktreeId,
+            worktreePath,
+            true,
+            connectionId,
+            activeWorktree?.pushTarget
+          )
           return
         }
         if (kind === 'push') {
-          await pushBranch(activeWorktreeId, worktreePath, false, connectionId)
+          await pushBranch(
+            activeWorktreeId,
+            worktreePath,
+            false,
+            connectionId,
+            activeWorktree?.pushTarget
+          )
           return
         }
         if (kind === 'pull') {
@@ -614,13 +626,21 @@ function SourceControlInner(): React.JSX.Element {
           await fetchBranch(activeWorktreeId, worktreePath, connectionId)
           return
         }
-        await syncBranch(activeWorktreeId, worktreePath, connectionId)
+        await syncBranch(activeWorktreeId, worktreePath, connectionId, activeWorktree?.pushTarget)
       } catch {
         // Why: remote action failures are surfaced by editor-slice actions to keep
         // one consistent toast path and avoid duplicate notifications in the UI.
       }
     },
-    [activeWorktreeId, fetchBranch, pullBranch, pushBranch, syncBranch, worktreePath]
+    [
+      activeWorktree?.pushTarget,
+      activeWorktreeId,
+      fetchBranch,
+      pullBranch,
+      pushBranch,
+      syncBranch,
+      worktreePath
+    ]
   )
 
   // Why: compound actions must commit first and only run the follow-up remote
@@ -1015,11 +1035,20 @@ function SourceControlInner(): React.JSX.Element {
     }
 
     void refreshBranchCompareRef.current()
-    const intervalId = window.setInterval(
-      () => void refreshBranchCompareRef.current(),
-      BRANCH_REFRESH_INTERVAL_MS
-    )
-    return () => window.clearInterval(intervalId)
+    const refreshIfFocused = (): void => {
+      if (document.hasFocus()) {
+        void refreshBranchCompareRef.current()
+      }
+    }
+    // Why: branch compare shells out to git every tick. The panel only needs
+    // background freshness while Orca is focused; on focus we refresh
+    // immediately so hidden-window time does not burn subprocess work.
+    const intervalId = window.setInterval(refreshIfFocused, BRANCH_REFRESH_INTERVAL_MS)
+    window.addEventListener('focus', refreshIfFocused)
+    return () => {
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', refreshIfFocused)
+    }
   }, [activeWorktreeId, effectiveBaseRef, isBranchVisible, isFolder, worktreePath])
 
   useEffect(() => {

@@ -234,24 +234,21 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
           // it when a new turn starts (working → Stop reprices it).
           interrupted: payload.interrupted
         }
-        // Why: `agentStatusEpoch` bumps on every update because visual +
-        // freshness selectors (WorktreeCard status, hover content) care about
-        // tool-name/prompt/assistant-message churn within a turn. `sortEpoch`,
-        // on the other hand, bumps only when sort-relevant inputs change —
-        // avoiding sidebar re-sorts on every tool/prompt event would stress
-        // the smart-sort debounce for no reason. Sort-relevant inputs are:
+        // Why: broad freshness-aware subscribers only need a global tick when
+        // an entry appears, changes state, or crosses stale->fresh. Same-state
+        // tool/prompt pings still update agentStatusByPaneKey for the owning
+        // row, but they must not fan out through dashboard/sidebar aggregate
+        // work across every card. Sort-relevant inputs are:
         //   1. `state` transitions — smart-sort class is a function of state.
         //   2. Freshness transitions (stale → fresh) — `resolveAttention` in
         //      smart-attention.ts filters entries through
         //      `isExplicitAgentStatusFresh(entry, now, AGENT_STATUS_STALE_AFTER_MS)`
         //      (30-min TTL). A stale entry that refreshes with the SAME state
         //      goes from "not contributing" (Class 4) to driving a higher
-        //      class — order must update. The new entry below always has
-        //      `updatedAt = now`, so it is fresh; we only need to detect the
-        //      stale→fresh flip on `existing`. Snapshot hydration can pass an
-        //      older updatedAt; in that case the entry is still stored with its
-        //      true age, and selectors will immediately decay it if it is
-        //      already stale.
+        //      class — order must update. Snapshot hydration can pass an older
+        //      updatedAt; in that case the entry is still stored with its true
+        //      age, and selectors will immediately decay it if it is already
+        //      stale.
         const wasFresh =
           !!existing && isExplicitAgentStatusFresh(existing, updatedAt, AGENT_STATUS_STALE_AFTER_MS)
         const sortRelevantChange = !existing || existing.state !== payload.state || !wasFresh
@@ -271,7 +268,7 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
         return {
           agentStatusByPaneKey: { ...s.agentStatusByPaneKey, [paneKey]: entry },
           retentionSuppressedPaneKeys: nextRetentionSuppressedPaneKeys,
-          agentStatusEpoch: s.agentStatusEpoch + 1,
+          agentStatusEpoch: sortRelevantChange ? s.agentStatusEpoch + 1 : s.agentStatusEpoch,
           sortEpoch: sortRelevantChange ? s.sortEpoch + 1 : s.sortEpoch
         }
       })

@@ -1,14 +1,17 @@
 import { useEffect, useRef } from 'react'
 import {
   FOCUS_TERMINAL_PANE_EVENT,
+  PASTE_TERMINAL_TEXT_EVENT,
   SYNC_FIT_PANES_EVENT,
   TOGGLE_TERMINAL_PANE_EXPAND_EVENT,
-  type FocusTerminalPaneDetail
+  type FocusTerminalPaneDetail,
+  type PasteTerminalTextDetail
 } from '@/constants/terminal'
 import type { PaneManager } from '@/lib/pane-manager/pane-manager'
 import { fitAndFocusPanes, fitPanes } from './pane-helpers'
 import type { PtyTransport } from './pty-transport'
 import { handleTerminalFileDrop } from './terminal-drop-handler'
+import { flushTerminalOutput } from '@/lib/pane-manager/pane-terminal-output-scheduler'
 
 type UseTerminalPaneGlobalEffectsArgs = {
   tabId: string
@@ -53,16 +56,19 @@ export function useTerminalPaneGlobalEffects({
       return
     }
     if (isVisible) {
+      // Why: background PTY output is throttled while a pane is not focused;
+      // flush it before fitting so newly visible terminals paint current state.
+      for (const pane of manager.getPanes()) {
+        flushTerminalOutput(pane.terminal)
+      }
       // Resume WebGL immediately so the terminal shows its last-known state
       // on the first painted frame. macOS context creation is ~5 ms; on
       // Windows (ANGLE → D3D11) it can be 100–500 ms but a deferred resume
       // would paint a stretched DOM-fallback flash, which is worse UX.
       manager.resumeRendering()
-      // Single fit on resume. xterm has been writing live the whole time
-      // (no visibility-gated buffering), so cols/rows are already correct
-      // for the new container; this fit is just to absorb any container
-      // dimension change that happened while we were hidden (e.g. sidebar
-      // toggle on another worktree).
+      // Single fit on resume. Background bytes have been pushed into xterm
+      // above, so this fit only absorbs container dimension changes that
+      // happened while hidden (e.g. sidebar toggle on another worktree).
       if (isActive) {
         fitAndFocusPanes(manager)
       } else {
@@ -123,6 +129,27 @@ export function useTerminalPaneGlobalEffects({
     }
     window.addEventListener(FOCUS_TERMINAL_PANE_EVENT, onFocusPane)
     return () => window.removeEventListener(FOCUS_TERMINAL_PANE_EVENT, onFocusPane)
+  }, [tabId, managerRef])
+
+  useEffect(() => {
+    const onPasteText = (event: Event): void => {
+      const detail = (event as CustomEvent<PasteTerminalTextDetail | undefined>).detail
+      if (!detail?.tabId || detail.tabId !== tabId || !detail.text) {
+        return
+      }
+      const manager = managerRef.current
+      if (!manager) {
+        return
+      }
+      const pane = manager.getActivePane() ?? manager.getPanes()[0]
+      if (!pane) {
+        return
+      }
+      pane.terminal.paste(detail.text)
+      pane.terminal.focus()
+    }
+    window.addEventListener(PASTE_TERMINAL_TEXT_EVENT, onPasteText)
+    return () => window.removeEventListener(PASTE_TERMINAL_TEXT_EVENT, onPasteText)
   }, [tabId, managerRef])
 
   // Why: sidebar open/close toggles dispatch SYNC_FIT_PANES_EVENT from a
@@ -196,15 +223,22 @@ export function useTerminalPaneGlobalEffects({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isVisible])
 
-  // Why: only the active tab's terminal should process file drops. Registering
-  // a listener per mounted tab causes a MaxListenersExceededWarning when 11+
-  // tabs are open. Gating on isActive ensures at most one listener exists.
+  // Why: visible but unfocused split-group terminals can still receive native
+  // OS drops. Route tab-id-aware payloads to the dropped pane, while legacy
+  // payloads without a tab id keep the old active-terminal-only behavior.
   useEffect(() => {
-    if (!isActive) {
+    if (!isActive && !isVisible) {
       return
     }
     return window.api.ui.onFileDrop((data) => {
       if (data.target !== 'terminal') {
+        return
+      }
+      if (data.tabId) {
+        if (data.tabId !== tabId) {
+          return
+        }
+      } else if (!isActive) {
         return
       }
       const manager = managerRef.current
@@ -223,5 +257,5 @@ export function useTerminalPaneGlobalEffects({
         data
       })
     })
-  }, [isActive, managerRef, paneTransportsRef])
+  }, [isActive, isVisible, managerRef, paneTransportsRef, tabId])
 }

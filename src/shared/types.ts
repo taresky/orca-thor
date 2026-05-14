@@ -1,5 +1,6 @@
 /* eslint-disable max-lines */
-import type { SshTarget } from './ssh-types'
+import type { SshRemotePtyLease, SshTarget } from './ssh-types'
+import type { Automation, AutomationRun } from './automations-types'
 import type { WorkspaceSource } from './telemetry-events'
 import type { GitHubProjectSettings } from './github-project-types'
 
@@ -121,6 +122,10 @@ export type Worktree = {
    *  grant newly-created worktrees a short grace window at the top of Recent,
    *  immune to ambient PTY-bump reordering in other worktrees. */
   createdAt?: number
+  /** Agent selected when Orca originally created the worktree. Used only to
+   *  seed a replacement terminal if the user later reopens the worktree after
+   *  closing every visible surface. */
+  createdWithAgent?: TuiAgent
   sparseDirectories?: string[]
   sparseBaseRef?: string
   /** ID of the saved preset this worktree was created from, if any. Cleared
@@ -128,8 +133,16 @@ export type Worktree = {
   sparsePresetId?: string
   /** Intended create base for stale-base probes. Persisted metadata, not UI drift state. */
   baseRef?: string
+  /** Remote/branch Orca should publish review commits to when it created this worktree. */
+  pushTarget?: GitPushTarget
   diffComments?: DiffComment[]
 } & GitWorktreeInfo
+
+export type GitPushTarget = {
+  remoteName: string
+  branchName: string
+  remoteUrl?: string
+}
 
 // ─── Worktree metadata (persisted user-authored fields only) ─────────
 export type WorktreeMeta = {
@@ -145,11 +158,15 @@ export type WorktreeMeta = {
   lastActivityAt: number
   /** See {@link Worktree.createdAt}. Persisted to orca-data.json. */
   createdAt?: number
+  /** See {@link Worktree.createdWithAgent}. Persisted to orca-data.json. */
+  createdWithAgent?: TuiAgent
   sparseDirectories?: string[]
   sparseBaseRef?: string
   sparsePresetId?: string
   /** Intended create base for stale-base probes. Persisted metadata, not UI drift state. */
   baseRef?: string
+  /** See {@link Worktree.pushTarget}. Persisted so refreshed worktree lists keep the target. */
+  pushTarget?: GitPushTarget
   diffComments?: DiffComment[]
 }
 
@@ -570,8 +587,8 @@ export type GitHubWorkItem = {
   branchName?: string
   baseRefName?: string
   // Why: true when a PR's head lives on a fork (headRepositoryOwner !== selected repo owner).
-  // The Start-from picker disables fork PRs in v1 because the create flow cannot
-  // safely resolve a fork head from headRefName alone.
+  // The Start-from picker passes this to resolvePrBase so fork heads use
+  // refs/pull/<N>/head for creation and a separate PR-head push target.
   isCrossRepository?: boolean
   /** Why: required because the cross-repo view merges items from every selected
    *  repo — the table row's repo pill and the "open in browser" fallback need
@@ -867,6 +884,11 @@ export type CreateWorktreeArgs = {
   baseBranch?: string
   setupDecision?: SetupDecision
   sparseCheckout?: CreateSparseCheckoutRequest
+  linkedIssue?: number
+  linkedPR?: number
+  pushTarget?: GitPushTarget
+  /** Agent selected in the create surface. Omitted for blank-shell creates. */
+  createdWithAgent?: TuiAgent
   /** Telemetry-only: which UI surface initiated this create. Threaded from
    *  the renderer entry point so main can emit `workspace_created` with the
    *  correct `source`. `unknown` is a valid wire value — an unrecognized
@@ -1079,6 +1101,10 @@ export type TerminalColorOverrides = {
   bold?: string
 }
 
+export type FloatingTerminalCwdRequest = {
+  path?: string
+}
+
 export type GlobalSettings = {
   workspaceDir: string
   nestWorkspaces: boolean
@@ -1170,6 +1196,19 @@ export type GlobalSettings = {
    *  left sidebar free of its button entirely. Hiding the button here also
    *  removes it from keyboard navigation. */
   showTasksButton: boolean
+  /** Why: Floating Terminal is the default global shell surface so users can
+   *  reach a terminal outside repo/worktree context immediately. */
+  floatingTerminalEnabled: boolean
+  /** One-shot migration flag for the default-on rollout. Before this field
+   *  landed, the floating terminal defaulted off and many profiles persisted
+   *  that inherited false. Once migrated, an explicit off choice sticks. */
+  floatingTerminalDefaultedForAllUsers?: boolean
+  /** Where new Floating Terminal tabs start. Defaults to '~' so the visible
+   *  setting matches the shell-oriented directory users expect. */
+  floatingTerminalCwd: string
+  /** Where the Floating Terminal toggle is shown. Defaults to the floating
+   *  button for discoverability. */
+  floatingTerminalTriggerLocation: FloatingTerminalTriggerLocation
   diffDefaultView: 'inline' | 'side-by-side'
   notifications: NotificationSettings
   /** When true, a countdown timer is shown after a Claude agent becomes idle,
@@ -1206,6 +1245,10 @@ export type GlobalSettings = {
    *  again" checkbox inside it or from the General settings pane. We keep this
    *  defaulted to false so first-time behavior stays safe. */
   skipDeleteWorktreeConfirm: boolean
+  /** Why: deleting an automation also deletes its run history. Keep this
+   *  separate from worktree deletion so skipping one destructive confirmation
+   *  does not silently skip the other. */
+  skipDeleteAutomationConfirm: boolean
   /** Default preset in the new-workspace GitHub task view. */
   defaultTaskViewPreset: TaskViewPresetId
   /** Why: persists the user's last-used task source so the Tasks page
@@ -1269,6 +1312,9 @@ export type GlobalSettings = {
   /** Legacy persisted key from before the sidekick -> pet rename. Read only
    *  during migration; new writes use experimentalPet. */
   experimentalSidekick?: boolean
+  /** Legacy persisted flag from when Activity was experimental. Activity is
+   *  now default-on and this no longer gates the page. */
+  experimentalActivity: boolean
   /** Experimental: when creating a worktree, automatically symlink a
    *  user-configured set of files/folders from the primary checkout (e.g.
    *  `.env`, `node_modules`) into the new worktree. Opt-in while the
@@ -1420,6 +1466,7 @@ export type WorktreeCardProperty =
   | 'inline-agents'
 
 export type StatusBarItem = 'claude' | 'codex' | 'gemini' | 'opencode-go' | 'ssh' | 'resource-usage'
+export type FloatingTerminalTriggerLocation = 'floating-button' | 'status-bar'
 
 export type TaskResumeState = {
   githubMode?: 'items' | 'project'
@@ -1630,6 +1677,9 @@ export type PersistedState = {
   }
   workspaceSession: WorkspaceSessionState
   sshTargets: SshTarget[]
+  sshRemotePtyLeases: SshRemotePtyLease[]
+  automations: Automation[]
+  automationRuns: AutomationRun[]
   onboarding: OnboardingState
 }
 
@@ -1704,11 +1754,14 @@ export type GitStatusResult = {
   conflictOperation: GitConflictOperation
   head?: string
   branch?: string
+  // Why: porcelain v2 status already includes upstream/ahead/behind metadata.
+  // Folding it in lets refresh polling avoid a second pair of git subprocesses.
+  upstreamStatus?: GitUpstreamStatus
 }
 
 // Why: when hasUpstream is false, ahead/behind are placeholder zeros, not a
 // "sync" signal — callers must check hasUpstream before treating 0/0 as in-sync.
-// Kept separate from GitStatusResult because upstream lookup can fail for
+// Kept as a named type because explicit upstream refreshes can still fail for
 // reasons unrelated to working-tree status (e.g., no upstream is expected).
 export type GitUpstreamStatus = {
   hasUpstream: boolean

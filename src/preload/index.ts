@@ -26,11 +26,16 @@ import type {
   NotificationSoundPathResult,
   NotificationSoundResult,
   OnboardingState,
+  FloatingTerminalCwdRequest,
   SearchResult,
   WorktreeBaseStatusEvent,
   WorktreeRemoteBranchConflictEvent
 } from '../shared/types'
 import type { RuntimeStatus, RuntimeSyncWindowGraph } from '../shared/runtime-types'
+import type {
+  RuntimeMobileMarkdownRequest,
+  RuntimeMobileMarkdownResponse
+} from '../shared/mobile-markdown-document'
 import type { RateLimitState } from '../shared/rate-limit-types'
 import type { GhAuthDiagnostic } from '../shared/github-auth-types'
 import type {
@@ -74,6 +79,14 @@ import type { AgentStatusIpcPayload } from '../shared/agent-status-types'
 import type { TelemetryConsentState } from '../shared/telemetry-consent-types'
 import type { RefreshAgentsResult } from './api-types'
 import type { AgentKind, LaunchSource, RequestKind } from '../shared/telemetry-events'
+import type {
+  Automation,
+  AutomationCreateInput,
+  AutomationDispatchRequest,
+  AutomationDispatchResult,
+  AutomationRun,
+  AutomationUpdateInput
+} from '../shared/automations-types'
 import {
   ORCA_EDITOR_SAVE_DIRTY_FILES_EVENT,
   type EditorSaveDirtyFilesDetail
@@ -85,13 +98,50 @@ import {
 
 type NativeDropResolution =
   | { target: 'editor' }
-  | { target: 'terminal' }
+  | { target: 'terminal'; tabId?: string }
   | { target: 'composer' }
   | { target: 'file-explorer'; destinationDir: string }
   // Why: returned when the explorer marker was found but no destinationDir
   // could be resolved. The caller must suppress the drop entirely instead of
   // falling back to 'editor' — fail-closed behavior per design §7.1.
   | { target: 'rejected' }
+
+type NativeFileDropPayload =
+  | { paths: string[]; target: 'editor' }
+  | { paths: string[]; target: 'terminal'; tabId?: string }
+  | { paths: string[]; target: 'composer' }
+  | { paths: string[]; target: 'file-explorer'; destinationDir: string }
+
+type NativeFileDropCallback = (data: NativeFileDropPayload) => void
+
+const nativeFileDropCallbacks: NativeFileDropCallback[] = []
+let nativeFileDropListenerRegistered = false
+
+const onNativeFileDrop = (_event: Electron.IpcRendererEvent, data: NativeFileDropPayload): void => {
+  for (const callback of Array.from(nativeFileDropCallbacks)) {
+    callback(data)
+  }
+}
+
+function subscribeNativeFileDrop(callback: NativeFileDropCallback): () => void {
+  nativeFileDropCallbacks.push(callback)
+  if (!nativeFileDropListenerRegistered) {
+    // Why: terminal panes subscribe per visible split group, so the IPC layer
+    // must keep one real listener and fan out locally to avoid listener warnings.
+    ipcRenderer.on('terminal:file-drop', onNativeFileDrop)
+    nativeFileDropListenerRegistered = true
+  }
+  return () => {
+    const callbackIndex = nativeFileDropCallbacks.indexOf(callback)
+    if (callbackIndex !== -1) {
+      nativeFileDropCallbacks.splice(callbackIndex, 1)
+    }
+    if (nativeFileDropCallbacks.length === 0 && nativeFileDropListenerRegistered) {
+      ipcRenderer.removeListener('terminal:file-drop', onNativeFileDrop)
+      nativeFileDropListenerRegistered = false
+    }
+  }
+}
 
 // Why: one shared HTMLAudioElement per sound file, restarted from t=0 on each
 // play, with an in-flight guard that drops new plays while the sound is still
@@ -137,7 +187,10 @@ function resolveNativeFileDrop(event: DragEvent): NativeDropResolution | null {
     }
 
     const target = entry.dataset.nativeFileDropTarget
-    if (target === 'editor' || target === 'terminal' || target === 'composer') {
+    if (target === 'terminal') {
+      return { target, tabId: entry.dataset.terminalTabId }
+    }
+    if (target === 'editor' || target === 'composer') {
       return { target }
     }
     if (target === 'file-explorer') {
@@ -236,7 +289,10 @@ document.addEventListener(
       // behavior instead of being silently discarded.
       ipcRenderer.send('terminal:file-dropped-from-preload', {
         paths,
-        target: resolution?.target ?? 'editor'
+        target: resolution?.target ?? 'editor',
+        ...(resolution?.target === 'terminal' && resolution.tabId
+          ? { tabId: resolution.tabId }
+          : {})
       })
     }
   },
@@ -255,7 +311,9 @@ const api = {
     getKeyboardInputSourceId: (): Promise<string | null> =>
       ipcRenderer.invoke('app:getKeyboardInputSourceId'),
     setUnreadDockBadgeCount: (count: number): Promise<void> =>
-      ipcRenderer.invoke('app:setUnreadDockBadgeCount', count)
+      ipcRenderer.invoke('app:setUnreadDockBadgeCount', count),
+    getFloatingTerminalCwd: (args?: FloatingTerminalCwdRequest): Promise<string> =>
+      ipcRenderer.invoke('app:getFloatingTerminalCwd', args)
   },
 
   wsl: {
@@ -365,7 +423,7 @@ const api = {
       prNumber: number
       headRefName?: string
       isCrossRepository?: boolean
-    }): Promise<{ baseBranch: string } | { error: string }> =>
+    }): Promise<{ baseBranch: string; pushTarget?: unknown } | { error: string }> =>
       ipcRenderer.invoke('worktrees:resolvePrBase', args),
 
     remove: (args: { worktreeId: string; force?: boolean; skipArchive?: boolean }): Promise<void> =>
@@ -522,6 +580,13 @@ const api = {
       ) => callback(data)
       ipcRenderer.on('pty:serializeBuffer:request', listener)
       return () => ipcRenderer.removeListener('pty:serializeBuffer:request', listener)
+    },
+
+    onClearBufferRequest: (callback: (data: { ptyId: string }) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: { ptyId: string }) =>
+        callback(data)
+      ipcRenderer.on('pty:clearBuffer:request', listener)
+      return () => ipcRenderer.removeListener('pty:clearBuffer:request', listener)
     },
 
     sendSerializedBuffer: (
@@ -928,7 +993,8 @@ const api = {
     geminiStatus: (): Promise<AgentHookInstallStatus> =>
       ipcRenderer.invoke('agentHooks:geminiStatus'),
     cursorStatus: (): Promise<AgentHookInstallStatus> =>
-      ipcRenderer.invoke('agentHooks:cursorStatus')
+      ipcRenderer.invoke('agentHooks:cursorStatus'),
+    droidStatus: (): Promise<AgentHookInstallStatus> => ipcRenderer.invoke('agentHooks:droidStatus')
   },
 
   agentTrust: {
@@ -1035,6 +1101,12 @@ const api = {
       ipcRenderer.invoke('developerPermissions:request', args),
     openSettings: (args: { id: string }): Promise<void> =>
       ipcRenderer.invoke('developerPermissions:openSettings', args)
+  },
+
+  computerUsePermissions: {
+    getStatus: (): Promise<unknown> => ipcRenderer.invoke('computerUsePermissions:getStatus'),
+    openSetup: (args?: { id?: string }): Promise<unknown> =>
+      ipcRenderer.invoke('computerUsePermissions:openSetup', args)
   },
 
   shell: {
@@ -1479,6 +1551,16 @@ const api = {
     }
   },
 
+  notebook: {
+    runPythonCell: (args: {
+      filePath: string
+      code: string
+      preamble?: string
+      connectionId?: string | null
+    }): Promise<{ stdout: string; stderr: string; exitCode: number | null; error?: string }> =>
+      ipcRenderer.invoke('notebook:runPythonCell', args)
+  },
+
   fs: {
     readDir: (args: {
       dirPath: string
@@ -1610,6 +1692,7 @@ const api = {
       worktreePath: string
       publish?: boolean
       connectionId?: string
+      pushTarget?: unknown
     }): Promise<void> => ipcRenderer.invoke('git:push', args),
     pull: (args: { worktreePath: string; connectionId?: string }): Promise<void> =>
       ipcRenderer.invoke('git:pull', args),
@@ -1680,6 +1763,11 @@ const api = {
       const listener = (_event: Electron.IpcRendererEvent) => callback()
       ipcRenderer.on('ui:toggleWorktreePalette', listener)
       return () => ipcRenderer.removeListener('ui:toggleWorktreePalette', listener)
+    },
+    onToggleFloatingTerminal: (callback: () => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent) => callback()
+      ipcRenderer.on('ui:toggleFloatingTerminal', listener)
+      return () => ipcRenderer.removeListener('ui:toggleFloatingTerminal', listener)
     },
     onOpenQuickOpen: (callback: () => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent) => callback()
@@ -1833,11 +1921,27 @@ const api = {
       return () => ipcRenderer.removeListener('ui:activateWorktree', listener)
     },
     onCreateTerminal: (
-      callback: (data: { worktreeId: string; command?: string; title?: string }) => void
+      callback: (data: {
+        requestId?: string
+        worktreeId: string
+        command?: string
+        title?: string
+        ptyId?: string
+        activate?: boolean
+        tabId?: string
+      }) => void
     ): (() => void) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
-        data: { worktreeId: string; command?: string; title?: string }
+        data: {
+          requestId?: string
+          worktreeId: string
+          command?: string
+          title?: string
+          ptyId?: string
+          activate?: boolean
+          tabId?: string
+        }
       ) => callback(data)
       ipcRenderer.on('ui:createTerminal', listener)
       return () => ipcRenderer.removeListener('ui:createTerminal', listener)
@@ -1846,13 +1950,20 @@ const api = {
       callback: (data: {
         requestId: string
         worktreeId?: string
+        afterTabId?: string
         command?: string
         title?: string
       }) => void
     ): (() => void) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
-        data: { requestId: string; worktreeId?: string; command?: string; title?: string }
+        data: {
+          requestId: string
+          worktreeId?: string
+          afterTabId?: string
+          command?: string
+          title?: string
+        }
       ) => callback(data)
       ipcRenderer.on('terminal:requestTabCreate', listener)
       return () => ipcRenderer.removeListener('terminal:requestTabCreate', listener)
@@ -1896,14 +2007,55 @@ const api = {
       return () => ipcRenderer.removeListener('ui:renameTerminal', listener)
     },
     onFocusTerminal: (
+      callback: (data: { tabId: string; worktreeId: string; leafId?: string | null }) => void
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: { tabId: string; worktreeId: string; leafId?: string | null }
+      ) => callback(data)
+      ipcRenderer.on('ui:focusTerminal', listener)
+      return () => ipcRenderer.removeListener('ui:focusTerminal', listener)
+    },
+    onFocusEditorTab: (
       callback: (data: { tabId: string; worktreeId: string }) => void
     ): (() => void) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
         data: { tabId: string; worktreeId: string }
       ) => callback(data)
-      ipcRenderer.on('ui:focusTerminal', listener)
-      return () => ipcRenderer.removeListener('ui:focusTerminal', listener)
+      ipcRenderer.on('ui:focusEditorTab', listener)
+      return () => ipcRenderer.removeListener('ui:focusEditorTab', listener)
+    },
+    onCloseSessionTab: (
+      callback: (data: { tabId: string; worktreeId: string }) => void
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: { tabId: string; worktreeId: string }
+      ) => callback(data)
+      ipcRenderer.on('ui:closeSessionTab', listener)
+      return () => ipcRenderer.removeListener('ui:closeSessionTab', listener)
+    },
+    onOpenFileFromMobile: (
+      callback: (data: { worktreeId: string; filePath: string; relativePath: string }) => void
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: { worktreeId: string; filePath: string; relativePath: string }
+      ) => callback(data)
+      ipcRenderer.on('ui:openFileFromMobile', listener)
+      return () => ipcRenderer.removeListener('ui:openFileFromMobile', listener)
+    },
+    onMobileMarkdownRequest: (
+      callback: (request: RuntimeMobileMarkdownRequest) => void
+    ): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, request: RuntimeMobileMarkdownRequest) =>
+        callback(request)
+      ipcRenderer.on('ui:mobileMarkdownRequest', listener)
+      return () => ipcRenderer.removeListener('ui:mobileMarkdownRequest', listener)
+    },
+    respondMobileMarkdownRequest: (response: RuntimeMobileMarkdownResponse): void => {
+      ipcRenderer.send('ui:mobileMarkdownResponse', response)
     },
     onCloseTerminal: (
       callback: (data: { tabId: string; paneRuntimeId?: number }) => void
@@ -1934,26 +2086,8 @@ const api = {
       ipcRenderer.invoke('clipboard:writeText', text),
     writeClipboardImage: (dataUrl: string): Promise<void> =>
       ipcRenderer.invoke('clipboard:writeImage', dataUrl),
-    onFileDrop: (
-      callback: (
-        data:
-          | { paths: string[]; target: 'editor' }
-          | { paths: string[]; target: 'terminal' }
-          | { paths: string[]; target: 'composer' }
-          | { paths: string[]; target: 'file-explorer'; destinationDir: string }
-      ) => void
-    ): (() => void) => {
-      const listener = (
-        _event: Electron.IpcRendererEvent,
-        data:
-          | { paths: string[]; target: 'editor' }
-          | { paths: string[]; target: 'terminal' }
-          | { paths: string[]; target: 'composer' }
-          | { paths: string[]; target: 'file-explorer'; destinationDir: string }
-      ) => callback(data)
-      ipcRenderer.on('terminal:file-drop', listener)
-      return () => ipcRenderer.removeListener('terminal:file-drop', listener)
-    },
+    onFileDrop: (callback: (data: NativeFileDropPayload) => void): (() => void) =>
+      subscribeNativeFileDrop(callback),
     getZoomLevel: (): number => webFrame.getZoomLevel(),
     setZoomLevel: (level: number): void => webFrame.setZoomLevel(level),
     syncTrafficLights: (zoomFactor: number): void =>
@@ -2156,6 +2290,9 @@ const api = {
     disconnect: (args: { targetId: string }): Promise<void> =>
       ipcRenderer.invoke('ssh:disconnect', args),
 
+    terminateSessions: (args: { targetId: string }): Promise<void> =>
+      ipcRenderer.invoke('ssh:terminateSessions', args),
+
     getState: (args: { targetId: string }): Promise<SshConnectionState | null> =>
       ipcRenderer.invoke('ssh:getState', args),
 
@@ -2265,6 +2402,29 @@ const api = {
     submitCredential: (args: { requestId: string; value: string | null }): Promise<void> =>
       ipcRenderer.invoke('ssh:submitCredential', args)
   },
+
+  automations: {
+    list: (): Promise<Automation[]> => ipcRenderer.invoke('automations:list'),
+    listRuns: (args?: { automationId?: string }): Promise<AutomationRun[]> =>
+      ipcRenderer.invoke('automations:listRuns', args),
+    create: (input: AutomationCreateInput): Promise<Automation> =>
+      ipcRenderer.invoke('automations:create', input),
+    update: (args: { id: string; updates: AutomationUpdateInput }): Promise<Automation> =>
+      ipcRenderer.invoke('automations:update', args),
+    delete: (args: { id: string }): Promise<void> => ipcRenderer.invoke('automations:delete', args),
+    runNow: (args: { id: string }): Promise<AutomationRun> =>
+      ipcRenderer.invoke('automations:runNow', args),
+    markDispatchResult: (result: AutomationDispatchResult): Promise<AutomationRun> =>
+      ipcRenderer.invoke('automations:markDispatchResult', result),
+    rendererReady: (): Promise<void> => ipcRenderer.invoke('automations:rendererReady'),
+    onDispatchRequested: (callback: (request: AutomationDispatchRequest) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, request: AutomationDispatchRequest) =>
+        callback(request)
+      ipcRenderer.on('automations:dispatchRequested', listener)
+      return () => ipcRenderer.removeListener('automations:dispatchRequested', listener)
+    }
+  },
+
   e2e: {
     getConfig: () => preloadE2EConfig
   },

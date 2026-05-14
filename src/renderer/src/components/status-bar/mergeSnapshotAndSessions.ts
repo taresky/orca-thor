@@ -28,7 +28,8 @@ import type {
   TerminalTab,
   WorktreeMemory
 } from '../../../../shared/types'
-import { parsePtySessionId, WORKTREE_ID_SEPARATOR } from '../../../../shared/pty-session-id-format'
+import { getRepoIdFromWorktreeId, splitWorktreeId } from '../../../../shared/worktree-id'
+import { parsePtySessionId } from '../../../../shared/pty-session-id-format'
 
 // ─── View-model types (renderer-local) ──────────────────────────────
 
@@ -105,16 +106,15 @@ export type MergeContext = {
 // ─── Helpers ────────────────────────────────────────────────────────
 
 function deriveRepoIdFromWorktreeId(worktreeId: string): string {
-  const sep = worktreeId.indexOf(WORKTREE_ID_SEPARATOR)
-  return sep > 0 ? worktreeId.slice(0, sep) : worktreeId
+  return getRepoIdFromWorktreeId(worktreeId)
 }
 
 function deriveWorktreeNameFromWorktreeId(worktreeId: string): string {
-  const sep = worktreeId.indexOf(WORKTREE_ID_SEPARATOR)
-  if (sep <= 0) {
+  const parsed = splitWorktreeId(worktreeId)
+  if (!parsed) {
     return worktreeId
   }
-  const path = worktreeId.slice(sep + WORKTREE_ID_SEPARATOR.length)
+  const path = parsed.worktreePath
   if (!path) {
     return worktreeId
   }

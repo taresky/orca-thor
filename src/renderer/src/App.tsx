@@ -1,6 +1,14 @@
 /* eslint-disable max-lines */
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { getDefaultUIState } from '../../shared/constants'
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type SetStateAction
+} from 'react'
 
 import {
   ArrowLeft,
@@ -14,6 +22,7 @@ import logo from '../../../resources/logo.svg'
 import { SYNC_FIT_PANES_EVENT, TOGGLE_TERMINAL_PANE_EXPAND_EVENT } from '@/constants/terminal'
 import { syncZoomCSSVar } from '@/lib/ui-zoom'
 import { buildAppFontFamily } from '@/lib/app-font-family'
+import { toast } from 'sonner'
 import { Toaster } from '@/components/ui/sonner'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -25,7 +34,9 @@ import {
 import { useAppStore } from './store'
 import { useShallow } from 'zustand/react/shallow'
 import { useIpcEvents } from './hooks/useIpcEvents'
+import { useAutomationDispatchEvents } from './hooks/useAutomationDispatchEvents'
 import RetainedAgentsSyncGate from './components/dashboard/RetainedAgentsSyncGate'
+import { ActivityTitlebarControls } from './components/activity/ActivityTitlebarControls'
 import Sidebar from './components/Sidebar'
 import Terminal from './components/Terminal'
 import { shutdownBufferCaptures } from './components/terminal-pane/shutdown-buffer-captures'
@@ -37,17 +48,33 @@ import { TelemetryFirstLaunchSurface } from './components/TelemetryFirstLaunchSu
 import { ZoomOverlay } from './components/ZoomOverlay'
 import { shouldShowOnboarding } from './components/onboarding/should-show-onboarding'
 import { SshPassphraseDialog } from './components/settings/SshPassphraseDialog'
+import {
+  FloatingTerminalPanel,
+  FloatingTerminalToggleButton
+} from './components/floating-terminal/FloatingTerminalPanel'
+import { TOGGLE_FLOATING_TERMINAL_EVENT } from '@/lib/floating-terminal'
 import { useGitStatusPolling } from './components/right-sidebar/useGitStatusPolling'
 import { useEditorExternalWatch } from './hooks/useEditorExternalWatch'
 import { useAutoAckViewedAgent } from './hooks/useAutoAckViewedAgent'
 import { useUnreadDockBadge } from './hooks/useUnreadDockBadge'
 import {
+  getRuntimeMobileSessionSyncKey,
+  runtimeMobileSessionSyncKeysEqual,
+  scheduleRuntimeGraphSync,
   setRuntimeGraphStoreStateGetter,
   setRuntimeGraphSyncEnabled
 } from './runtime/sync-runtime-graph'
 import { useGlobalFileDrop } from './hooks/useGlobalFileDrop'
 import { registerUpdaterBeforeUnloadBypass } from './lib/updater-beforeunload'
-import { buildWorkspaceSessionPayload } from './lib/workspace-session'
+import {
+  buildWorkspaceSessionPayload,
+  shouldPersistWorkspaceSession
+} from './lib/workspace-session'
+import { createSessionWriteSubscriber } from './lib/session-write-subscriber'
+import {
+  getStartupErrorFallbackUI,
+  hydratePersistedUIAfterStartupRead
+} from './lib/startup-ui-hydration'
 import { applyDocumentTheme } from './lib/document-theme'
 import { isEditableTarget } from './lib/editable-target'
 import {
@@ -127,6 +154,8 @@ function WindowControls(): React.JSX.Element {
 
 const Landing = lazy(() => import('./components/Landing'))
 const TaskPage = lazy(() => import('./components/TaskPage'))
+const AutomationsPage = lazy(() => import('./components/automations/AutomationsPage'))
+const ActivityPrototypePage = lazy(() => import('./components/activity/ActivityPrototypePage'))
 const Settings = lazy(() => import('./components/settings/Settings'))
 const QuickOpen = lazy(() => import('./components/QuickOpen'))
 const WorktreeJumpPalette = lazy(() => import('./components/WorktreeJumpPalette'))
@@ -141,6 +170,7 @@ const OnboardingFlow = lazy(() => import('./components/onboarding/OnboardingFlow
 
 function App(): React.JSX.Element {
   useUnreadDockBadge()
+  const [floatingTerminalOpen, setFloatingTerminalOpen] = useState(false)
 
   // Why: Zustand actions are referentially stable, but each individual
   // useAppStore(s => s.someAction) still registers a subscription that React
@@ -163,11 +193,13 @@ function App(): React.JSX.Element {
       setDeferredSshReconnectTargets: s.setDeferredSshReconnectTargets,
       setSshConnectionState: s.setSshConnectionState,
       hydratePersistedUI: s.hydratePersistedUI,
+      setHydrationSucceeded: s.setHydrationSucceeded,
       openModal: s.openModal,
       closeModal: s.closeModal,
       toggleRightSidebar: s.toggleRightSidebar,
       setRightSidebarOpen: s.setRightSidebarOpen,
       setRightSidebarTab: s.setRightSidebarTab,
+      setActiveView: s.setActiveView,
       updateSettings: s.updateSettings,
       pruneLastVisitedTimestamps: s.pruneLastVisitedTimestamps,
       seedActiveWorktreeLastVisitedIfMissing: s.seedActiveWorktreeLastVisitedIfMissing
@@ -182,6 +214,70 @@ function App(): React.JSX.Element {
   const expandedPaneByTabId = useAppStore((s) => s.expandedPaneByTabId)
   const canExpandPaneByTabId = useAppStore((s) => s.canExpandPaneByTabId)
   const workspaceSessionReady = useAppStore((s) => s.workspaceSessionReady)
+  const floatingTerminalEnabled = useAppStore((s) => s.settings?.floatingTerminalEnabled === true)
+  const floatingTerminalTriggerLocation = useAppStore(
+    (s) => s.settings?.floatingTerminalTriggerLocation ?? 'floating-button'
+  )
+  // Why: the floating terminal is a transient overlay; hotkey minimize should
+  // return keyboard focus to the surface the user was working in before it.
+  const floatingTerminalReturnFocusRef = useRef<HTMLElement | null>(null)
+
+  const rememberFloatingTerminalReturnFocus = useCallback((): void => {
+    const active = document.activeElement
+    if (!(active instanceof HTMLElement)) {
+      floatingTerminalReturnFocusRef.current = null
+      return
+    }
+    if (
+      active.closest('[data-floating-terminal-panel]') ||
+      active.closest('[data-floating-terminal-toggle]')
+    ) {
+      return
+    }
+    floatingTerminalReturnFocusRef.current = active
+  }, [])
+
+  const restoreFloatingTerminalReturnFocus = useCallback((): void => {
+    const target = floatingTerminalReturnFocusRef.current
+    floatingTerminalReturnFocusRef.current = null
+    if (!target || !document.contains(target)) {
+      return
+    }
+    requestAnimationFrame(() => {
+      target.focus({ preventScroll: true })
+    })
+  }, [])
+
+  const setFloatingTerminalOpenWithFocus = useCallback(
+    (nextOpen: SetStateAction<boolean>): void => {
+      setFloatingTerminalOpen((currentOpen) => {
+        const resolvedOpen = typeof nextOpen === 'function' ? nextOpen(currentOpen) : nextOpen
+        if (resolvedOpen && !currentOpen) {
+          rememberFloatingTerminalReturnFocus()
+        } else if (!resolvedOpen && currentOpen) {
+          restoreFloatingTerminalReturnFocus()
+        }
+        return resolvedOpen
+      })
+    },
+    [rememberFloatingTerminalReturnFocus, restoreFloatingTerminalReturnFocus]
+  )
+
+  useEffect(() => {
+    const toggleFloatingTerminal = (): void => {
+      if (floatingTerminalEnabled) {
+        setFloatingTerminalOpenWithFocus((open) => !open)
+      }
+    }
+    window.addEventListener(TOGGLE_FLOATING_TERMINAL_EVENT, toggleFloatingTerminal)
+    return () => window.removeEventListener(TOGGLE_FLOATING_TERMINAL_EVENT, toggleFloatingTerminal)
+  }, [floatingTerminalEnabled, setFloatingTerminalOpenWithFocus])
+
+  useEffect(() => {
+    if (!floatingTerminalEnabled) {
+      setFloatingTerminalOpenWithFocus(false)
+    }
+  }, [floatingTerminalEnabled, setFloatingTerminalOpenWithFocus])
   const sidebarWidth = useAppStore((s) => s.sidebarWidth)
   const sidebarOpen = useAppStore((s) => s.sidebarOpen)
   const groupBy = useAppStore((s) => s.groupBy)
@@ -206,13 +302,14 @@ function App(): React.JSX.Element {
 
   // Subscribe to IPC push events
   useIpcEvents()
+  useAutomationDispatchEvents()
   // Why: retention must run at App level so the inline per-card agents list
   // always sees retained entries. If retention ran inside the sidebar-card
   // subtree, "done" agents would vanish any time the user collapsed a card's
   // inline agents section. The retention hooks are hosted inside
   // <RetainedAgentsSyncGate /> (a leaf component that renders null) rather
   // than being called inline here so its high-churn store subscriptions
-  // (agentStatusByPaneKey + agentStatusEpoch tick at PTY event frequency)
+  // (agentStatusByPaneKey ticks at PTY event frequency)
   // do not re-render the App tree on every agent status update.
   // Why: git conflict-operation state also drives the worktree cards. Polling
   // cannot live under RightSidebar because App unmounts that subtree when the
@@ -248,18 +345,38 @@ function App(): React.JSX.Element {
     // without this, the first (unmounted) pass would keep spawning PTYs.
     const abortController = new AbortController()
 
+    // Why (issue #1158): hydrate persisted UI immediately after ui.get()
+    // succeeds, before any later session step can throw. The UI writer is
+    // gated only on persistedUIReady, so falling back to defaults after a
+    // successful ui.get() would serialize those defaults back to disk.
+    let uiHydrated = false
+    // Why (issue #1158): track whether the success-path call to
+    // reconnectPersistedTerminals started so the catch path doesn't run it a
+    // second time. Reconnect mutates store state via per-tab set() blocks
+    // inside its loops (populating tabsByWorktree / ptyIdsByTabId); re-entering
+    // it on partially-mutated state would double-set ptyIds and drain pending*
+    // maps twice. If the success-path call started and threw mid-loop, those
+    // per-tab set() blocks may have populated tabsByWorktree / ptyIdsByTabId
+    // for some tabs but did NOT reach the tail set() that flips
+    // workspaceSessionReady — so we still need to force the flag true so the
+    // UI mounts.
+    let reconnectStarted = false
     void (async () => {
       try {
         await actions.fetchRepos()
         await actions.fetchAllWorktrees()
         const persistedUI = await window.api.ui.get()
+        uiHydrated = hydratePersistedUIAfterStartupRead({
+          persistedUI,
+          cancelled,
+          hydratePersistedUI: actions.hydratePersistedUI
+        })
         const session = await window.api.session.get()
         // Why: settings must be loaded before hydrateWorkspaceSession so that
         // hydration has access to user preferences. Without this, settings
         // would still be null at hydration time.
         await actions.fetchSettings()
         if (!cancelled) {
-          actions.hydratePersistedUI(persistedUI)
           actions.hydrateWorkspaceSession(session)
           actions.hydrateTabsSession(session)
           actions.hydrateEditorSession(session)
@@ -363,24 +480,117 @@ function App(): React.JSX.Element {
             }
           }
 
+          reconnectStarted = true
           await actions.reconnectPersistedTerminals(abortController.signal)
           syncZoomCSSVar()
+          // Why (issue #1158): unlock the debounced session writer only after
+          // hydration AND all dependent startup steps (SSH reconnect, terminal
+          // reconnect) completed without throwing. If this flag flipped earlier
+          // and a later step threw, the catch path's reconnectPersistedTerminals
+          // would flip workspaceSessionReady=true with the gate already open,
+          // and the writer would serialize a partially-mutated store back to
+          // disk — the exact data-loss mode this PR fixes.
+          actions.setHydrationSucceeded(true)
         }
       } catch (error) {
-        console.error('Failed to hydrate workspace session:', error)
+        // Why (issue #1158): previously this catch called hydrateWorkspaceSession
+        // with empty defaults, which overwrote the in-memory tab map. The
+        // debounced session writer then serialized that empty state back to
+        // orca-data.json, silently erasing the user's saved tabs. The fix is
+        // to leave in-memory state untouched and keep hydrationSucceeded
+        // false so the writer stays gated. We still ensure persistedUIReady and
+        // workspaceSessionReady flip so the UI can mount without a session.
+        const stepLabel = error instanceof Error && error.message ? error.message : String(error)
+        console.error(
+          '[startup] Workspace session hydration failed; leaving disk state untouched:',
+          stepLabel,
+          error
+        )
         if (!cancelled) {
-          actions.hydratePersistedUI(getDefaultUIState())
-          actions.hydrateWorkspaceSession({
-            activeRepoId: null,
-            activeWorktreeId: null,
-            activeTabId: null,
-            tabsByWorktree: {},
-            terminalLayoutsByTabId: {}
+          // Why (issue #1158): only hydrate UI with defaults if ui.get() never
+          // produced persisted data. If the real UI hydrate already ran and a
+          // later session step threw, defaults would flow through the debounced
+          // UI writer and clobber ui.json (sidebar width, sort, filters, etc.).
+          const fallbackUI = getStartupErrorFallbackUI(uiHydrated)
+          if (fallbackUI) {
+            actions.hydratePersistedUI(fallbackUI)
+          }
+          // Why (issue #1158): surface a sticky, dismissible toast so the
+          // user knows they're in degraded "no-save" mode. Without this, every
+          // new tab/file/browse becomes silently ephemeral — `hydrationSucceeded`
+          // stays false for the rest of the process and the session writer is
+          // a no-op. The "Restart now" action calls app.relaunch (defined in
+          // src/main/ipc/app.ts) so the user can recover with one click instead
+          // of having to find a quit/relaunch path themselves.
+          toast.error('Session restore failed', {
+            description:
+              "Changes won't be saved until restart. Your previous tabs are safe on disk.",
+            duration: Infinity,
+            dismissible: true,
+            action: {
+              label: 'Restart now',
+              onClick: () => {
+                void window.api.app.relaunch()
+              }
+            }
           })
-          // Why: hydrateWorkspaceSession no longer sets workspaceSessionReady.
-          // The error path has no worktrees to reconnect, but must still flip
-          // the flag so auto-tab-creation and session writes are unblocked.
-          await actions.reconnectPersistedTerminals()
+          // Why: reconnectPersistedTerminals flips workspaceSessionReady so the
+          // UI mounts; auto-tab-creation becomes unblocked. hydrationSucceeded
+          // is intentionally NOT set — the session writer must stay a no-op
+          // until the user gets a clean restart, so we don't overwrite the
+          // on-disk file we failed to load.
+          if (!reconnectStarted) {
+            try {
+              await actions.reconnectPersistedTerminals(abortController.signal)
+            } catch (reconnectErr) {
+              console.error(
+                '[startup] reconnectPersistedTerminals failed in error path:',
+                reconnectErr
+              )
+              // Why (issue #1158): re-check !cancelled before mutating store
+              // state. The await above may have run while the effect was being
+              // torn down (StrictMode pass 1 cleanup) — in that case the
+              // second pass owns hydration and we must not stomp its work
+              // from a cancelled run.
+              if (!cancelled) {
+                // Why (issue #1158): this is already the recovery path from a
+                // failed hydration. If the recovery itself throws, the async IIFE
+                // rejects as an unhandled promise and workspaceSessionReady never
+                // flips — leaving the user staring at a blank window. Forcing the
+                // flag true lets the app shell mount with an empty session, which
+                // is strictly better than a non-functional UI.
+                //
+                // Also clear pendingReconnect* maps because reconnectPersistedTerminals
+                // normally drains them as part of its post-conditions
+                // (see terminals.ts post-loop cleanup). Bypassing that drain by
+                // flipping only the flag would leave stale reconnect data in
+                // memory — any later reader of pending* maps could trigger
+                // phantom reconnect attempts on PTYs that no longer exist.
+                useAppStore.setState({
+                  workspaceSessionReady: true,
+                  pendingReconnectWorktreeIds: [],
+                  pendingReconnectTabByWorktree: {},
+                  pendingReconnectPtyIdByTabId: {}
+                })
+              }
+            }
+          } else {
+            // Why (issue #1158): the success-path call to
+            // reconnectPersistedTerminals already started; its per-tab set()
+            // blocks may have populated tabsByWorktree / ptyIdsByTabId for
+            // some tabs but did NOT reach the tail set() that flips
+            // workspaceSessionReady (that runs after the loop completes).
+            // Don't re-run reconnect over partially-mutated state — doing so
+            // would double-set ptyIds and drain pending* maps twice. Force
+            // the flag true so the UI mounts. The same pending* clear applies
+            // here for the same reason as above.
+            useAppStore.setState({
+              workspaceSessionReady: true,
+              pendingReconnectWorktreeIds: [],
+              pendingReconnectTabByWorktree: {},
+              pendingReconnectPtyIdByTabId: {}
+            })
+          }
         }
       }
       void actions.initGitHubCache()
@@ -399,6 +609,39 @@ function App(): React.JSX.Element {
     }
   }, [])
 
+  useEffect(() => {
+    let previousKey = getRuntimeMobileSessionSyncKey(useAppStore.getState())
+    return useAppStore.subscribe((state, previousState) => {
+      // Why: skip the key build entirely when no input field has changed by
+      // reference. Mirrors every field used by getRuntimeMobileSessionSyncKey
+      // so this gate covers every "could the key have changed?" case.
+      // — if any field's reference is unchanged, neither the projection
+      // serialized from it nor the reference-compared map can have changed.
+      if (
+        state.tabsByWorktree === previousState.tabsByWorktree &&
+        state.groupsByWorktree === previousState.groupsByWorktree &&
+        state.activeGroupIdByWorktree === previousState.activeGroupIdByWorktree &&
+        state.unifiedTabsByWorktree === previousState.unifiedTabsByWorktree &&
+        state.tabBarOrderByWorktree === previousState.tabBarOrderByWorktree &&
+        state.activeFileId === previousState.activeFileId &&
+        state.activeFileIdByWorktree === previousState.activeFileIdByWorktree &&
+        state.openFiles === previousState.openFiles &&
+        state.editorDrafts === previousState.editorDrafts &&
+        state.activeTabId === previousState.activeTabId &&
+        state.terminalLayoutsByTabId === previousState.terminalLayoutsByTabId &&
+        state.runtimePaneTitlesByTabId === previousState.runtimePaneTitlesByTabId
+      ) {
+        return
+      }
+      const nextKey = getRuntimeMobileSessionSyncKey(state)
+      if (runtimeMobileSessionSyncKeysEqual(nextKey, previousKey)) {
+        return
+      }
+      previousKey = nextKey
+      scheduleRuntimeGraphSync()
+    })
+  }, [])
+
   useEffect(() => registerUpdaterBeforeUnloadBypass(), [])
 
   useEffect(() => {
@@ -412,25 +655,10 @@ function App(): React.JSX.Element {
   // Using a Zustand subscribe() outside React removes ~15 subscriptions from
   // App's render cycle, eliminating re-renders on every tab/file/browser change.
   useEffect(() => {
-    let timer: number | null = null
-    const unsub = useAppStore.subscribe((state) => {
-      if (!state.workspaceSessionReady) {
-        return
-      }
-      if (timer) {
-        window.clearTimeout(timer)
-      }
-      timer = window.setTimeout(() => {
-        timer = null
-        void window.api.session.set(buildWorkspaceSessionPayload(state))
-      }, 150)
+    return createSessionWriteSubscriber({
+      store: useAppStore,
+      persist: (payload) => void window.api.session.set(payload)
     })
-    return () => {
-      unsub()
-      if (timer) {
-        window.clearTimeout(timer)
-      }
-    }
   }, [])
 
   // On shutdown, capture terminal scrollback buffers and flush to disk.
@@ -448,18 +676,21 @@ function App(): React.JSX.Element {
       if (shutdownBuffersCaptured) {
         return
       }
-      if (!useAppStore.getState().workspaceSessionReady) {
+      if (!shouldPersistWorkspaceSession(useAppStore.getState())) {
         return
       }
       for (const capture of shutdownBufferCaptures.values()) {
         try {
-          capture()
+          capture({ includeLocalBuffers: false })
         } catch {
           // Don't let one pane's failure block the rest.
         }
       }
-      const state = useAppStore.getState()
-      window.api.session.setSync(buildWorkspaceSessionPayload(state))
+      // Why: re-read state after capture() calls populated scrollback buffers
+      // into the store via Zustand setters. The earlier read is only for the
+      // gating flags and would miss those updates.
+      const freshState = useAppStore.getState()
+      window.api.session.setSync(buildWorkspaceSessionPayload(freshState))
       shutdownBuffersCaptured = true
     }
     window.addEventListener('beforeunload', captureAndFlush)
@@ -568,14 +799,21 @@ function App(): React.JSX.Element {
     activeWorktreeId !== null &&
     !hasTabBar &&
     effectiveActiveTabExpanded
-  const showSidebar = activeView !== 'settings'
-  // Why: when a worktree is active (split groups always enabled), the
-  // full-width titlebar is replaced by a sidebar-width left header so the
-  // terminal + tab groups extend to the very top of the window.
-  const workspaceActive = activeView !== 'settings' && activeWorktreeId !== null
-  // Why: suppress right sidebar controls on the tasks page since that surface
-  // is intentionally distraction-free (no right sidebar).
-  const showRightSidebarControls = activeView !== 'settings' && activeView !== 'tasks'
+  // Why: Activity is a full-page navigation surface — same treatment as
+  // Settings — so the worktree sidebar is removed for that view, letting the
+  // thread list + agent terminal span edge-to-edge.
+  const showSidebar = activeView !== 'settings' && activeView !== 'activity'
+  // Why: only the terminal workspace replaces the full-width titlebar with
+  // split-column chrome. Full-page navigation views keep the draggable app
+  // titlebar so their page-level controls can live in that window strip.
+  const workspaceActive = activeView === 'terminal' && activeWorktreeId !== null
+  // Why: suppress right sidebar controls on full-page navigation surfaces
+  // since those surfaces intentionally own the full content area.
+  const showRightSidebarControls =
+    activeView !== 'settings' &&
+    activeView !== 'tasks' &&
+    activeView !== 'activity' &&
+    activeView !== 'automations'
 
   const handleToggleExpand = (): void => {
     if (!effectiveActiveTabId) {
@@ -630,7 +868,7 @@ function App(): React.JSX.Element {
         // Why: Back/Forward traverse mixed worktree + Tasks visits, so the
         // shortcut is active wherever the titlebar button cluster is (terminal
         // or tasks). Still suppressed in Settings to keep that view modal-ish.
-        if (activeView !== 'terminal' && activeView !== 'tasks') {
+        if (activeView !== 'terminal' && activeView !== 'tasks' && activeView !== 'automations') {
           return
         }
         e.preventDefault()
@@ -660,9 +898,9 @@ function App(): React.JSX.Element {
       // (contentEditable) or a browser guest webContents, both of which bypass
       // this renderer-side window keydown listener.
 
-      // Why: the tasks page should not be able to reveal the right sidebar at
-      // all, because that surface is intentionally distraction-free.
-      if (activeView === 'tasks') {
+      // Why: full-page navigation surfaces should not reveal the right sidebar;
+      // they are designed as distraction-free content areas.
+      if (activeView === 'tasks' || activeView === 'activity' || activeView === 'automations') {
         return
       }
 
@@ -836,7 +1074,9 @@ function App(): React.JSX.Element {
       </div>
       {/* Why: Back/Forward traverse mixed worktree + Tasks history, so the
           cluster is shown wherever the history shortcut is live (terminal or
-          tasks). Hidden in Settings to keep that view modal-ish. */}
+          tasks). Hidden in Settings to keep that view modal-ish, and in
+          Activity since that page owns its own back-out via the Close button
+          in ActivityTitlebarControls. */}
       {(activeView === 'terminal' || activeView === 'tasks') && (
         <div className="ml-auto mr-3 flex items-center">
           <Tooltip>
@@ -892,9 +1132,12 @@ function App(): React.JSX.Element {
   ) : null
 
   useEffect(() => {
-    if (activeView === 'tasks' && rightSidebarOpen) {
-      // Why: hide the right sidebar immediately when entering the tasks page
-      // so a previous open state can't bleed into that distraction-free view.
+    if (
+      (activeView === 'tasks' || activeView === 'activity' || activeView === 'automations') &&
+      rightSidebarOpen
+    ) {
+      // Why: hide the right sidebar immediately when entering full-page
+      // navigation views so previous side-panel state cannot occlude them.
       actions.setRightSidebarOpen(false)
     }
   }, [activeView, rightSidebarOpen, actions])
@@ -916,9 +1159,8 @@ function App(): React.JSX.Element {
       }
     >
       <TooltipProvider delayDuration={400}>
-        {/* Why: leaf-mounted retention sync — hosting useDashboardData() +
-            useRetainedAgentsSync() inside a null-rendering leaf keeps their
-            high-churn store subscriptions from re-rendering the App tree. */}
+        {/* Why: leaf-mounted retention sync keeps agent-status retention
+            subscriptions from re-rendering the App tree. */}
         <RetainedAgentsSyncGate />
         <div className="flex flex-row flex-1 min-h-0 overflow-hidden">
           {/* Why: the non-workspace titlebar lives inside this left+center
@@ -939,10 +1181,14 @@ function App(): React.JSX.Element {
                 >
                   {titlebarLeftControls}
                 </div>
-                <div
-                  id="titlebar-tabs"
-                  className={`flex flex-1 min-w-0 self-stretch${activeView !== 'terminal' || !activeWorktreeId ? ' invisible pointer-events-none' : ''}`}
-                />
+                {activeView === 'activity' ? (
+                  <ActivityTitlebarControls />
+                ) : (
+                  <div
+                    id="titlebar-tabs"
+                    className={`flex flex-1 min-w-0 self-stretch${activeView !== 'terminal' || !activeWorktreeId ? ' invisible pointer-events-none' : ''}`}
+                  />
+                )}
                 {showTitlebarExpandButton && (
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -1055,6 +1301,8 @@ function App(): React.JSX.Element {
                   <Suspense fallback={null}>
                     {activeView === 'settings' ? <Settings /> : null}
                     {activeView === 'tasks' ? <TaskPage /> : null}
+                    {activeView === 'automations' ? <AutomationsPage /> : null}
+                    {activeView === 'activity' ? <ActivityPrototypePage /> : null}
                     {activeView === 'terminal' && !activeWorktreeId ? <Landing /> : null}
                   </Suspense>
                 </div>
@@ -1068,7 +1316,21 @@ function App(): React.JSX.Element {
               surface is intentionally distraction-free. */}
           {showRightSidebarControls ? <RightSidebar /> : null}
         </div>
-        <StatusBar />
+        {floatingTerminalEnabled ? (
+          <>
+            <FloatingTerminalPanel
+              open={floatingTerminalOpen}
+              onOpenChange={setFloatingTerminalOpenWithFocus}
+            />
+            {floatingTerminalTriggerLocation === 'floating-button' ? (
+              <FloatingTerminalToggleButton
+                open={floatingTerminalOpen}
+                onToggle={() => setFloatingTerminalOpenWithFocus((open) => !open)}
+              />
+            ) : null}
+          </>
+        ) : null}
+        <StatusBar floatingTerminalOpen={floatingTerminalOpen} />
         {/* Why: NewWorkspaceComposerCard renders Radix <Tooltip>s that crash
             when mounted outside a TooltipProvider ancestor. Keep the global
             composer modal inside this provider so the card renders safely
