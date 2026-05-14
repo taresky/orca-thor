@@ -99,7 +99,11 @@ export function PrSection({ pr, onClick: _onClick }: PrSectionProps): React.JSX.
           target="_blank"
           rel="noreferrer"
           className="flex items-center gap-1.5 min-w-0 cursor-pointer group/meta -mx-1.5 px-1.5 py-0.5 rounded transition-colors hover:bg-background/40"
-          onClick={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            if (pr.url) {
+              e.stopPropagation()
+            }
+          }}
         >
           <PullRequestIcon
             className={cn(
