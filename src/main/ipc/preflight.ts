@@ -6,6 +6,7 @@ import { TUI_AGENT_CONFIG } from '../../shared/tui-agent-config'
 import type { PathSource, ShellHydrationFailureReason } from '../../shared/types'
 import { hydrateShellPath, mergePathSegments } from '../startup/hydrate-shell-path'
 import { getBitbucketAuthStatus } from '../bitbucket/client'
+import { _resetKnownHostsCache } from '../gitlab/gl-utils'
 import { getActiveMultiplexer } from './ssh'
 
 const execFileAsync = promisify(execFile)
@@ -142,6 +143,16 @@ async function isGlabAuthenticated(): Promise<boolean> {
 export async function runPreflightCheck(force = false): Promise<PreflightStatus> {
   if (cached && !force) {
     return cached
+  }
+
+  if (force) {
+    // Why: the GitLab known-hosts cache (gl-utils) is populated lazily on the
+    // first GitLab request and never invalidated within a session. A user who
+    // runs `glab auth login` for a self-hosted host after Orca starts would
+    // otherwise see "No GitLab project found" until app relaunch. The Re-check
+    // path in IntegrationsPane forces preflight, so piggyback on that signal
+    // to refresh the host list too.
+    _resetKnownHostsCache()
   }
 
   const [gitInstalled, ghInstalled, glabInstalled] = await Promise.all([
