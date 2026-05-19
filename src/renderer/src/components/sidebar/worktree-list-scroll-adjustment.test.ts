@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   resolvePendingSidebarReveal,
   shouldAdjustWorktreeSidebarMeasuredRowScroll,
+  shouldShowFloatingCurrentWorkspaceButton,
   shouldQueueStartupSidebarReveal
 } from './WorktreeList'
 
@@ -113,5 +114,57 @@ describe('shouldAdjustWorktreeSidebarMeasuredRowScroll', () => {
         targetWorktreeStillExists: true
       })
     ).toBe('scroll-and-clear')
+  })
+
+  it('shows the floating reveal action when the current workspace row is hidden', () => {
+    expect(
+      shouldShowFloatingCurrentWorkspaceButton({
+        currentWorktreeId: 'wt-1',
+        currentRowIndex: -1,
+        currentItem: null,
+        scrollTop: 0,
+        viewportHeight: 400,
+        pendingRevealWorktreeId: null
+      })
+    ).toBe(true)
+  })
+
+  it('shows the floating reveal action when the current workspace is outside the scrollport', () => {
+    expect(
+      shouldShowFloatingCurrentWorkspaceButton({
+        currentWorktreeId: 'wt-1',
+        currentRowIndex: 10,
+        currentItem: { start: 500, end: 560 },
+        scrollTop: 0,
+        viewportHeight: 400,
+        pendingRevealWorktreeId: null
+      })
+    ).toBe(true)
+  })
+
+  it('hides the floating reveal action when the current workspace is visible', () => {
+    expect(
+      shouldShowFloatingCurrentWorkspaceButton({
+        currentWorktreeId: 'wt-1',
+        currentRowIndex: 3,
+        currentItem: { start: 120, end: 180 },
+        scrollTop: 100,
+        viewportHeight: 200,
+        pendingRevealWorktreeId: null
+      })
+    ).toBe(false)
+  })
+
+  it('hides the floating reveal action while the current workspace reveal is pending', () => {
+    expect(
+      shouldShowFloatingCurrentWorkspaceButton({
+        currentWorktreeId: 'wt-1',
+        currentRowIndex: -1,
+        currentItem: null,
+        scrollTop: 0,
+        viewportHeight: 400,
+        pendingRevealWorktreeId: 'wt-1'
+      })
+    ).toBe(false)
   })
 })

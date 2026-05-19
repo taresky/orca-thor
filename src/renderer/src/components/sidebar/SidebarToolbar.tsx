@@ -3,7 +3,6 @@ import {
   BookOpen,
   Boxes,
   CircleHelp,
-  Crosshair,
   ExternalLink,
   FolderPlus,
   Github,
@@ -34,7 +33,6 @@ import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import type { GitHubViewer } from '../../../../shared/types'
 import { showOnboardingFromRenderer } from '../onboarding/show-onboarding-event'
-import { revealCurrentSidebarWorktree } from './reveal-sidebar-worktree'
 
 const GITHUB_ISSUES_URL = 'https://github.com/stablyai/orca/issues/'
 const DISCORD_URL = 'https://discord.gg/fzjDKHxv8Q'
@@ -47,16 +45,6 @@ const SETTINGS_ACTION_HIT_TARGET_CLASS = 'relative z-20'
 type SubmitIdentity = {
   githubLogin: string | null
   githubEmail: string | null
-}
-
-export function canRevealCurrentWorkspace(activeWorktreeId: string | null): boolean {
-  return activeWorktreeId !== null
-}
-
-export function revealCurrentWorkspaceFromToolbar(
-  revealCurrentWorkspace: typeof revealCurrentSidebarWorktree
-): boolean {
-  return revealCurrentWorkspace({ behavior: 'smooth' })
 }
 
 function openExternalUrl(url: string): void {
@@ -271,7 +259,6 @@ const SidebarToolbar = React.memo(function SidebarToolbar() {
   const openSettingsTarget = useAppStore((s) => s.openSettingsTarget)
   const openSkillsPage = useAppStore((s) => s.openSkillsPage)
   const openSpacePage = useAppStore((s) => s.openSpacePage)
-  const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const lastShowOnboardingAtRef = React.useRef(0)
 
@@ -309,26 +296,6 @@ const SidebarToolbar = React.memo(function SidebarToolbar() {
           </TooltipContent>
         </Tooltip>
         <div className="flex items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                type="button"
-                aria-label="Reveal current workspace"
-                className="text-muted-foreground"
-                disabled={!canRevealCurrentWorkspace(activeWorktreeId)}
-                onClick={() => {
-                  revealCurrentWorkspaceFromToolbar(revealCurrentSidebarWorktree)
-                }}
-              >
-                <Crosshair className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top" sideOffset={4}>
-              Reveal current workspace
-            </TooltipContent>
-          </Tooltip>
           <DropdownMenu modal={false}>
             <Tooltip>
               <TooltipTrigger asChild>

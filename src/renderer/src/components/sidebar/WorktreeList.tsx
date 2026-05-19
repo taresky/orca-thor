@@ -6,7 +6,7 @@ import {
   useVirtualizer
 } from '@tanstack/react-virtual'
 import type { Range } from '@tanstack/react-virtual'
-import { ChevronDown, CircleX, Ellipsis, Plus, Trash2, Workflow } from 'lucide-react'
+import { ChevronDown, CircleX, Crosshair, Ellipsis, Plus, Trash2, Workflow } from 'lucide-react'
 import { useAppStore } from '@/store'
 import {
   getAllWorktreesFromState,
@@ -99,6 +99,11 @@ const WORKTREE_SIDEBAR_SCROLL_STYLE: React.CSSProperties = {
 const GROUP_HEADER_ROW_HEIGHT = 28
 const SECONDARY_GROUP_HEADER_TOP_MARGIN = 8
 
+type ScrollVisibilityItem = {
+  start: number
+  end: number
+}
+
 export function shouldAdjustWorktreeSidebarMeasuredRowScroll(args: {
   isScrolling: boolean
   now: number
@@ -135,6 +140,31 @@ export function resolvePendingSidebarReveal(args: {
   return args.targetWorktreeStillExists ? 'keep-pending' : 'clear'
 }
 
+export function shouldShowFloatingCurrentWorkspaceButton(args: {
+  currentWorktreeId: string | null
+  currentRowIndex: number
+  currentItem: ScrollVisibilityItem | null
+  scrollTop: number
+  viewportHeight: number
+  pendingRevealWorktreeId: string | null
+}): boolean {
+  if (!args.currentWorktreeId || args.pendingRevealWorktreeId === args.currentWorktreeId) {
+    return false
+  }
+  if (args.currentRowIndex === -1) {
+    return true
+  }
+  if (args.viewportHeight <= 0) {
+    return false
+  }
+  if (!args.currentItem) {
+    return true
+  }
+
+  const viewportBottom = args.scrollTop + args.viewportHeight
+  return args.currentItem.start < args.scrollTop || args.currentItem.end > viewportBottom
+}
+
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false
@@ -166,6 +196,30 @@ function stopNestedWorktreeCardBubble(event: React.SyntheticEvent<HTMLElement>):
   event.stopPropagation()
 }
 
+function FloatingCurrentWorkspaceButton({ onClick }: { onClick: () => void }): React.JSX.Element {
+  return (
+    <div className="pointer-events-none absolute bottom-1.5 right-2 z-30 flex justify-end">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Scroll to the open workspace"
+            className="pointer-events-auto size-6 rounded-md bg-sidebar/90 text-muted-foreground shadow-xs ring-1 ring-sidebar-border/80 backdrop-blur hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-sidebar-ring"
+            onClick={onClick}
+          >
+            <Crosshair className="size-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={4}>
+          Scroll to the open workspace
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  )
+}
+
 function getWorktreeOptionId(worktreeId: string): string {
   return `worktree-list-option-${encodeURIComponent(worktreeId)}`
 }
@@ -175,6 +229,7 @@ const LINEAGE_INDENT = 18
 type VirtualizedWorktreeViewportProps = {
   rows: Row[]
   activeWorktreeId: string | null
+  currentWorktreeId: string | null
   groupBy: WorktreeGroupBy
   repoGroupOrdering: RepoGroupOrdering
   toggleGroup: (key: string) => void
@@ -209,6 +264,7 @@ type VirtualizedWorktreeViewportProps = {
   onPinWorktree: (worktreeId: string) => void
   onPinWorktrees: (worktreeIds: readonly string[]) => void
   showInlineAgentCards: boolean
+  onRevealCurrentWorkspace: () => void
   // Why: broad grouping changes still remount the viewport, while add/delete
   // stays mounted for row-key anchoring and layout animation. These refs bridge
   // both paths so the virtualizer never falls back to scrollTop 0.
@@ -359,6 +415,7 @@ function getActiveStickyHeaderIndex(
 const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewport({
   rows,
   activeWorktreeId,
+  currentWorktreeId,
   groupBy,
   repoGroupOrdering,
   toggleGroup,
@@ -386,12 +443,18 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   onPinWorktree,
   onPinWorktrees,
   showInlineAgentCards,
+  onRevealCurrentWorkspace,
   scrollOffsetRef,
   scrollAnchorRef
 }: VirtualizedWorktreeViewportProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
+  const scrollViewportFrameRef = useRef<number | null>(null)
   const suppressMeasurementAdjustmentUntilRef = useRef(0)
   const directScrollInputUntilRef = useRef(0)
+  const [scrollViewport, setScrollViewport] = useState({
+    scrollTop: scrollOffsetRef.current,
+    height: 0
+  })
   const [dragOverStatus, setDragOverStatus] = useState<WorkspaceStatus | null>(null)
   const [pinDragOver, setPinDragOver] = useState(false)
   const [lineageReconnectWorktreeId, setLineageReconnectWorktreeId] = useState<string | null>(null)
@@ -418,6 +481,10 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   const activeWorktreeRowIndex = useMemo(
     () => renderRows.findIndex((row) => renderRowContainsWorktree(row, activeWorktreeId)),
     [renderRows, activeWorktreeId]
+  )
+  const currentWorktreeRowIndex = useMemo(
+    () => renderRows.findIndex((row) => renderRowContainsWorktree(row, currentWorktreeId)),
+    [renderRows, currentWorktreeId]
   )
   const activeLineageChildRow = useMemo(() => {
     if (activeWorktreeId === null) {
@@ -520,6 +587,28 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     suppressMeasurementAdjustmentUntilRef.current = suppressUntil
     directScrollInputUntilRef.current = suppressUntil
   }, [])
+  const updateScrollViewport = useCallback(() => {
+    const element = scrollRef.current
+    if (!element) {
+      return
+    }
+    const next = {
+      scrollTop: element.scrollTop,
+      height: element.clientHeight
+    }
+    setScrollViewport((previous) =>
+      previous.scrollTop === next.scrollTop && previous.height === next.height ? previous : next
+    )
+  }, [])
+  const requestScrollViewportUpdate = useCallback(() => {
+    if (scrollViewportFrameRef.current !== null) {
+      return
+    }
+    scrollViewportFrameRef.current = window.requestAnimationFrame(() => {
+      scrollViewportFrameRef.current = null
+      updateScrollViewport()
+    })
+  }, [updateScrollViewport])
   const hasDirectScrollInput = useCallback(
     () => window.performance.now() < directScrollInputUntilRef.current,
     []
@@ -686,6 +775,42 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   )
   const totalSize = virtualizer.getTotalSize()
   const virtualItems = virtualizer.getVirtualItems()
+  const currentWorktreeVirtualItem = useMemo(() => {
+    if (currentWorktreeRowIndex === -1) {
+      return null
+    }
+    const item = virtualItems.find((virtualItem) => virtualItem.index === currentWorktreeRowIndex)
+    return item ? { start: item.start, end: item.end } : null
+  }, [currentWorktreeRowIndex, virtualItems])
+  const showFloatingCurrentWorkspaceButton = shouldShowFloatingCurrentWorkspaceButton({
+    currentWorktreeId,
+    currentRowIndex: currentWorktreeRowIndex,
+    currentItem: currentWorktreeVirtualItem,
+    scrollTop: scrollViewport.scrollTop,
+    viewportHeight: scrollViewport.height,
+    pendingRevealWorktreeId: pendingRevealWorktree?.worktreeId ?? null
+  })
+  useLayoutEffect(() => {
+    updateScrollViewport()
+    const element = scrollRef.current
+    if (!element || typeof ResizeObserver === 'undefined') {
+      return
+    }
+
+    const observer = new ResizeObserver(requestScrollViewportUpdate)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [requestScrollViewportUpdate, updateScrollViewport])
+
+  useEffect(
+    () => () => {
+      if (scrollViewportFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollViewportFrameRef.current)
+        scrollViewportFrameRef.current = null
+      }
+    },
+    []
+  )
 
   const measureMountedRows = useCallback(() => {
     virtualizer.elementsCache.forEach((element) => {
@@ -882,6 +1007,12 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     },
     [markDirectScrollInput]
   )
+  const handleScroll = useCallback(() => {
+    // Why: the floating "Current" affordance depends on scrollport visibility,
+    // not just TanStack's overscanned virtual row window.
+    markScrollMovement()
+    requestScrollViewportUpdate()
+  }, [markScrollMovement, requestScrollViewportUpdate])
 
   const activeDescendantId =
     activeWorktreeId != null &&
@@ -965,500 +1096,533 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   )
 
   return (
-    <div
-      ref={scrollRef}
-      data-worktree-sidebar
-      tabIndex={0}
-      role="listbox"
-      aria-label="Worktrees"
-      aria-orientation="vertical"
-      aria-multiselectable="true"
-      aria-activedescendant={activeDescendantId}
-      onKeyDown={handleContainerKeyDown}
-      // Why: trackpad momentum can continue as sparse scroll events after the
-      // original wheel/touch event stream quiets down. Keep measurement-based
-      // scroll correction suppressed until the viewport itself has stopped.
-      onScroll={markScrollMovement}
-      onPointerDown={handleScrollPointerDown}
-      onTouchMove={markDirectScrollInput}
-      onWheel={markDirectScrollInput}
-      className="worktree-sidebar-scrollbar flex-1 overflow-y-scroll overflow-x-hidden pl-1 scrollbar-sleek outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset pt-px"
-      style={WORKTREE_SIDEBAR_SCROLL_STYLE}
-    >
-      {activeLineageChildConnectionId && activeLineageChildSshStatus ? (
-        <SshDisconnectedDialog
-          open={
-            lineageReconnectWorktreeId === activeLineageChildWorktreeId &&
-            activeLineageChildSshDisconnected
-          }
-          onOpenChange={(open) => {
-            if (!open) {
-              setLineageReconnectWorktreeId(null)
-            }
-          }}
-          targetId={activeLineageChildConnectionId}
-          targetLabel={
-            activeLineageChildTargetLabel ?? activeLineageChildRow?.repo?.displayName ?? ''
-          }
-          status={activeLineageChildSshStatus}
-        />
-      ) : null}
+    <div data-worktree-sidebar-container className="relative min-h-0 flex-1">
       <div
-        role="presentation"
-        className="relative w-full"
-        style={{ height: `${virtualizer.getTotalSize()}px` }}
+        ref={scrollRef}
+        data-worktree-sidebar
+        tabIndex={0}
+        role="listbox"
+        aria-label="Worktrees"
+        aria-orientation="vertical"
+        aria-multiselectable="true"
+        aria-activedescendant={activeDescendantId}
+        onKeyDown={handleContainerKeyDown}
+        // Why: trackpad momentum can continue as sparse scroll events after the
+        // original wheel/touch event stream quiets down. Keep measurement-based
+        // scroll correction suppressed until the viewport itself has stopped.
+        onScroll={handleScroll}
+        onPointerDown={handleScrollPointerDown}
+        onTouchMove={markDirectScrollInput}
+        onWheel={markDirectScrollInput}
+        className="worktree-sidebar-scrollbar h-full overflow-y-scroll overflow-x-hidden pl-1 scrollbar-sleek outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset pt-px"
+        style={WORKTREE_SIDEBAR_SCROLL_STYLE}
       >
-        {canReorderRepoHeaders &&
-        repoDrag.state.draggingRepoId !== null &&
-        repoDrag.state.dropIndicatorY !== null ? (
-          <div
-            role="presentation"
-            className="pointer-events-none absolute left-2 right-2 z-10 border-t border-dashed border-muted-foreground/70"
-            style={{ top: `${repoDrag.state.dropIndicatorY}px` }}
+        {activeLineageChildConnectionId && activeLineageChildSshStatus ? (
+          <SshDisconnectedDialog
+            open={
+              lineageReconnectWorktreeId === activeLineageChildWorktreeId &&
+              activeLineageChildSshDisconnected
+            }
+            onOpenChange={(open) => {
+              if (!open) {
+                setLineageReconnectWorktreeId(null)
+              }
+            }}
+            targetId={activeLineageChildConnectionId}
+            targetLabel={
+              activeLineageChildTargetLabel ?? activeLineageChildRow?.repo?.displayName ?? ''
+            }
+            status={activeLineageChildSshStatus}
           />
         ) : null}
-        {virtualItems.map((vItem) => {
-          const row = renderRows[vItem.index]
-          if (!row) {
-            return null
-          }
-
-          if (row.type === 'header') {
-            const isActiveStickyHeader = activeStickyHeaderIndexRef.current === vItem.index
-            const hasHeaderTopSpacing = shouldUseHeaderTopSpacing({
-              rows: renderRows,
-              index: vItem.index,
-              firstHeaderIndex,
-              isActiveStickyHeader
-            })
-            const isRepoHeader = groupBy === 'repo' && row.repo !== undefined
-            const repoIdForHeader = isRepoHeader ? row.repo!.id : undefined
-            const isDraggingThis =
-              canReorderRepoHeaders &&
-              repoDrag.state.draggingRepoId !== null &&
-              repoDrag.state.draggingRepoId === repoIdForHeader
-            const headerWorkspaceStatus =
-              groupBy === 'workspace-status'
-                ? getWorkspaceStatusFromGroupKey(row.key, workspaceStatuses)
-                : null
-            const isPinnedHeader = row.key === PINNED_GROUP_KEY
-            const createState = row.repo
-              ? getRepoHeaderCreateState({
-                  repo: row.repo,
-                  label: row.label,
-                  sshStatus: row.repo.connectionId
-                    ? (sshConnectionStates.get(row.repo.connectionId)?.status ?? null)
-                    : null
-                })
-              : null
-            return (
-              <div
-                key={vItem.key}
-                role="presentation"
-                data-worktree-virtual-row
-                data-worktree-virtual-row-key={String(vItem.key)}
-                data-worktree-sticky-header=""
-                data-worktree-sticky-header-active={isActiveStickyHeader ? '' : undefined}
-                data-index={vItem.index}
-                ref={measureVirtualRowElement}
-                className={cn(
-                  'left-0 right-0',
-                  isActiveStickyHeader ? 'sticky -top-px z-20 bg-sidebar' : 'absolute top-0'
-                )}
-                style={
-                  isActiveStickyHeader
-                    ? undefined
-                    : { transform: getVirtualRowTransform(vItem.start) }
-                }
-              >
-                <div
-                  role="button"
-                  tabIndex={0}
-                  data-repo-header-id={repoIdForHeader}
-                  data-workspace-status-drop-target={headerWorkspaceStatus ? '' : undefined}
-                  data-workspace-status={headerWorkspaceStatus ?? undefined}
-                  data-workspace-pin-drop-target={isPinnedHeader ? '' : undefined}
-                  className={cn(
-                    'group flex h-7 w-full items-center gap-1.5 pl-3 pr-1 text-left transition-all',
-                    'cursor-pointer',
-                    isDraggingThis &&
-                      'bg-accent/80 ring-1 ring-ring/40 shadow-md rounded-md scale-[1.01]',
-                    headerWorkspaceStatus &&
-                      dragOverStatus === headerWorkspaceStatus &&
-                      'rounded-md bg-sidebar-accent ring-1 ring-sidebar-ring/40',
-                    isPinnedHeader &&
-                      pinDragOver &&
-                      'rounded-md bg-sidebar-accent ring-1 ring-sidebar-ring/40',
-                    // First header sits directly under SidebarHeader, which already
-                    // supplies its own spacing — only offset secondary group headers.
-                    // Why: the active sticky header must paint flush to the
-                    // scrollport top; a collapsed top margin leaks rows behind it.
-                    hasHeaderTopSpacing && 'mt-2',
-                    row.repo && 'overflow-hidden'
-                  )}
-                  onDragOver={
-                    isPinnedHeader
-                      ? handleWorkspacePinDragOver
-                      : headerWorkspaceStatus
-                        ? (event) => handleWorkspaceStatusDragOver(event, headerWorkspaceStatus)
-                        : undefined
-                  }
-                  onDragLeave={
-                    isPinnedHeader
-                      ? handleWorkspacePinDragLeave
-                      : headerWorkspaceStatus
-                        ? handleWorkspaceStatusDragLeave
-                        : undefined
-                  }
-                  onDrop={
-                    headerWorkspaceStatus
-                      ? (event) => handleWorkspaceStatusDrop(event, headerWorkspaceStatus)
-                      : undefined
-                  }
-                  onClick={() => toggleGroupWithScrollAnchor(row.key)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      toggleGroupWithScrollAnchor(row.key)
-                    }
-                  }}
-                >
-                  {row.icon ? (
-                    <div
-                      onPointerDown={
-                        canReorderRepoHeaders && isRepoHeader && repoIdForHeader
-                          ? (e) => repoDrag.onHandlePointerDown(e, repoIdForHeader)
-                          : undefined
-                      }
-                      className={cn(
-                        'flex size-4 shrink-0 items-center justify-center rounded-[4px]',
-                        row.repo ? 'text-muted-foreground' : row.tone
-                      )}
-                    >
-                      <row.icon className={row.repo ? 'size-3.5' : 'size-3'} />
-                    </div>
-                  ) : null}
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <div className="truncate text-[13px] font-semibold leading-none">
-                        {row.label}
-                      </div>
-                      <div className="rounded-full bg-black/12 px-1.5 py-0.5 text-[9px] font-medium leading-none text-muted-foreground/90">
-                        {row.count}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex size-4 shrink-0 cursor-pointer items-center justify-center text-muted-foreground/60 opacity-0 transition-opacity group-hover:opacity-100">
-                    <ChevronDown
-                      className={cn(
-                        'size-3.5 cursor-pointer transition-transform [&_path]:cursor-pointer',
-                        collapsedGroups.has(row.key) && '-rotate-90'
-                      )}
-                    />
-                  </div>
-
-                  {row.repo && groupBy === 'repo' ? (
-                    <DropdownMenu modal={false}>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-xs"
-                              className="size-5 shrink-0 rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent/70 hover:text-foreground focus:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
-                              aria-label={`Project actions for ${row.label}`}
-                              onClick={(event) => event.stopPropagation()}
-                              onKeyDown={stopRepoHeaderKeyboardToggle}
-                              onPointerDown={(event) => event.stopPropagation()}
-                            >
-                              <Ellipsis className="size-3.5" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom" sideOffset={6}>
-                          Project actions
-                        </TooltipContent>
-                      </Tooltip>
-                      <DropdownMenuContent
-                        align="end"
-                        side="bottom"
-                        sideOffset={6}
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onSelect={() => {
-                            if (row.repo) {
-                              handleRemoveRepo(row.repo)
-                            }
-                          }}
-                        >
-                          <Trash2 className="size-3.5" />
-                          Remove Project
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  ) : null}
-
-                  {row.repo && groupBy === 'repo' ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        {createState?.disabled ? (
-                          <span
-                            className="inline-flex cursor-not-allowed"
-                            tabIndex={0}
-                            aria-label={createState.ariaLabel}
-                            onKeyDown={stopRepoHeaderKeyboardToggle}
-                            onClick={(event) => event.stopPropagation()}
-                            onPointerDown={(event) => event.stopPropagation()}
-                          >
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-xs"
-                              className="pointer-events-none size-5 shrink-0 rounded-md text-muted-foreground transition-opacity opacity-60"
-                              aria-label={createState.ariaLabel}
-                              disabled
-                            >
-                              <Plus className="size-3" />
-                            </Button>
-                          </span>
-                        ) : (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-xs"
-                            className="size-5 shrink-0 rounded-md text-muted-foreground hover:bg-accent/70 hover:text-foreground transition-opacity"
-                            aria-label={
-                              createState?.ariaLabel ?? `Create worktree for ${row.label}`
-                            }
-                            onKeyDown={stopRepoHeaderKeyboardToggle}
-                            onClick={(event) => {
-                              event.preventDefault()
-                              event.stopPropagation()
-                              if (row.repo) {
-                                handleCreateForRepo(row.repo.id)
-                              }
-                            }}
-                          >
-                            <Plus className="size-3" />
-                          </Button>
-                        )}
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom" sideOffset={6}>
-                        {createState?.tooltip ?? `Create worktree for ${row.label}`}
-                      </TooltipContent>
-                    </Tooltip>
-                  ) : null}
-                </div>
-              </div>
-            )
-          }
-
-          const renderWorktreeRow = (
-            itemRow: WorktreeItemRow,
-            nested: boolean,
-            lineageChildren?: React.ReactNode,
-            forceActiveSurface = false
-          ) => {
-            const lineageToggleGroupKey = itemRow.lineageGroupKey
-            // Why: child cards render inside the parent card body, so their
-            // first nested level starts flush with that inset.
-            const paddingDepth = nested ? Math.max(0, itemRow.depth - 1) : itemRow.depth
-            return (
-              <div
-                key={itemRow.worktree.id}
-                id={getWorktreeOptionId(itemRow.worktree.id)}
-                role="option"
-                aria-selected={selectedWorktreeIds.has(itemRow.worktree.id)}
-                aria-current={activeWorktreeId === itemRow.worktree.id ? 'page' : undefined}
-                className="relative"
-                // Why: nested child cards live inside the parent's clickable
-                // card body; bubbling would activate/edit the parent too.
-                onClick={nested ? stopNestedWorktreeCardBubble : undefined}
-                onDoubleClick={nested ? stopNestedWorktreeCardBubble : undefined}
-                onDragStart={nested ? stopNestedWorktreeCardBubble : undefined}
-                style={{
-                  paddingLeft: paddingDepth > 0 ? `${paddingDepth * LINEAGE_INDENT}px` : undefined
-                }}
-              >
-                <WorktreeCard
-                  worktree={itemRow.worktree}
-                  repo={itemRow.repo}
-                  isActive={activeWorktreeId === itemRow.worktree.id}
-                  // Why: a child-active parent should look active without
-                  // running active-card side effects such as SSH reconnect UI.
-                  isActiveSurface={forceActiveSurface || activeWorktreeId === itemRow.worktree.id}
-                  isMultiSelected={selectedWorktreeIds.has(itemRow.worktree.id)}
-                  selectedWorktrees={selectedWorktrees}
-                  onSelectionGesture={onSelectionGesture}
-                  onContextMenuSelect={(event) => onContextMenuSelect(event, itemRow.worktree)}
-                  hideRepoBadge={groupBy === 'repo'}
-                  parentLabel={
-                    itemRow.depth > 0 && itemRow.lineageState === 'valid'
-                      ? undefined
-                      : itemRow.parentLabel
-                  }
-                  lineageState={itemRow.lineageState}
-                  lineageChildCount={itemRow.lineageChildCount}
-                  lineageCollapsed={itemRow.lineageCollapsed}
-                  lineageChildren={lineageChildren}
-                  onLineageToggle={
-                    lineageToggleGroupKey
-                      ? (event) => {
-                          event.preventDefault()
-                          event.stopPropagation()
-                          toggleGroupWithScrollAnchor(lineageToggleGroupKey)
-                        }
-                      : undefined
-                  }
-                />
-              </div>
-            )
-          }
-
-          const renderLineageChildCard = (child: WorktreeItemRow) => {
-            const isActive = activeWorktreeId === child.worktree.id
-            const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
-              event.preventDefault()
-              event.stopPropagation()
-              const selectionOnly = onSelectionGesture(event, child.worktree.id)
-              if (selectionOnly) {
-                return
-              }
-              activateAndRevealWorktree(child.worktree.id)
-              if (child.repo?.connectionId) {
-                const sshStatus =
-                  useAppStore.getState().sshConnectionStates.get(child.repo.connectionId)?.status ??
-                  'disconnected'
-                if (sshStatus !== 'connected') {
-                  setLineageReconnectWorktreeId(child.worktree.id)
-                }
-              }
+        <div
+          role="presentation"
+          className="relative w-full"
+          style={{ height: `${virtualizer.getTotalSize()}px` }}
+        >
+          {canReorderRepoHeaders &&
+          repoDrag.state.draggingRepoId !== null &&
+          repoDrag.state.dropIndicatorY !== null ? (
+            <div
+              role="presentation"
+              className="pointer-events-none absolute left-2 right-2 z-10 border-t border-dashed border-muted-foreground/70"
+              style={{ top: `${repoDrag.state.dropIndicatorY}px` }}
+            />
+          ) : null}
+          {virtualItems.map((vItem) => {
+            const row = renderRows[vItem.index]
+            if (!row) {
+              return null
             }
-            const lineageToggleGroupKey = child.lineageGroupKey
-            return (
-              <div
-                key={child.worktree.id}
-                style={{ paddingLeft: `${Math.max(0, child.depth - 1) * LINEAGE_INDENT}px` }}
-              >
-                <WorktreeContextMenu
-                  worktree={child.worktree}
-                  selectedWorktrees={selectedWorktrees}
-                  onContextMenuSelect={(event) => onContextMenuSelect(event, child.worktree)}
+
+            if (row.type === 'header') {
+              const isActiveStickyHeader = activeStickyHeaderIndexRef.current === vItem.index
+              const hasHeaderTopSpacing = shouldUseHeaderTopSpacing({
+                rows: renderRows,
+                index: vItem.index,
+                firstHeaderIndex,
+                isActiveStickyHeader
+              })
+              const isRepoHeader = groupBy === 'repo' && row.repo !== undefined
+              const repoIdForHeader = isRepoHeader ? row.repo!.id : undefined
+              const isDraggingThis =
+                canReorderRepoHeaders &&
+                repoDrag.state.draggingRepoId !== null &&
+                repoDrag.state.draggingRepoId === repoIdForHeader
+              const headerWorkspaceStatus =
+                groupBy === 'workspace-status'
+                  ? getWorkspaceStatusFromGroupKey(row.key, workspaceStatuses)
+                  : null
+              const isPinnedHeader = row.key === PINNED_GROUP_KEY
+              const createState = row.repo
+                ? getRepoHeaderCreateState({
+                    repo: row.repo,
+                    label: row.label,
+                    sshStatus: row.repo.connectionId
+                      ? (sshConnectionStates.get(row.repo.connectionId)?.status ?? null)
+                      : null
+                  })
+                : null
+              return (
+                <div
+                  key={vItem.key}
+                  role="presentation"
+                  data-worktree-virtual-row
+                  data-worktree-virtual-row-key={String(vItem.key)}
+                  data-worktree-sticky-header=""
+                  data-worktree-sticky-header-active={isActiveStickyHeader ? '' : undefined}
+                  data-index={vItem.index}
+                  ref={measureVirtualRowElement}
+                  className={cn(
+                    'left-0 right-0',
+                    isActiveStickyHeader ? 'sticky -top-px z-20 bg-sidebar' : 'absolute top-0'
+                  )}
+                  style={
+                    isActiveStickyHeader
+                      ? undefined
+                      : { transform: getVirtualRowTransform(vItem.start) }
+                  }
                 >
                   <div
-                    id={getWorktreeOptionId(child.worktree.id)}
-                    role="option"
-                    aria-selected={selectedWorktreeIds.has(child.worktree.id)}
-                    aria-current={isActive ? 'page' : undefined}
+                    role="button"
+                    tabIndex={0}
+                    data-repo-header-id={repoIdForHeader}
+                    data-workspace-status-drop-target={headerWorkspaceStatus ? '' : undefined}
+                    data-workspace-status={headerWorkspaceStatus ?? undefined}
+                    data-workspace-pin-drop-target={isPinnedHeader ? '' : undefined}
                     className={cn(
-                      'flex cursor-pointer items-start gap-1.5 rounded-md border border-transparent px-2 py-1.5 transition-colors',
-                      isActive
-                        ? 'border-black/[0.015] bg-black/[0.08] shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:border-border/40 dark:bg-white/[0.10] dark:shadow-[0_1px_2px_rgba(0,0,0,0.03)]'
-                        : 'hover:bg-sidebar-accent/40'
+                      'group flex h-7 w-full items-center gap-1.5 pl-3 pr-1 text-left transition-all',
+                      'cursor-pointer',
+                      isDraggingThis &&
+                        'bg-accent/80 ring-1 ring-ring/40 shadow-md rounded-md scale-[1.01]',
+                      headerWorkspaceStatus &&
+                        dragOverStatus === headerWorkspaceStatus &&
+                        'rounded-md bg-sidebar-accent ring-1 ring-sidebar-ring/40',
+                      isPinnedHeader &&
+                        pinDragOver &&
+                        'rounded-md bg-sidebar-accent ring-1 ring-sidebar-ring/40',
+                      // First header sits directly under SidebarHeader, which already
+                      // supplies its own spacing — only offset secondary group headers.
+                      // Why: the active sticky header must paint flush to the
+                      // scrollport top; a collapsed top margin leaks rows behind it.
+                      hasHeaderTopSpacing && 'mt-2',
+                      row.repo && 'overflow-hidden'
                     )}
-                    onClick={handleClick}
-                    onDoubleClick={(event) => event.stopPropagation()}
+                    onDragOver={
+                      isPinnedHeader
+                        ? handleWorkspacePinDragOver
+                        : headerWorkspaceStatus
+                          ? (event) => handleWorkspaceStatusDragOver(event, headerWorkspaceStatus)
+                          : undefined
+                    }
+                    onDragLeave={
+                      isPinnedHeader
+                        ? handleWorkspacePinDragLeave
+                        : headerWorkspaceStatus
+                          ? handleWorkspaceStatusDragLeave
+                          : undefined
+                    }
+                    onDrop={
+                      headerWorkspaceStatus
+                        ? (event) => handleWorkspaceStatusDrop(event, headerWorkspaceStatus)
+                        : undefined
+                    }
+                    onClick={() => toggleGroupWithScrollAnchor(row.key)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        toggleGroupWithScrollAnchor(row.key)
+                      }
+                    }}
                   >
-                    <span className="mt-[2px] flex w-4 shrink-0 justify-center pt-[2px]">
-                      <WorktreeActivityStatusIndicator worktreeId={child.worktree.id} />
-                    </span>
+                    {row.icon ? (
+                      <div
+                        onPointerDown={
+                          canReorderRepoHeaders && isRepoHeader && repoIdForHeader
+                            ? (e) => repoDrag.onHandlePointerDown(e, repoIdForHeader)
+                            : undefined
+                        }
+                        className={cn(
+                          'flex size-4 shrink-0 items-center justify-center rounded-[4px]',
+                          row.repo ? 'text-muted-foreground' : row.tone
+                        )}
+                      >
+                        <row.icon className={row.repo ? 'size-3.5' : 'size-3'} />
+                      </div>
+                    ) : null}
+
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[12px] leading-tight text-foreground">
-                        {child.worktree.displayName}
-                      </div>
-                      <div className="mt-1 flex min-w-0 items-center gap-1.5">
-                        {child.repo && groupBy !== 'repo' ? (
-                          <span className="flex h-[16px] shrink-0 items-center gap-1.5 rounded-[4px] border border-border bg-accent px-1.5 text-[10px] font-semibold leading-none text-foreground dark:bg-accent/50 dark:border-border/60">
-                            <span
-                              className="size-1.5 rounded-full"
-                              style={{ backgroundColor: child.repo.badgeColor }}
-                            />
-                            <span className="max-w-[6rem] truncate lowercase">
-                              {child.repo.displayName}
-                            </span>
-                          </span>
-                        ) : null}
-                        <span className="truncate text-[10.5px] leading-none text-muted-foreground">
-                          {branchDisplayName(child.worktree.branch)}
-                        </span>
-                      </div>
-                      {child.worktree.linkedIssue || child.worktree.comment ? (
-                        <div className="mt-1.5 truncate text-[10.5px] leading-tight text-muted-foreground">
-                          {child.worktree.linkedIssue ? (
-                            <span className="font-medium text-foreground/80">
-                              #{child.worktree.linkedIssue}
-                            </span>
-                          ) : null}
-                          {child.worktree.linkedIssue && child.worktree.comment ? '  ' : null}
-                          {child.worktree.comment}
+                      <div className="flex items-center gap-1.5">
+                        <div className="truncate text-[13px] font-semibold leading-none">
+                          {row.label}
                         </div>
-                      ) : null}
-                      {child.lineageChildCount > 0 && lineageToggleGroupKey ? (
-                        <div className="mt-1.5 flex min-w-0 justify-start">
-                          <Tooltip>
-                            <TooltipTrigger asChild>
+                        <div className="rounded-full bg-black/12 px-1.5 py-0.5 text-[9px] font-medium leading-none text-muted-foreground/90">
+                          {row.count}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex size-4 shrink-0 cursor-pointer items-center justify-center text-muted-foreground/60 opacity-0 transition-opacity group-hover:opacity-100">
+                      <ChevronDown
+                        className={cn(
+                          'size-3.5 cursor-pointer transition-transform [&_path]:cursor-pointer',
+                          collapsedGroups.has(row.key) && '-rotate-90'
+                        )}
+                      />
+                    </div>
+
+                    {row.repo && groupBy === 'repo' ? (
+                      <DropdownMenu modal={false}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <DropdownMenuTrigger asChild>
                               <Button
                                 type="button"
                                 variant="ghost"
-                                size="xs"
-                                className="h-[18px] max-w-[8rem] gap-1 rounded-md border border-sidebar-border bg-sidebar px-1.5 text-[10px] font-medium leading-none text-muted-foreground shadow-none hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-sidebar-ring"
-                                aria-label={`${child.lineageCollapsed ? 'Show' : 'Hide'} ${
-                                  child.lineageChildCount
-                                } child ${
-                                  child.lineageChildCount === 1 ? 'workspace' : 'workspaces'
-                                }`}
-                                aria-expanded={!child.lineageCollapsed}
-                                onClick={(event) => {
-                                  event.preventDefault()
-                                  event.stopPropagation()
-                                  toggleGroupWithScrollAnchor(lineageToggleGroupKey)
-                                }}
+                                size="icon-xs"
+                                className="size-5 shrink-0 rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent/70 hover:text-foreground focus:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
+                                aria-label={`Project actions for ${row.label}`}
+                                onClick={(event) => event.stopPropagation()}
+                                onKeyDown={stopRepoHeaderKeyboardToggle}
+                                onPointerDown={(event) => event.stopPropagation()}
                               >
-                                <Workflow className="size-2.5" />
-                                <span className="truncate">
-                                  {child.lineageChildCount}{' '}
-                                  {child.lineageChildCount === 1 ? 'child' : 'children'}
-                                </span>
-                                <ChevronDown
-                                  className={cn(
-                                    'size-2.5 transition-transform',
-                                    child.lineageCollapsed && '-rotate-90'
-                                  )}
-                                />
+                                <Ellipsis className="size-3.5" />
                               </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="right" sideOffset={8}>
-                              {child.lineageCollapsed
-                                ? 'Show child workspaces'
-                                : 'Hide child workspaces'}
-                            </TooltipContent>
-                          </Tooltip>
-                        </div>
-                      ) : null}
-                      {showInlineAgentCards ? (
-                        // Why: nested lineage children use this lightweight
-                        // renderer instead of WorktreeCard, so their inline
-                        // agent rows must be mounted here explicitly.
-                        <WorktreeCardAgents
-                          worktreeId={child.worktree.id}
-                          className="mt-1 divide-y-0"
-                        />
-                      ) : null}
-                    </div>
-                  </div>
-                </WorktreeContextMenu>
-              </div>
-            )
-          }
+                            </DropdownMenuTrigger>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" sideOffset={6}>
+                            Project actions
+                          </TooltipContent>
+                        </Tooltip>
+                        <DropdownMenuContent
+                          align="end"
+                          side="bottom"
+                          sideOffset={6}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onSelect={() => {
+                              if (row.repo) {
+                                handleRemoveRepo(row.repo)
+                              }
+                            }}
+                          >
+                            <Trash2 className="size-3.5" />
+                            Remove Project
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    ) : null}
 
-          if (row.type === 'lineage-group') {
-            const [parent, ...children] = row.rows
-            const childIsActive = children.some((child) => child.worktree.id === activeWorktreeId)
+                    {row.repo && groupBy === 'repo' ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          {createState?.disabled ? (
+                            <span
+                              className="inline-flex cursor-not-allowed"
+                              tabIndex={0}
+                              aria-label={createState.ariaLabel}
+                              onKeyDown={stopRepoHeaderKeyboardToggle}
+                              onClick={(event) => event.stopPropagation()}
+                              onPointerDown={(event) => event.stopPropagation()}
+                            >
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-xs"
+                                className="pointer-events-none size-5 shrink-0 rounded-md text-muted-foreground transition-opacity opacity-60"
+                                aria-label={createState.ariaLabel}
+                                disabled
+                              >
+                                <Plus className="size-3" />
+                              </Button>
+                            </span>
+                          ) : (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-xs"
+                              className="size-5 shrink-0 rounded-md text-muted-foreground hover:bg-accent/70 hover:text-foreground transition-opacity"
+                              aria-label={
+                                createState?.ariaLabel ?? `Create worktree for ${row.label}`
+                              }
+                              onKeyDown={stopRepoHeaderKeyboardToggle}
+                              onClick={(event) => {
+                                event.preventDefault()
+                                event.stopPropagation()
+                                if (row.repo) {
+                                  handleCreateForRepo(row.repo.id)
+                                }
+                              }}
+                            >
+                              <Plus className="size-3" />
+                            </Button>
+                          )}
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" sideOffset={6}>
+                          {createState?.tooltip ?? `Create worktree for ${row.label}`}
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : null}
+                  </div>
+                </div>
+              )
+            }
+
+            const renderWorktreeRow = (
+              itemRow: WorktreeItemRow,
+              nested: boolean,
+              lineageChildren?: React.ReactNode,
+              forceActiveSurface = false
+            ) => {
+              const lineageToggleGroupKey = itemRow.lineageGroupKey
+              // Why: child cards render inside the parent card body, so their
+              // first nested level starts flush with that inset.
+              const paddingDepth = nested ? Math.max(0, itemRow.depth - 1) : itemRow.depth
+              return (
+                <div
+                  key={itemRow.worktree.id}
+                  id={getWorktreeOptionId(itemRow.worktree.id)}
+                  role="option"
+                  aria-selected={selectedWorktreeIds.has(itemRow.worktree.id)}
+                  aria-current={activeWorktreeId === itemRow.worktree.id ? 'page' : undefined}
+                  className="relative"
+                  // Why: nested child cards live inside the parent's clickable
+                  // card body; bubbling would activate/edit the parent too.
+                  onClick={nested ? stopNestedWorktreeCardBubble : undefined}
+                  onDoubleClick={nested ? stopNestedWorktreeCardBubble : undefined}
+                  onDragStart={nested ? stopNestedWorktreeCardBubble : undefined}
+                  style={{
+                    paddingLeft: paddingDepth > 0 ? `${paddingDepth * LINEAGE_INDENT}px` : undefined
+                  }}
+                >
+                  <WorktreeCard
+                    worktree={itemRow.worktree}
+                    repo={itemRow.repo}
+                    isActive={activeWorktreeId === itemRow.worktree.id}
+                    // Why: a child-active parent should look active without
+                    // running active-card side effects such as SSH reconnect UI.
+                    isActiveSurface={forceActiveSurface || activeWorktreeId === itemRow.worktree.id}
+                    isMultiSelected={selectedWorktreeIds.has(itemRow.worktree.id)}
+                    selectedWorktrees={selectedWorktrees}
+                    onSelectionGesture={onSelectionGesture}
+                    onContextMenuSelect={(event) => onContextMenuSelect(event, itemRow.worktree)}
+                    hideRepoBadge={groupBy === 'repo'}
+                    parentLabel={
+                      itemRow.depth > 0 && itemRow.lineageState === 'valid'
+                        ? undefined
+                        : itemRow.parentLabel
+                    }
+                    lineageState={itemRow.lineageState}
+                    lineageChildCount={itemRow.lineageChildCount}
+                    lineageCollapsed={itemRow.lineageCollapsed}
+                    lineageChildren={lineageChildren}
+                    onLineageToggle={
+                      lineageToggleGroupKey
+                        ? (event) => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            toggleGroupWithScrollAnchor(lineageToggleGroupKey)
+                          }
+                        : undefined
+                    }
+                  />
+                </div>
+              )
+            }
+
+            const renderLineageChildCard = (child: WorktreeItemRow) => {
+              const isActive = activeWorktreeId === child.worktree.id
+              const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
+                event.preventDefault()
+                event.stopPropagation()
+                const selectionOnly = onSelectionGesture(event, child.worktree.id)
+                if (selectionOnly) {
+                  return
+                }
+                activateAndRevealWorktree(child.worktree.id)
+                if (child.repo?.connectionId) {
+                  const sshStatus =
+                    useAppStore.getState().sshConnectionStates.get(child.repo.connectionId)
+                      ?.status ?? 'disconnected'
+                  if (sshStatus !== 'connected') {
+                    setLineageReconnectWorktreeId(child.worktree.id)
+                  }
+                }
+              }
+              const lineageToggleGroupKey = child.lineageGroupKey
+              return (
+                <div
+                  key={child.worktree.id}
+                  style={{ paddingLeft: `${Math.max(0, child.depth - 1) * LINEAGE_INDENT}px` }}
+                >
+                  <WorktreeContextMenu
+                    worktree={child.worktree}
+                    selectedWorktrees={selectedWorktrees}
+                    onContextMenuSelect={(event) => onContextMenuSelect(event, child.worktree)}
+                  >
+                    <div
+                      id={getWorktreeOptionId(child.worktree.id)}
+                      role="option"
+                      aria-selected={selectedWorktreeIds.has(child.worktree.id)}
+                      aria-current={isActive ? 'page' : undefined}
+                      className={cn(
+                        'flex cursor-pointer items-start gap-1.5 rounded-md border border-transparent px-2 py-1.5 transition-colors',
+                        isActive
+                          ? 'border-black/[0.015] bg-black/[0.08] shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:border-border/40 dark:bg-white/[0.10] dark:shadow-[0_1px_2px_rgba(0,0,0,0.03)]'
+                          : 'hover:bg-sidebar-accent/40'
+                      )}
+                      onClick={handleClick}
+                      onDoubleClick={(event) => event.stopPropagation()}
+                    >
+                      <span className="mt-[2px] flex w-4 shrink-0 justify-center pt-[2px]">
+                        <WorktreeActivityStatusIndicator worktreeId={child.worktree.id} />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[12px] leading-tight text-foreground">
+                          {child.worktree.displayName}
+                        </div>
+                        <div className="mt-1 flex min-w-0 items-center gap-1.5">
+                          {child.repo && groupBy !== 'repo' ? (
+                            <span className="flex h-[16px] shrink-0 items-center gap-1.5 rounded-[4px] border border-border bg-accent px-1.5 text-[10px] font-semibold leading-none text-foreground dark:bg-accent/50 dark:border-border/60">
+                              <span
+                                className="size-1.5 rounded-full"
+                                style={{ backgroundColor: child.repo.badgeColor }}
+                              />
+                              <span className="max-w-[6rem] truncate lowercase">
+                                {child.repo.displayName}
+                              </span>
+                            </span>
+                          ) : null}
+                          <span className="truncate text-[10.5px] leading-none text-muted-foreground">
+                            {branchDisplayName(child.worktree.branch)}
+                          </span>
+                        </div>
+                        {child.worktree.linkedIssue || child.worktree.comment ? (
+                          <div className="mt-1.5 truncate text-[10.5px] leading-tight text-muted-foreground">
+                            {child.worktree.linkedIssue ? (
+                              <span className="font-medium text-foreground/80">
+                                #{child.worktree.linkedIssue}
+                              </span>
+                            ) : null}
+                            {child.worktree.linkedIssue && child.worktree.comment ? '  ' : null}
+                            {child.worktree.comment}
+                          </div>
+                        ) : null}
+                        {child.lineageChildCount > 0 && lineageToggleGroupKey ? (
+                          <div className="mt-1.5 flex min-w-0 justify-start">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="xs"
+                                  className="h-[18px] max-w-[8rem] gap-1 rounded-md border border-sidebar-border bg-sidebar px-1.5 text-[10px] font-medium leading-none text-muted-foreground shadow-none hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-sidebar-ring"
+                                  aria-label={`${child.lineageCollapsed ? 'Show' : 'Hide'} ${
+                                    child.lineageChildCount
+                                  } child ${
+                                    child.lineageChildCount === 1 ? 'workspace' : 'workspaces'
+                                  }`}
+                                  aria-expanded={!child.lineageCollapsed}
+                                  onClick={(event) => {
+                                    event.preventDefault()
+                                    event.stopPropagation()
+                                    toggleGroupWithScrollAnchor(lineageToggleGroupKey)
+                                  }}
+                                >
+                                  <Workflow className="size-2.5" />
+                                  <span className="truncate">
+                                    {child.lineageChildCount}{' '}
+                                    {child.lineageChildCount === 1 ? 'child' : 'children'}
+                                  </span>
+                                  <ChevronDown
+                                    className={cn(
+                                      'size-2.5 transition-transform',
+                                      child.lineageCollapsed && '-rotate-90'
+                                    )}
+                                  />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="right" sideOffset={8}>
+                                {child.lineageCollapsed
+                                  ? 'Show child workspaces'
+                                  : 'Hide child workspaces'}
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        ) : null}
+                        {showInlineAgentCards ? (
+                          // Why: nested lineage children use this lightweight
+                          // renderer instead of WorktreeCard, so their inline
+                          // agent rows must be mounted here explicitly.
+                          <WorktreeCardAgents
+                            worktreeId={child.worktree.id}
+                            className="mt-1 divide-y-0"
+                          />
+                        ) : null}
+                      </div>
+                    </div>
+                  </WorktreeContextMenu>
+                </div>
+              )
+            }
+
+            if (row.type === 'lineage-group') {
+              const [parent, ...children] = row.rows
+              const childIsActive = children.some((child) => child.worktree.id === activeWorktreeId)
+              return (
+                <div
+                  key={vItem.key}
+                  role="presentation"
+                  data-worktree-virtual-row
+                  data-worktree-virtual-row-key={String(vItem.key)}
+                  data-index={vItem.index}
+                  ref={measureVirtualRowElement}
+                  className="absolute left-0 right-0 top-0"
+                  style={{ transform: getVirtualRowTransform(vItem.start) }}
+                >
+                  <div className="overflow-visible">
+                    {parent
+                      ? renderWorktreeRow(
+                          parent,
+                          false,
+                          children.length > 0
+                            ? children.map((child) => renderLineageChildCard(child))
+                            : undefined,
+                          childIsActive
+                        )
+                      : null}
+                  </div>
+                </div>
+              )
+            }
+
+            const itemWorkspaceStatus =
+              groupBy === 'workspace-status'
+                ? getWorkspaceStatus(row.worktree, workspaceStatuses)
+                : null
+
             return (
               <div
                 key={vItem.key}
@@ -1467,59 +1631,31 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                 data-worktree-virtual-row-key={String(vItem.key)}
                 data-index={vItem.index}
                 ref={measureVirtualRowElement}
+                data-workspace-status-drop-target={itemWorkspaceStatus ? '' : undefined}
+                data-workspace-status={itemWorkspaceStatus ?? undefined}
                 className="absolute left-0 right-0 top-0"
                 style={{ transform: getVirtualRowTransform(vItem.start) }}
+                onDragOver={
+                  itemWorkspaceStatus
+                    ? (event) => handleWorkspaceStatusDragOver(event, itemWorkspaceStatus)
+                    : undefined
+                }
+                onDragLeave={itemWorkspaceStatus ? handleWorkspaceStatusDragLeave : undefined}
+                onDrop={
+                  itemWorkspaceStatus
+                    ? (event) => handleWorkspaceStatusDrop(event, itemWorkspaceStatus)
+                    : undefined
+                }
               >
-                <div className="overflow-visible">
-                  {parent
-                    ? renderWorktreeRow(
-                        parent,
-                        false,
-                        children.length > 0
-                          ? children.map((child) => renderLineageChildCard(child))
-                          : undefined,
-                        childIsActive
-                      )
-                    : null}
-                </div>
+                {renderWorktreeRow(row, false)}
               </div>
             )
-          }
-
-          const itemWorkspaceStatus =
-            groupBy === 'workspace-status'
-              ? getWorkspaceStatus(row.worktree, workspaceStatuses)
-              : null
-
-          return (
-            <div
-              key={vItem.key}
-              role="presentation"
-              data-worktree-virtual-row
-              data-worktree-virtual-row-key={String(vItem.key)}
-              data-index={vItem.index}
-              ref={measureVirtualRowElement}
-              data-workspace-status-drop-target={itemWorkspaceStatus ? '' : undefined}
-              data-workspace-status={itemWorkspaceStatus ?? undefined}
-              className="absolute left-0 right-0 top-0"
-              style={{ transform: getVirtualRowTransform(vItem.start) }}
-              onDragOver={
-                itemWorkspaceStatus
-                  ? (event) => handleWorkspaceStatusDragOver(event, itemWorkspaceStatus)
-                  : undefined
-              }
-              onDragLeave={itemWorkspaceStatus ? handleWorkspaceStatusDragLeave : undefined}
-              onDrop={
-                itemWorkspaceStatus
-                  ? (event) => handleWorkspaceStatusDrop(event, itemWorkspaceStatus)
-                  : undefined
-              }
-            >
-              {renderWorktreeRow(row, false)}
-            </div>
-          )
-        })}
+          })}
+        </div>
       </div>
+      {showFloatingCurrentWorkspaceButton ? (
+        <FloatingCurrentWorkspaceButton onClick={onRevealCurrentWorkspace} />
+      ) : null}
     </div>
   )
 })
@@ -1940,8 +2076,8 @@ const WorktreeList = React.memo(function WorktreeList({
 
     const clearSelectionOutsideSidebar = (event: PointerEvent): void => {
       const target = event.target
-      const sidebar = document.querySelector('[data-worktree-sidebar]')
-      if (target instanceof Node && sidebar?.contains(target)) {
+      const sidebarContainer = document.querySelector('[data-worktree-sidebar-container]')
+      if (target instanceof Node && sidebarContainer?.contains(target)) {
         return
       }
       setSelectedWorktreeIds(new Set())
@@ -2128,21 +2264,35 @@ const WorktreeList = React.memo(function WorktreeList({
     }
   }, [setShowActiveOnly, setFilterRepoIds, setHideDefaultBranchWorkspace, filterState])
 
+  const activeWorktreeIsFilteredOut =
+    activeWorktreeId !== null && !worktrees.some((worktree) => worktree.id === activeWorktreeId)
+  const revealCurrentWorkspaceFromFloatingButton = useCallback(() => {
+    if (activeWorktreeIsFilteredOut && hasFilters) {
+      clearFilters()
+    }
+    revealCurrentSidebarWorktree({ behavior: 'smooth' })
+  }, [activeWorktreeIsFilteredOut, clearFilters, hasFilters])
+
   if (worktrees.length === 0) {
     return (
-      <div className="worktree-sidebar-scrollbar flex flex-1 flex-col overflow-y-scroll overflow-x-hidden pl-1 scrollbar-sleek pt-px">
-        <div className="flex flex-col items-center gap-2 px-4 py-6 text-center text-[11px] text-muted-foreground">
-          <span>No worktrees found</span>
-          {hasFilters && (
-            <button
-              onClick={clearFilters}
-              className="inline-flex items-center gap-1.5 bg-secondary/70 border border-border/80 text-foreground font-medium text-[11px] px-2.5 py-1 rounded-md cursor-pointer hover:bg-accent transition-colors"
-            >
-              <CircleX className="size-3.5" />
-              Clear Filters
-            </button>
-          )}
+      <div data-worktree-sidebar-container className="relative min-h-0 flex-1">
+        <div className="worktree-sidebar-scrollbar flex h-full flex-col overflow-y-scroll overflow-x-hidden pl-1 scrollbar-sleek pt-px">
+          <div className="flex flex-col items-center gap-2 px-4 py-6 text-center text-[11px] text-muted-foreground">
+            <span>No worktrees found</span>
+            {hasFilters && (
+              <button
+                onClick={clearFilters}
+                className="inline-flex items-center gap-1.5 bg-secondary/70 border border-border/80 text-foreground font-medium text-[11px] px-2.5 py-1 rounded-md cursor-pointer hover:bg-accent transition-colors"
+              >
+                <CircleX className="size-3.5" />
+                Clear Filters
+              </button>
+            )}
+          </div>
         </div>
+        {activeWorktreeIsFilteredOut && hasFilters ? (
+          <FloatingCurrentWorkspaceButton onClick={revealCurrentWorkspaceFromFloatingButton} />
+        ) : null}
       </div>
     )
   }
@@ -2152,6 +2302,7 @@ const WorktreeList = React.memo(function WorktreeList({
       key={viewportResetKey}
       rows={rows}
       activeWorktreeId={selectedSidebarWorktreeId}
+      currentWorktreeId={activeWorktreeId}
       groupBy={groupBy}
       repoGroupOrdering={repoGroupOrdering}
       toggleGroup={toggleGroup}
@@ -2181,6 +2332,7 @@ const WorktreeList = React.memo(function WorktreeList({
       onPinWorktree={pinWorktree}
       onPinWorktrees={pinWorktrees}
       showInlineAgentCards={cardProps.includes('inline-agents')}
+      onRevealCurrentWorkspace={revealCurrentWorkspaceFromFloatingButton}
       scrollOffsetRef={scrollOffsetRef}
       scrollAnchorRef={scrollAnchorRef}
     />
