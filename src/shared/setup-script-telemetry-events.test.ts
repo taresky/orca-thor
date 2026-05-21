@@ -35,6 +35,28 @@ describe('setup script prompt schemas', () => {
     expect(parsed.success).toBe(false)
   })
 
+  it('rejects import prompt exposure without a provider', () => {
+    const parsed = eventSchemas.setup_script_prompt_shown.safeParse({
+      mode: 'import_available',
+      file_count_bucket: '1',
+      unsupported_field_count_bucket: '0',
+      has_shared_hooks: false
+    })
+    expect(parsed.success).toBe(false)
+  })
+
+  it('rejects configure prompt actions with a provider', () => {
+    const parsed = eventSchemas.setup_script_prompt_action.safeParse({
+      action: 'configure_clicked',
+      mode: 'configure_needed',
+      provider: 'codex',
+      file_count_bucket: '0',
+      unsupported_field_count_bucket: '0',
+      has_shared_hooks: false
+    })
+    expect(parsed.success).toBe(false)
+  })
+
   it('rejects raw setup import details via .strict()', () => {
     const parsed = eventSchemas.setup_script_prompt_action.safeParse({
       action: 'import_completed',

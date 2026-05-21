@@ -345,21 +345,52 @@ const setupScriptPromptModeSchema = z.enum(['import_available', 'configure_neede
 const setupScriptCountBucketSchema = z.enum(['0', '1', '2-3', '4+'])
 const setupScriptPromptContextSchema = {
   mode: setupScriptPromptModeSchema,
+  // Why: cohort injection probes top-level ZodObject shapes; superRefine
+  // keeps that path while still rejecting impossible mode/provider pairs.
   provider: setupScriptImportProviderSchema.optional(),
   file_count_bucket: setupScriptCountBucketSchema,
   unsupported_field_count_bucket: setupScriptCountBucketSchema,
   has_shared_hooks: z.boolean(),
   nth_repo_added: nthRepoAddedSchema
 } as const
+
+type SetupScriptPromptContextTelemetry = {
+  mode: z.infer<typeof setupScriptPromptModeSchema>
+  provider?: z.infer<typeof setupScriptImportProviderSchema>
+}
+
+function validateSetupScriptPromptProvider(
+  props: SetupScriptPromptContextTelemetry,
+  ctx: z.RefinementCtx
+): void {
+  if (props.mode === 'import_available' && props.provider === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['provider'],
+      message: 'provider is required when setup import is available'
+    })
+  }
+  if (props.mode === 'configure_needed' && props.provider !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['provider'],
+      message: 'provider is only valid when setup import is available'
+    })
+  }
+}
 // Why: setup-import telemetry is for a retention cohort, not debugging a
 // user's repo, so it carries only closed enums and count buckets.
-const setupScriptPromptShownSchema = z.object(setupScriptPromptContextSchema).strict()
+const setupScriptPromptShownSchema = z
+  .object(setupScriptPromptContextSchema)
+  .strict()
+  .superRefine(validateSetupScriptPromptProvider)
 const setupScriptPromptActionSchema = z
   .object({
     ...setupScriptPromptContextSchema,
     action: z.enum(['import_completed', 'import_failed', 'configure_clicked', 'dismissed'])
   })
   .strict()
+  .superRefine(validateSetupScriptPromptProvider)
 
 // Managed-hook installer per-agent label. Distinct from `AGENT_KIND_VALUES`:
 // hook installation only targets the agents in `AGENT_HOOK_TARGETS` and the

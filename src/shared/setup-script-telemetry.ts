@@ -9,10 +9,13 @@ type SetupScriptPromptActionTelemetry = Omit<
 
 export type SetupScriptPromptAction = SetupScriptPromptActionTelemetry['action']
 
-export function buildSetupScriptPromptTelemetry(
-  candidate: SetupScriptImportCandidate | null,
+export function buildSetupScriptPromptTelemetry({
+  candidate,
+  hasSharedHooks
+}: {
+  candidate: SetupScriptImportCandidate | null
   hasSharedHooks: boolean
-): SetupScriptPromptTelemetry {
+}): SetupScriptPromptTelemetry {
   const base = {
     mode: candidate ? 'import_available' : 'configure_needed',
     file_count_bucket: bucketSetupScriptCount(candidate?.files.length ?? 0),
@@ -25,13 +28,17 @@ export function buildSetupScriptPromptTelemetry(
   return candidate ? { ...base, provider: candidate.provider } : base
 }
 
-export function buildSetupScriptPromptActionTelemetry(
-  action: SetupScriptPromptAction,
-  candidate: SetupScriptImportCandidate | null,
+export function buildSetupScriptPromptActionTelemetry({
+  action,
+  candidate,
+  hasSharedHooks
+}: {
+  action: SetupScriptPromptAction
+  candidate: SetupScriptImportCandidate | null
   hasSharedHooks: boolean
-): SetupScriptPromptActionTelemetry {
+}): SetupScriptPromptActionTelemetry {
   return {
-    ...buildSetupScriptPromptTelemetry(candidate, hasSharedHooks),
+    ...buildSetupScriptPromptTelemetry({ candidate, hasSharedHooks }),
     action
   }
 }

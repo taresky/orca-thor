@@ -189,10 +189,10 @@ function SetupScriptPromptCard(): React.JSX.Element | null {
       return
     }
 
-    const telemetry = buildSetupScriptPromptTelemetry(
-      promptState.candidate,
-      promptState.hasSharedHooks
-    )
+    const telemetry = buildSetupScriptPromptTelemetry({
+      candidate: promptState.candidate,
+      hasSharedHooks: promptState.hasSharedHooks
+    })
     // Why: React may re-render the sidebar often; this event should represent
     // a distinct prompt exposure for this repo/source, not render churn.
     const promptKey = [
@@ -218,11 +218,11 @@ function SetupScriptPromptCard(): React.JSX.Element | null {
     if (promptState?.repoId === activeRepo.id && !promptState.hasEffectiveSetup) {
       track(
         'setup_script_prompt_action',
-        buildSetupScriptPromptActionTelemetry(
-          'configure_clicked',
-          promptState.candidate,
-          promptState.hasSharedHooks
-        )
+        buildSetupScriptPromptActionTelemetry({
+          action: 'configure_clicked',
+          candidate: promptState.candidate,
+          hasSharedHooks: promptState.hasSharedHooks
+        })
       )
     }
     openLocalCommandSettings(activeRepo.id)
@@ -233,11 +233,11 @@ function SetupScriptPromptCard(): React.JSX.Element | null {
       if (promptState?.repoId === activeRepo.id && !promptState.hasEffectiveSetup) {
         track(
           'setup_script_prompt_action',
-          buildSetupScriptPromptActionTelemetry(
-            'dismissed',
-            promptState.candidate,
-            promptState.hasSharedHooks
-          )
+          buildSetupScriptPromptActionTelemetry({
+            action: 'dismissed',
+            candidate: promptState.candidate,
+            hasSharedHooks: promptState.hasSharedHooks
+          })
         )
       }
       dismissSetupScriptPrompt(activeRepo.id)
@@ -260,22 +260,22 @@ function SetupScriptPromptCard(): React.JSX.Element | null {
       if (!didUpdate) {
         track(
           'setup_script_prompt_action',
-          buildSetupScriptPromptActionTelemetry(
-            'import_failed',
-            promptState.candidate,
-            promptState.hasSharedHooks
-          )
+          buildSetupScriptPromptActionTelemetry({
+            action: 'import_failed',
+            candidate: promptState.candidate,
+            hasSharedHooks: promptState.hasSharedHooks
+          })
         )
         toast.error('Failed to import setup script')
         return
       }
       track(
         'setup_script_prompt_action',
-        buildSetupScriptPromptActionTelemetry(
-          'import_completed',
-          promptState.candidate,
-          promptState.hasSharedHooks
-        )
+        buildSetupScriptPromptActionTelemetry({
+          action: 'import_completed',
+          candidate: promptState.candidate,
+          hasSharedHooks: promptState.hasSharedHooks
+        })
       )
       setPromptState((current) =>
         current?.repoId === activeRepo.id ? { ...current, hasEffectiveSetup: true } : current
@@ -294,11 +294,11 @@ function SetupScriptPromptCard(): React.JSX.Element | null {
     } catch (error) {
       track(
         'setup_script_prompt_action',
-        buildSetupScriptPromptActionTelemetry(
-          'import_failed',
-          promptState.candidate,
-          promptState.hasSharedHooks
-        )
+        buildSetupScriptPromptActionTelemetry({
+          action: 'import_failed',
+          candidate: promptState.candidate,
+          hasSharedHooks: promptState.hasSharedHooks
+        })
       )
       console.warn('[setup-script-prompt] Failed to import setup script:', error)
       toast.error('Failed to import setup script')

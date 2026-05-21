@@ -7,7 +7,7 @@ import type { SetupScriptImportCandidate } from './setup-script-imports'
 
 describe('setup script telemetry payload builders', () => {
   it('builds configure prompt telemetry without provider or raw details', () => {
-    expect(buildSetupScriptPromptTelemetry(null, true)).toEqual({
+    expect(buildSetupScriptPromptTelemetry({ candidate: null, hasSharedHooks: true })).toEqual({
       mode: 'configure_needed',
       file_count_bucket: '0',
       unsupported_field_count_bucket: '0',
@@ -24,7 +24,7 @@ describe('setup script telemetry payload builders', () => {
       unsupportedFields: ['a', 'b', 'c', 'd']
     }
 
-    expect(buildSetupScriptPromptTelemetry(candidate, false)).toEqual({
+    expect(buildSetupScriptPromptTelemetry({ candidate, hasSharedHooks: false })).toEqual({
       mode: 'import_available',
       provider: 'codex',
       file_count_bucket: '2-3',
@@ -41,7 +41,13 @@ describe('setup script telemetry payload builders', () => {
       setup: 'pnpm install'
     }
 
-    expect(buildSetupScriptPromptActionTelemetry('import_completed', candidate, true)).toEqual({
+    expect(
+      buildSetupScriptPromptActionTelemetry({
+        action: 'import_completed',
+        candidate,
+        hasSharedHooks: true
+      })
+    ).toEqual({
       action: 'import_completed',
       mode: 'import_available',
       provider: 'conductor',
