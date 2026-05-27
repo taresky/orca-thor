@@ -747,6 +747,39 @@ describe('updater', () => {
     expect(setPendingUpdateNudgeId).toHaveBeenCalledWith(null)
   })
 
+  it('does not preserve a pending nudge for ordinary manifest transition errors', async () => {
+    const sendMock = vi.fn()
+    const mainWindow = { webContents: { send: sendMock } }
+    const setPendingUpdateNudgeId = vi.fn()
+    const setDismissedUpdateNudgeId = vi.fn()
+    const missingManifest = new Error(
+      'Cannot find channel "latest-mac.yml" update info: HttpError: 404'
+    )
+
+    fetchNudgeMock.mockResolvedValue({ id: 'campaign-1', minVersion: '1.0.0' })
+    shouldApplyNudgeMock.mockReturnValue(true)
+    autoUpdaterMock.checkForUpdates.mockImplementation(() => {
+      autoUpdaterMock.emit('checking-for-update')
+      return Promise.reject(missingManifest)
+    })
+
+    const { setupAutoUpdater } = await import('./updater')
+
+    setupAutoUpdater(mainWindow as never, {
+      getLastUpdateCheckAt: () => Date.now(),
+      setPendingUpdateNudgeId,
+      getPendingUpdateNudgeId: () => null,
+      getDismissedUpdateNudgeId: () => null,
+      setDismissedUpdateNudgeId
+    })
+
+    await vi.waitFor(() => {
+      expect(setPendingUpdateNudgeId).toHaveBeenCalledWith(null)
+    })
+
+    expect(setDismissedUpdateNudgeId).toHaveBeenCalledWith('campaign-1')
+  })
+
   it('moves pending nudge to dismissed when dismissNudge is called', async () => {
     const sendMock = vi.fn()
     const mainWindow = { webContents: { send: sendMock } }

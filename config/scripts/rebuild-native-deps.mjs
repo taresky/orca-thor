@@ -151,6 +151,10 @@ function ensureElectronPackageInstalled() {
     })
   } catch (/** @type {any} */ err) {
     console.error('[rebuild] Electron install retry failed:', err?.message ?? err)
+    logElectronInstallDiagnostics()
+    if (continuePostinstallWithoutElectron()) {
+      process.exit(0)
+    }
     process.exit(1)
   }
 
@@ -159,12 +163,7 @@ function ensureElectronPackageInstalled() {
   } catch (/** @type {any} */ err) {
     if (!repairElectronPathFile()) {
       logElectronInstallDiagnostics()
-      if (isPostinstall() && process.env.ORCA_STRICT_ELECTRON_INSTALL !== '1') {
-        console.error(
-          '[rebuild] Continuing postinstall because Electron binary installation failed. ' +
-            'Commands that need Electron run config/scripts/ensure-native-runtime.mjs ' +
-            '--runtime=electron and will retry/fail with a targeted error.'
-        )
+      if (continuePostinstallWithoutElectron()) {
         process.exit(0)
       }
       console.error(
@@ -183,6 +182,18 @@ function ensureElectronPackageInstalled() {
       process.exit(1)
     }
   }
+}
+
+function continuePostinstallWithoutElectron() {
+  if (!isPostinstall() || process.env.ORCA_STRICT_ELECTRON_INSTALL === '1') {
+    return false
+  }
+  console.error(
+    '[rebuild] Continuing postinstall because Electron binary installation failed. ' +
+      'Electron-consuming package scripts and release jobs run ' +
+      'config/scripts/ensure-native-runtime.mjs --runtime=electron before launching Electron.'
+  )
+  return true
 }
 
 function repairElectronPathFile() {
