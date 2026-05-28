@@ -180,6 +180,20 @@ type SplitWithStartupDeps = {
   startup?: SplitStartupPayload | null
 }
 
+function resolveTerminalHomePathFromEnv(env: Record<string, string> | undefined): string | null {
+  const home = env?.HOME?.trim()
+  if (home) {
+    return home
+  }
+  const userProfile = env?.USERPROFILE?.trim()
+  if (userProfile) {
+    return userProfile
+  }
+  const homeDrive = env?.HOMEDRIVE?.trim()
+  const homePath = env?.HOMEPATH?.trim()
+  return homeDrive && homePath ? `${homeDrive}${homePath}` : null
+}
+
 /** Scopes `deps.startup` to a single call of `splitPane()`, clearing it in `finally` so later splits do not replay the payload. */
 export function splitPaneWithOneShotStartup<TPane>(
   deps: SplitWithStartupDeps,
@@ -355,6 +369,7 @@ export function useTerminalPaneLifecycle({
       cwd ??
       ''
     const startupCwd = cwd ?? worktreePath
+    const terminalHomePath = resolveTerminalHomePathFromEnv(startup?.env)
     // Why: existence probes can cross SSH/runtime boundaries. This cache is
     // lifecycle-scoped, so external mutations and the initial 'active' runtime
     // fallback can temporarily leave stale entries.
@@ -363,6 +378,7 @@ export function useTerminalPaneLifecycle({
       worktreeId,
       worktreePath,
       startupCwd,
+      terminalHomePath,
       managerRef,
       linkProviderDisposablesRef,
       pathExistsCache,
