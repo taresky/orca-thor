@@ -5,8 +5,11 @@ import {
   filterWorkspaceSpaceRows,
   getSelectedDeletableWorkspaceIds,
   getVisibleDeletableWorkspaceIds,
+  getWorkspaceSpaceInspectedWorktreeId,
   getWorkspaceSpaceGitStatusRefreshCandidates,
+  getWorkspaceSpaceZoomWorktreeId,
   isWorkspaceSpaceRowReadyToDelete,
+  pruneWorkspaceSpaceSelectedIds,
   sortWorkspaceSpaceRows
 } from './workspace-space-presentation'
 import type { AgentStatusEntry } from '../../../../shared/agent-status-types'
@@ -122,6 +125,32 @@ describe('workspace space presentation helpers', () => {
     expect(
       getSelectedDeletableWorkspaceIds(rows, new Set(['idle', 'deleting']), isDeleting)
     ).toEqual(['idle'])
+  })
+
+  it('keeps the inspected workspace when it is still present', () => {
+    const rows = [row({ worktreeId: 'failed', status: 'error' }), row({ worktreeId: 'ok' })]
+
+    expect(getWorkspaceSpaceInspectedWorktreeId(rows, 'failed')).toBe('failed')
+  })
+
+  it('falls back inspected workspace to the first ok row', () => {
+    const rows = [row({ worktreeId: 'missing-source', status: 'error' }), row({ worktreeId: 'ok' })]
+
+    expect(getWorkspaceSpaceInspectedWorktreeId(rows, 'gone')).toBe('ok')
+    expect(getWorkspaceSpaceInspectedWorktreeId([], 'gone')).toBeNull()
+  })
+
+  it('prunes selected workspace ids to rows still in the scan', () => {
+    const rows = [row({ worktreeId: 'keep' }), row({ worktreeId: 'also-keep' })]
+
+    expect([...pruneWorkspaceSpaceSelectedIds(rows, new Set(['keep', 'gone']))]).toEqual(['keep'])
+  })
+
+  it('keeps treemap zoom only for an ok workspace row', () => {
+    const rows = [row({ worktreeId: 'ok' }), row({ worktreeId: 'failed', status: 'error' })]
+
+    expect(getWorkspaceSpaceZoomWorktreeId(rows, 'ok')).toBe('ok')
+    expect(getWorkspaceSpaceZoomWorktreeId(rows, 'failed')).toBeNull()
   })
 
   it('treats open browser tabs as active workspace usage for deletion readiness', () => {

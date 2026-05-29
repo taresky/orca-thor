@@ -238,6 +238,42 @@ export function getSelectedDeletableWorkspaceIds(
     .map((row) => row.worktreeId)
 }
 
+export function getWorkspaceSpaceInspectedWorktreeId(
+  rows: readonly WorkspaceSpaceWorktree[],
+  currentId: string | null
+): string | null {
+  if (currentId && rows.some((row) => row.worktreeId === currentId)) {
+    return currentId
+  }
+  return rows.find((row) => row.status === 'ok')?.worktreeId ?? null
+}
+
+export function getWorkspaceSpaceZoomWorktreeId(
+  rows: readonly WorkspaceSpaceWorktree[],
+  currentId: string | null
+): string | null {
+  return currentId && rows.some((row) => row.worktreeId === currentId && row.status === 'ok')
+    ? currentId
+    : null
+}
+
+export function pruneWorkspaceSpaceSelectedIds(
+  rows: readonly WorkspaceSpaceWorktree[],
+  selectedIds: ReadonlySet<string>
+): Set<string> {
+  const validIds = new Set(rows.map((row) => row.worktreeId))
+  let changed = false
+  const next = new Set<string>()
+  for (const id of selectedIds) {
+    if (validIds.has(id)) {
+      next.add(id)
+    } else {
+      changed = true
+    }
+  }
+  return changed ? next : (selectedIds as Set<string>)
+}
+
 export function getVisibleDeletableWorkspaceIds(
   rows: readonly WorkspaceSpaceWorktree[],
   isWorktreeDeleting: (worktreeId: string) => boolean = () => false
