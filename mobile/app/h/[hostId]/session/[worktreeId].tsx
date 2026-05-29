@@ -23,6 +23,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import {
   AlertTriangle,
   ArrowUp,
+  Bot,
   ChevronLeft,
   ChevronRight,
   Eraser,
@@ -98,6 +99,11 @@ import {
   terminalRecordsEqual,
   type TerminalRecord
 } from '../../../../src/session/mobile-terminal-records'
+import {
+  buildMobileNewTabAgentOptions,
+  type MobileNewTabAgentOption,
+  type MobileNewTabAgentSettings
+} from '../../../../src/session/mobile-new-tab-agent-options'
 import { colors, spacing, radii, typography } from '../../../../src/theme/mobile-theme'
 
 type Terminal = TerminalRecord
@@ -292,6 +298,19 @@ function isFileExistsErrorMessage(message: string): boolean {
 
 type TerminalCreateResult = {
   tab: Extract<MobileSessionTab, { type: 'terminal' }>
+}
+
+type MobileNewTabAgentLoadState = 'idle' | 'loading' | 'loaded' | 'error'
+
+type RuntimeWorktreeResult = {
+  worktree?: {
+    repoId?: string
+  }
+}
+
+type RuntimeRepoSummary = {
+  id: string
+  connectionId?: string | null
 }
 
 type MobileDisplayMode = 'auto' | 'phone' | 'desktop'
@@ -703,6 +722,9 @@ export default function SessionScreen() {
   const [createError, setCreateError] = useState('')
   const [createWarning, setCreateWarning] = useState(initialCreateWarning)
   const [showCreateTabDrawer, setShowCreateTabDrawer] = useState(false)
+  const [createTabAgentLoadState, setCreateTabAgentLoadState] =
+    useState<MobileNewTabAgentLoadState>('idle')
+  const [createTabAgentOptions, setCreateTabAgentOptions] = useState<MobileNewTabAgentOption[]>([])
   const [showCreateBrowserModal, setShowCreateBrowserModal] = useState(false)
   const [actionTarget, setActionTarget] = useState<Terminal | null>(null)
   const [markdownActionTarget, setMarkdownActionTarget] = useState<Extract<
@@ -2610,7 +2632,81 @@ export default function SessionScreen() {
     }
   }, [selectModeActive])
 
-  async function handleCreateTerminal() {
+  useEffect(() => {
+    if (!showCreateTabDrawer) {
+      setCreateTabAgentLoadState('idle')
+      setCreateTabAgentOptions([])
+      return
+    }
+    if (!client || connState !== 'connected') {
+      setCreateTabAgentLoadState('idle')
+      setCreateTabAgentOptions([])
+      return
+    }
+
+    let stale = false
+    setCreateTabAgentLoadState('loading')
+    setCreateTabAgentOptions([])
+
+    void (async () => {
+      const [settingsResponse, worktreeResponse] = await Promise.all([
+        client.sendRequest('settings.get'),
+        client.sendRequest('worktree.show', { worktree: `id:${worktreeId}` })
+      ])
+      if (!settingsResponse.ok) {
+        throw new Error(settingsResponse.error.message)
+      }
+      if (!worktreeResponse.ok) {
+        throw new Error(worktreeResponse.error.message)
+      }
+
+      const settings = (
+        (settingsResponse as RpcSuccess).result as {
+          settings?: MobileNewTabAgentSettings
+        }
+      ).settings
+      const worktree = ((worktreeResponse as RpcSuccess).result as RuntimeWorktreeResult).worktree
+      const repoId = worktree?.repoId
+      if (!repoId) {
+        throw new Error('worktree_repo_missing')
+      }
+
+      const repoResponse = await client.sendRequest('repo.list')
+      if (!repoResponse.ok) {
+        throw new Error(repoResponse.error.message)
+      }
+      const repos =
+        ((repoResponse as RpcSuccess).result as { repos?: RuntimeRepoSummary[] }).repos ?? []
+      const repo = repos.find((candidate) => candidate.id === repoId)
+      if (!repo) {
+        throw new Error('worktree_repo_not_found')
+      }
+      const connectionId = repo.connectionId?.trim() || null
+      const detectedResponse = connectionId
+        ? await client.sendRequest('preflight.detectRemoteAgents', { connectionId })
+        : await client.sendRequest('preflight.detectAgents')
+      if (!detectedResponse.ok) {
+        throw new Error(detectedResponse.error.message)
+      }
+      if (stale) {
+        return
+      }
+      const detectedAgentIds = (detectedResponse as RpcSuccess).result as unknown[]
+      setCreateTabAgentOptions(buildMobileNewTabAgentOptions(settings, detectedAgentIds))
+      setCreateTabAgentLoadState('loaded')
+    })().catch(() => {
+      if (!stale) {
+        setCreateTabAgentOptions([])
+        setCreateTabAgentLoadState('error')
+      }
+    })
+
+    return () => {
+      stale = true
+    }
+  }, [client, connState, showCreateTabDrawer, worktreeId])
+
+  async function handleCreateTerminal(agent?: MobileNewTabAgentOption['agent']) {
     if (!client || creating) return
 
     setCreating(true)
@@ -2619,7 +2715,8 @@ export default function SessionScreen() {
     try {
       const response = await client.sendRequest('session.tabs.createTerminal', {
         worktree: `id:${worktreeId}`,
-        afterTabId: activeSessionTabId ?? undefined
+        afterTabId: activeSessionTabId ?? undefined,
+        ...(agent ? { agent } : {})
       })
       if (response.ok) {
         const result = (response as RpcSuccess).result as TerminalCreateResult
@@ -2951,6 +3048,47 @@ export default function SessionScreen() {
     opacity: toastOpacityRef.current,
     transform: [{ translateY: -keyboardLift }]
   }
+  const createTabAgentActions =
+    createTabAgentLoadState === 'loading'
+      ? [
+          {
+            label: 'Detecting Agents',
+            icon: Bot,
+            disabled: true,
+            loading: true,
+            onPress: () => {}
+          }
+        ]
+      : createTabAgentOptions.length > 0
+        ? createTabAgentOptions.map((option) => ({
+            label: option.label,
+            hint: 'Agent preset',
+            icon: Bot,
+            onPress: () => {
+              setShowCreateTabDrawer(false)
+              void handleCreateTerminal(option.agent)
+            }
+          }))
+        : createTabAgentLoadState === 'loaded'
+          ? [
+              {
+                label: 'No Agents Detected',
+                icon: Bot,
+                disabled: true,
+                onPress: () => {}
+              }
+            ]
+          : createTabAgentLoadState === 'error'
+            ? [
+                {
+                  label: 'Agent Presets Unavailable',
+                  hint: 'Check the host connection',
+                  icon: Bot,
+                  disabled: true,
+                  onPress: () => {}
+                }
+              ]
+            : []
 
   return (
     <View style={styles.container}>
@@ -3512,7 +3650,8 @@ export default function SessionScreen() {
               setShowCreateTabDrawer(false)
               void handleCreateMarkdownNote()
             }
-          }
+          },
+          ...createTabAgentActions
         ]}
         onClose={() => setShowCreateTabDrawer(false)}
       />

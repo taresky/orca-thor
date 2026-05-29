@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { isTuiAgent } from '../../../../shared/tui-agent-config'
 import { defineMethod, defineStreamingMethod, type RpcAnyMethod } from '../core'
 
 const WorktreeTabSelector = z.object({
@@ -19,6 +20,10 @@ const CreateTerminalTab = WorktreeTabSelector.extend({
   afterTabId: z.string().optional(),
   targetGroupId: z.string().optional(),
   command: z.string().optional(),
+  agent: z
+    .unknown()
+    .transform((value) => (isTuiAgent(value) ? value : undefined))
+    .optional(),
   activate: z.boolean().optional()
 })
 
@@ -99,6 +104,7 @@ export const SESSION_TAB_METHODS: RpcAnyMethod[] = [
         afterTabId: params.afterTabId,
         targetGroupId: params.targetGroupId,
         command: params.command,
+        agent: params.agent,
         activate: params.activate
       })
   }),
