@@ -93,6 +93,26 @@ vi.mock('./WorktreeContextMenu', () => ({
   WORKTREE_CONTEXT_MENU_SCOPE_ATTR: 'data-orca-context-menu-scope'
 }))
 
+vi.mock('./SshDisconnectedDialog', () => ({
+  SshDisconnectedDialog: ({
+    open,
+    status,
+    targetId,
+    targetLabel
+  }: {
+    open: boolean
+    status: string
+    targetId: string
+    targetLabel: string
+  }) =>
+    React.createElement('aside', {
+      'data-lineage-ssh-dialog': open ? 'open' : 'closed',
+      'data-ssh-status': status,
+      'data-ssh-target-id': targetId,
+      'data-ssh-target-label': targetLabel
+    })
+}))
+
 vi.mock('@/components/ui/tooltip', () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) =>
     React.createElement(React.Fragment, null, children),
@@ -356,6 +376,22 @@ describe('WorktreeList lineage child card renderer', () => {
     expect(agentRowIndex).toBeGreaterThan(childStart)
     expect(childToggleIndex).toBeGreaterThan(childStart)
     expect(agentRowIndex).toBeLessThan(childToggleIndex)
+  })
+
+  it('opens the reconnect dialog for an active disconnected lineage child during render', async () => {
+    setLineageFixtureState()
+    const repo = (mockStore.state.repos as Repo[])[0]!
+    repo.connectionId = 'ssh-target-1'
+    mockStore.state.activeWorktreeId = 'child'
+    mockStore.state.sshConnectionStates = new Map([['ssh-target-1', { status: 'disconnected' }]])
+    mockStore.state.sshTargetLabels = new Map([['ssh-target-1', 'Remote target']])
+
+    const markup = await renderWorktreeListMarkup()
+
+    expect(markup).toContain('data-lineage-ssh-dialog="open"')
+    expect(markup).toContain('data-ssh-status="disconnected"')
+    expect(markup).toContain('data-ssh-target-id="ssh-target-1"')
+    expect(markup).toContain('data-ssh-target-label="Remote target"')
   })
 
   it('does not add group indentation when grouping is disabled', async () => {
