@@ -294,6 +294,27 @@ const settingsChangedSchema = z
 const telemetryOptedInSchema = z.object({ via: optInViaSchema }).strict()
 const telemetryOptedOutSchema = z.object({ via: optInViaSchema }).strict()
 
+const orcaCliFeatureTipSourceSchema = z.enum(['app_open', 'manual'])
+const orcaCliFeatureTipShownSchema = z
+  .object({
+    source: orcaCliFeatureTipSourceSchema,
+    nth_repo_added: nthRepoAddedSchema
+  })
+  .strict()
+const orcaCliFeatureTipSetupClickedSchema = z
+  .object({
+    source: orcaCliFeatureTipSourceSchema,
+    nth_repo_added: nthRepoAddedSchema
+  })
+  .strict()
+const orcaCliFeatureTipSetupResultSchema = z
+  .object({
+    source: orcaCliFeatureTipSourceSchema,
+    result: z.enum(['installed', 'needs_attention', 'dev_preview', 'failed']),
+    nth_repo_added: nthRepoAddedSchema
+  })
+  .strict()
+
 const featureWallOpenedSchema = z
   .object({
     source: featureWallOpenSourceSchema
@@ -915,6 +936,10 @@ export const eventSchemas = {
   telemetry_opted_in: telemetryOptedInSchema,
   telemetry_opted_out: telemetryOptedOutSchema,
 
+  orca_cli_feature_tip_shown: orcaCliFeatureTipShownSchema,
+  orca_cli_feature_tip_setup_clicked: orcaCliFeatureTipSetupClickedSchema,
+  orca_cli_feature_tip_setup_result: orcaCliFeatureTipSetupResultSchema,
+
   feature_wall_opened: featureWallOpenedSchema,
   feature_wall_closed: featureWallClosedSchema,
   feature_wall_tile_focused: featureWallTileFocusedSchema,
@@ -994,6 +1019,9 @@ type _CohortExtendedRoster =
   | 'setup_script_prompt_action'
   | 'agent_started'
   | 'agent_error'
+  | 'orca_cli_feature_tip_shown'
+  | 'orca_cli_feature_tip_setup_clicked'
+  | 'orca_cli_feature_tip_setup_result'
 // Why: `z.object({}).strict()` infers a string index signature, which would
 // make every key appear present. Ignore index-signature-only keys here so
 // strict empty event payloads do not get pulled into keyed telemetry rosters.
