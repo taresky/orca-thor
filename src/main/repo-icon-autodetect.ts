@@ -75,9 +75,35 @@ function extractIconHref(source: string): string | null {
   return source.match(LINK_ICON_HTML_RE)?.[1] ?? source.match(LINK_ICON_OBJECT_RE)?.[1] ?? null
 }
 
+function normalizeIconRelativePath(relativePath: string): string | null {
+  const normalized = relativePath.replace(/\\/g, '/').trim()
+  if (
+    !normalized ||
+    normalized.startsWith('/') ||
+    normalized.includes('\0') ||
+    /^[A-Za-z][A-Za-z0-9+.-]*:/.test(normalized)
+  ) {
+    return null
+  }
+  const segments = normalized.split('/').filter((segment) => segment && segment !== '.')
+  if (segments.length === 0 || segments.some((segment) => segment === '..')) {
+    return null
+  }
+  return segments.join('/')
+}
+
 function iconHrefCandidates(href: string): string[] {
   const clean = href.replace(/^\/+/, '')
-  return [`public/${clean}`, clean]
+  const candidates: string[] = []
+  for (const candidate of [`public/${clean}`, clean]) {
+    // Why: icon hrefs are repo-controlled input; never let detection probe above
+    // the selected repo root while looking for a best-effort visual.
+    const normalized = normalizeIconRelativePath(candidate)
+    if (normalized && !candidates.includes(normalized)) {
+      candidates.push(normalized)
+    }
+  }
+  return candidates
 }
 
 async function readLocalPngIcon(repoPath: string, relativePath: string): Promise<RepoIcon | null> {

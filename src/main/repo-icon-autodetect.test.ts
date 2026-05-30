@@ -69,6 +69,25 @@ describe('detectRepoIcon', () => {
     })
   })
 
+  it('does not resolve declared icon hrefs outside the repo', async () => {
+    const rootPath = await makeTempRepoDir()
+    const repoPath = join(rootPath, 'repo')
+    await mkdir(repoPath)
+    await writeFile(join(repoPath, 'index.html'), '<link rel="icon" href="../outside.png">')
+    await writeFile(join(rootPath, 'outside.png'), Buffer.from(PNG_1X1_BASE64, 'base64'))
+    await writeFile(
+      join(repoPath, 'package.json'),
+      JSON.stringify({ homepage: 'https://app.example.com/docs' })
+    )
+
+    await expect(detectRepoIcon({ repoPath, kind: 'folder' })).resolves.toEqual({
+      type: 'image',
+      src: 'https://www.google.com/s2/favicons?domain=app.example.com&sz=64',
+      source: 'favicon',
+      label: 'Website favicon'
+    })
+  })
+
   it('falls back to the GitHub owner avatar for GitHub repos', async () => {
     const repoPath = await makeTempRepoDir()
     await gitExecFileAsync(['init'], { cwd: repoPath })
