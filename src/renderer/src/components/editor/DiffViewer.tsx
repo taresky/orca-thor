@@ -184,13 +184,13 @@ export default function DiffViewer({
   // one-shot per mount.
   const didAutoScrollFirstDiffRef = useRef(false)
   const didAutoScrollModelKeyRef = useRef(modelKey)
-  if (didAutoScrollModelKeyRef.current !== modelKey) {
-    didAutoScrollModelKeyRef.current = modelKey
-    // Why: the one-shot above is intentionally per-modelKey. Reset before
-    // commit so the auto-scroll Effect can run immediately for a new file.
-    didAutoScrollFirstDiffRef.current = false
-  }
   useEffect(() => {
+    if (didAutoScrollModelKeyRef.current !== modelKey) {
+      didAutoScrollModelKeyRef.current = modelKey
+      // Why: the one-shot above is intentionally per-modelKey. Reset inside
+      // this Effect before its first-diff guard runs for the new file.
+      didAutoScrollFirstDiffRef.current = false
+    }
     const diffEditor = diffEditorRef.current
     if (!diffEditor || !modifiedEditor) {
       return
