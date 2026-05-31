@@ -7,7 +7,8 @@ import { useAppStore } from '@/store'
 import type {
   ContextualTourId,
   ContextualTourStepPlacement,
-  ContextualTourStepControl
+  ContextualTourStepControl,
+  ContextualTourStepAction
 } from '../../../../shared/contextual-tours'
 import { ContextualTourArrow } from './ContextualTourArrow'
 import { ContextualTourControl } from './ContextualTourControl'
@@ -25,6 +26,8 @@ export type ActiveTourRenderState = {
   title: string
   body: string
   control?: ContextualTourStepControl
+  primaryAction?: ContextualTourStepAction
+  secondaryAction?: ContextualTourStepAction
   preferredPlacement?: ContextualTourStepPlacement
   isLastStep: boolean
   isFirstStep: boolean
@@ -45,6 +48,7 @@ type ContextualTourOverlaySurfaceProps = {
   onSkip: (id: ContextualTourId) => void
   onBack: () => void
   onNext: () => void
+  onStepAction: (action: ContextualTourStepAction) => void
   onOverlayKeyDownCapture: (event: KeyboardEvent<HTMLDivElement>) => void
 }
 
@@ -73,6 +77,7 @@ export function ContextualTourOverlaySurface({
   onSkip,
   onBack,
   onNext,
+  onStepAction,
   onOverlayKeyDownCapture
 }: ContextualTourOverlaySurfaceProps): JSX.Element {
   const panelHostSlot = panelHost?.getAttribute('data-slot')
@@ -90,6 +95,12 @@ export function ContextualTourOverlaySurface({
   )
 
   const stepKey = `${activeTourId}-${renderState.progress.current}`
+  const primaryAction =
+    renderState.primaryAction ??
+    ({
+      kind: renderState.isLastStep ? 'complete' : 'next',
+      label: renderState.isLastStep ? 'Done' : 'Next'
+    } satisfies ContextualTourStepAction)
 
   const panel = (
     <section
@@ -132,9 +143,28 @@ export function ContextualTourOverlaySurface({
                 Back
               </Button>
             ) : null}
-            <Button type="button" size="xs" onClick={onNext}>
-              {renderState.isLastStep ? 'Done' : 'Next'}
-              {!renderState.isLastStep ? <ArrowRight /> : null}
+            {renderState.secondaryAction ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={() => onStepAction(renderState.secondaryAction!)}
+              >
+                {renderState.secondaryAction.label}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              size="xs"
+              onClick={
+                primaryAction.kind === (renderState.isLastStep ? 'complete' : 'next') &&
+                primaryAction.label === (renderState.isLastStep ? 'Done' : 'Next')
+                  ? onNext
+                  : () => onStepAction(primaryAction)
+              }
+            >
+              {primaryAction.label}
+              {primaryAction.kind === 'next' && !renderState.isLastStep ? <ArrowRight /> : null}
             </Button>
           </div>
         </div>

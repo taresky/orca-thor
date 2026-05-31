@@ -18,7 +18,8 @@ import type { GlobalSettings } from '../../../../shared/types'
 import { getTaskPresetQuery, PER_REPO_FETCH_LIMIT } from '@/lib/new-workspace'
 import { LinearIcon } from '@/components/icons/LinearIcon'
 import {
-  getFeatureWallSetupSteps,
+  FEATURE_WALL_SETUP_PARALLEL_WORK_STEP_IDS,
+  getFirstIncompleteFeatureWallSetupStepId,
   type FeatureWallSetupStepId
 } from '../../../../shared/feature-wall-setup-steps'
 import {
@@ -156,23 +157,28 @@ const SidebarNav = React.memo(function SidebarNav() {
   // count instead of changing while the lazy modal is mounting.
   const setupProgress = useSetupGuideProgress(true, false, false)
   const setupComplete = setupProgress.coreDoneCount >= setupProgress.coreTotal
-  const firstUnfinishedSetupStepId = React.useMemo<FeatureWallSetupStepId>(() => {
-    const firstUnfinished = getFeatureWallSetupSteps().find(
-      (step) => !setupProgress.stepDone[step.id]
-    )
-    return firstUnfinished?.id ?? 'default-agent'
-  }, [setupProgress.stepDone])
+  const firstUnfinishedSetupStepId = React.useMemo<FeatureWallSetupStepId>(
+    () => getFirstIncompleteFeatureWallSetupStepId(setupProgress.stepDone),
+    [setupProgress.stepDone]
+  )
+  const hasIncompleteParallelWork = FEATURE_WALL_SETUP_PARALLEL_WORK_STEP_IDS.some(
+    (id) => !setupProgress.stepDone[id]
+  )
   const hideMobileButton = React.useCallback(() => {
     void updateSettings({ showMobileButton: false })
   }, [updateSettings])
 
   return (
-    <div className="flex flex-col gap-0.5 px-2 pt-2 pb-1">
+    <div
+      className="flex flex-col gap-0.5 px-2 pt-2 pb-1"
+      data-contextual-tour-target="sidebar-navigation"
+    >
       {!setupComplete ? (
         <button
           type="button"
           onClick={() => openModal('setup-guide', { setupStepId: firstUnfinishedSetupStepId })}
           aria-current={setupActive ? 'page' : undefined}
+          data-contextual-tour-target="setup-guide-entry"
           className={cn(
             'flex w-full items-center gap-2 rounded-md border border-sidebar-border px-2 py-1.5 text-left text-[13px] font-medium tracking-tight transition-colors',
             setupActive
@@ -187,7 +193,14 @@ const SidebarNav = React.memo(function SidebarNav() {
             )}
             strokeWidth={setupActive ? 2.25 : 1.75}
           />
-          <span className="flex-1">Getting started with Orca</span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate">Getting started with Orca</span>
+            {hasIncompleteParallelWork ? (
+              <span className="truncate text-[11px] font-normal leading-3 text-muted-foreground">
+                Try parallel work
+              </span>
+            ) : null}
+          </span>
           <span className="font-mono text-[11px] text-muted-foreground">
             {setupProgress.coreDoneCount}/{setupProgress.coreTotal}
           </span>
@@ -206,6 +219,7 @@ const SidebarNav = React.memo(function SidebarNav() {
           onFocus={handlePrefetch}
           disabled={!canBrowseTasks}
           aria-current={tasksActive ? 'page' : undefined}
+          data-contextual-tour-target="sidebar-tasks"
           className={cn(
             'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] font-medium tracking-tight transition-colors',
             tasksActive

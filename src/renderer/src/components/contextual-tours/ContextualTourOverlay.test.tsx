@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ContextualTourId } from '../../../../shared/contextual-tours'
 import { getContextualTourCleanupOutcome } from './ContextualTourOverlay'
+import { performContextualTourStepAction } from './contextual-tour-step-actions'
 import {
   ContextualTourOverlaySurface,
   handleContextualTourGlobalKeyDown,
@@ -49,6 +50,7 @@ function renderSurface(
     onSkip?: (id: ContextualTourId) => void
     onNext?: () => void
     onBack?: () => void
+    onStepAction?: Parameters<typeof ContextualTourOverlaySurface>[0]['onStepAction']
   } = {}
 ): ReactElement {
   const renderState = { ...baseRenderState, ...overrides }
@@ -62,6 +64,7 @@ function renderSurface(
     onSkip: callbacks.onSkip ?? vi.fn(),
     onBack: callbacks.onBack ?? vi.fn(),
     onNext: callbacks.onNext ?? vi.fn(),
+    onStepAction: callbacks.onStepAction ?? vi.fn(),
     onOverlayKeyDownCapture: handleContextualTourOverlayKeyDown
   })
 }
@@ -224,6 +227,25 @@ describe('ContextualTourOverlaySurface', () => {
     expect(onNext).toHaveBeenCalledTimes(1)
   })
 
+  it('renders configured step action labels and wires them through the action callback', () => {
+    const onStepAction = vi.fn()
+    const primaryAction = { kind: 'split-terminal-pane' as const, label: 'Split terminal' }
+    const secondaryAction = { kind: 'next' as const, label: 'Skip' }
+    const element = renderSurface(
+      {
+        primaryAction,
+        secondaryAction
+      },
+      { onStepAction }
+    )
+
+    findElementByText(element, 'Split terminal')?.props.onClick?.()
+    findElementByText(element, 'Skip')?.props.onClick?.()
+
+    expect(onStepAction).toHaveBeenCalledWith(primaryAction)
+    expect(onStepAction).toHaveBeenCalledWith(secondaryAction)
+  })
+
   it('handles Escape by clicking Skip before page-level handlers see it', () => {
     const click = vi.fn()
     const preventDefault = vi.fn()
@@ -314,6 +336,57 @@ describe('ContextualTourOverlaySurface', () => {
     expect(preventDefault).toHaveBeenCalledTimes(1)
     expect(stopImmediatePropagation).toHaveBeenCalledTimes(1)
     expect(dismissContextualTour).not.toHaveBeenCalled()
+  })
+})
+
+describe('performContextualTourStepAction', () => {
+  it('opens Tasks after detaching the terminal-owned tour source', () => {
+    const finishTour = vi.fn()
+    const advanceContextualTour = vi.fn()
+    const detachContextualTourSource = vi.fn()
+    const openTaskPage = vi.fn()
+
+    performContextualTourStepAction({
+      action: { kind: 'open-tasks', label: 'Show tasks' },
+      activeTabId: 'tab-1',
+      isLastStep: false,
+      finishTour,
+      advanceContextualTour,
+      detachContextualTourSource,
+      setSidebarOpen: vi.fn(),
+      openTaskPage,
+      openModal: vi.fn(),
+      dispatchTerminalPaneSplit: vi.fn(),
+      schedule: vi.fn()
+    })
+
+    expect(detachContextualTourSource).toHaveBeenCalledTimes(1)
+    expect(openTaskPage).toHaveBeenCalledTimes(1)
+    expect(advanceContextualTour).toHaveBeenCalledTimes(1)
+    expect(finishTour).not.toHaveBeenCalled()
+  })
+
+  it('dispatches the terminal-pane split action against the active tab', () => {
+    const dispatchTerminalPaneSplit = vi.fn()
+
+    performContextualTourStepAction({
+      action: { kind: 'split-terminal-pane', label: 'Split terminal' },
+      activeTabId: 'tab-1',
+      isLastStep: false,
+      finishTour: vi.fn(),
+      advanceContextualTour: vi.fn(),
+      detachContextualTourSource: vi.fn(),
+      setSidebarOpen: vi.fn(),
+      openTaskPage: vi.fn(),
+      openModal: vi.fn(),
+      dispatchTerminalPaneSplit,
+      schedule: vi.fn()
+    })
+
+    expect(dispatchTerminalPaneSplit).toHaveBeenCalledWith({
+      tabId: 'tab-1',
+      direction: 'vertical'
+    })
   })
 })
 

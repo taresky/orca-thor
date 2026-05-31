@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX } from 'react'
 import { useAppStore } from '@/store'
-import { getContextualTour, type ContextualTourId } from '../../../../shared/contextual-tours'
+import {
+  getContextualTour,
+  type ContextualTourId,
+  type ContextualTourStepAction
+} from '../../../../shared/contextual-tours'
 import type { ContextualTourOutcome } from '../../../../shared/feature-education-telemetry'
 import {
   trackContextualTourOutcome,
@@ -23,6 +27,11 @@ import {
   handleContextualTourOverlayKeyDown,
   type ActiveTourRenderState
 } from './ContextualTourOverlaySurface'
+import {
+  REQUEST_ACTIVE_TERMINAL_PANE_SPLIT_EVENT,
+  type RequestActiveTerminalPaneSplitDetail
+} from '@/constants/terminal'
+import { performContextualTourStepAction } from './contextual-tour-step-actions'
 
 export function ContextualTourOverlay(): JSX.Element | null {
   const activeTourId = useAppStore((s) => s.activeContextualTourId)
@@ -36,12 +45,17 @@ export function ContextualTourOverlay(): JSX.Element | null {
   const blockingSurfaceVisible = useAppStore((s) => s.contextualToursBlockingSurfaceVisible)
   const activeTourSuppressed = useAppStore((s) => s.activeContextualTourSuppressed)
   const keybindings = useAppStore((s) => s.keybindings)
+  const activeTabId = useAppStore((s) => s.activeTabId)
   const markContextualToursSeen = useAppStore((s) => s.markContextualToursSeen)
   const advanceContextualTour = useAppStore((s) => s.advanceContextualTour)
   const regressContextualTour = useAppStore((s) => s.regressContextualTour)
   const dismissContextualTour = useAppStore((s) => s.dismissContextualTour)
   const completeContextualTour = useAppStore((s) => s.completeContextualTour)
   const cancelContextualTour = useAppStore((s) => s.cancelContextualTour)
+  const detachContextualTourSource = useAppStore((s) => s.detachContextualTourSource)
+  const setSidebarOpen = useAppStore((s) => s.setSidebarOpen)
+  const openTaskPage = useAppStore((s) => s.openTaskPage)
+  const openModal = useAppStore((s) => s.openModal)
   const [renderState, setRenderState] = useState<ActiveTourRenderState | null>(null)
   const [measureVersion, setMeasureVersion] = useState(0)
   const panelRef = useRef<HTMLElement | null>(null)
@@ -177,6 +191,8 @@ export function ContextualTourOverlay(): JSX.Element | null {
       title: activeStep.title,
       body: formatContextualTourStepCopy(getContextualTourStepCopy(activeStep), keybindings),
       control: activeStep.control,
+      primaryAction: activeStep.primaryAction,
+      secondaryAction: activeStep.secondaryAction,
       preferredPlacement: activeStep.preferredPlacement,
       isLastStep: progress.current === progress.total,
       isFirstStep: progress.current === 1,
@@ -284,6 +300,40 @@ export function ContextualTourOverlay(): JSX.Element | null {
     return null
   }
 
+  const finishTour = (): void => {
+    emitContextualTourOutcome('completed')
+    completeContextualTour(activeTourId)
+  }
+
+  const handleStepAction = (action: ContextualTourStepAction): void => {
+    performContextualTourStepAction({
+      action,
+      activeTabId,
+      isLastStep: renderState.isLastStep,
+      finishTour,
+      advanceContextualTour,
+      detachContextualTourSource: () => {
+        if (activeTourSource) {
+          detachContextualTourSource(activeTourId, activeTourSource)
+        }
+      },
+      setSidebarOpen,
+      openTaskPage,
+      openModal,
+      dispatchTerminalPaneSplit: (detail) => {
+        window.dispatchEvent(
+          new CustomEvent<RequestActiveTerminalPaneSplitDetail>(
+            REQUEST_ACTIVE_TERMINAL_PANE_SPLIT_EVENT,
+            { detail }
+          )
+        )
+      },
+      schedule: (callback) => {
+        window.setTimeout(callback, 0)
+      }
+    })
+  }
+
   const viewport = {
     width: typeof window === 'undefined' ? 1024 : window.innerWidth,
     height: typeof window === 'undefined' ? 768 : window.innerHeight
@@ -311,12 +361,12 @@ export function ContextualTourOverlay(): JSX.Element | null {
       onBack={regressContextualTour}
       onNext={() => {
         if (renderState.isLastStep) {
-          emitContextualTourOutcome('completed')
-          completeContextualTour(activeTourId)
+          finishTour()
         } else {
           advanceContextualTour()
         }
       }}
+      onStepAction={handleStepAction}
       onOverlayKeyDownCapture={handleContextualTourOverlayKeyDown}
     />
   )

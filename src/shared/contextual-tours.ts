@@ -12,6 +12,19 @@ export type ContextualTourStepControl = {
   kind: 'auto-rename-branch-from-work'
 }
 
+export type ContextualTourStepActionKind =
+  | 'next'
+  | 'complete'
+  | 'split-terminal-pane'
+  | 'show-worktrees'
+  | 'open-tasks'
+  | 'open-getting-started'
+
+export type ContextualTourStepAction = {
+  kind: ContextualTourStepActionKind
+  label: string
+}
+
 export type ContextualTourStepPlacement = 'top' | 'right' | 'bottom' | 'left'
 
 export type ContextualTourStep = {
@@ -22,6 +35,8 @@ export type ContextualTourStep = {
   fallbackCopy?: string
   preferredPlacement?: ContextualTourStepPlacement
   control?: ContextualTourStepControl
+  primaryAction?: ContextualTourStepAction
+  secondaryAction?: ContextualTourStepAction
   advanceOnFeatureInteraction?: FeatureInteractionId
 }
 
@@ -57,12 +72,48 @@ export const CONTEXTUAL_TOURS = [
     id: 'workspace-agent-sessions',
     steps: [
       {
-        title: 'Split panes for agents',
-        body: 'Use the right-click menu or {terminal.splitRight} to split the terminal and keep multiple agent sessions visible at once.',
+        title: 'Work side by side',
+        body: 'Orca is built for running more than one thread of work at once.',
         targetSelector: '[data-contextual-tour-target="workspace-agent-terminal-tip"]',
         requiredForStart: true,
         preferredPlacement: 'bottom',
+        primaryAction: { kind: 'next', label: 'Show me' }
+      },
+      {
+        title: 'Split the terminal',
+        body: 'Split right to make room for another agent, a server, or a follow-up.',
+        targetSelector:
+          '[data-contextual-tour-target="terminal-pane-split-target"], [data-contextual-tour-target="workspace-agent-terminal-tip"]',
+        preferredPlacement: 'bottom',
+        primaryAction: { kind: 'split-terminal-pane', label: 'Split terminal' },
         advanceOnFeatureInteraction: 'terminal-pane-split'
+      },
+      {
+        title: 'Keep separate tasks isolated',
+        body: 'Use separate worktrees when you want different tasks or agents isolated from each other.',
+        targetSelector:
+          '[data-contextual-tour-target="workspace-list"], [data-contextual-tour-target="workspace-create-control"], [data-contextual-tour-target="sidebar-workspaces"]',
+        preferredPlacement: 'right',
+        primaryAction: { kind: 'show-worktrees', label: 'Show worktrees' },
+        secondaryAction: { kind: 'next', label: 'Skip' }
+      },
+      {
+        title: 'Start from real work',
+        body: 'Start from tasks, issues, reviews, or merge requests so agents begin with the right context.',
+        targetSelector:
+          '[data-contextual-tour-target="sidebar-tasks"], [data-contextual-tour-target="tasks-source-filters"], [data-contextual-tour-target="sidebar-navigation"]',
+        preferredPlacement: 'right',
+        primaryAction: { kind: 'open-tasks', label: 'Show tasks' },
+        secondaryAction: { kind: 'next', label: 'Skip' }
+      },
+      {
+        title: 'Orchestrate capable agents',
+        body: 'Use browser context, setup scripts, notifications, orchestration, and action skills so agents can coordinate beyond the terminal.',
+        targetSelector:
+          '[data-contextual-tour-target="browser-toolbar"], [data-contextual-tour-target="setup-guide-entry"], [data-contextual-tour-target="sidebar-navigation"]',
+        preferredPlacement: 'right',
+        primaryAction: { kind: 'open-getting-started', label: 'Open Getting started' },
+        secondaryAction: { kind: 'complete', label: 'Done' }
       }
     ]
   },

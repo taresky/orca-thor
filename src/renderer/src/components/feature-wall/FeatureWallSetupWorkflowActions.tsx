@@ -4,15 +4,22 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
+import { activateTabAndFocusPane } from '@/lib/activate-tab-and-focus-pane'
+import { focusTerminalTabSurface } from '@/lib/focus-terminal-tab-surface'
 import { useAppStore } from '@/store'
 import { useAllWorktrees } from '@/store/selectors'
 import { getDefaultRepoHookSettings } from '../../../../shared/constants'
 import { isGitRepoKind } from '../../../../shared/repo-kind'
-import type { RepoHookSettings, Worktree } from '../../../../shared/types'
+import type { RepoHookSettings, TerminalPaneLayoutNode, Worktree } from '../../../../shared/types'
 import { getRepositoryLocalCommandsSectionId } from '../settings/repository-settings-targets'
 import { AddReposAnimatedVisual } from './AddReposAnimatedVisual'
 import { SetupTwoAgentsVisual, SetupWorkspacesVisual } from './FeatureWallSetupStepVisuals'
 import { SetupScriptAnimatedVisual } from './SetupScriptAnimatedVisual'
+import {
+  requestContextualTourWhenReady,
+  type RequestContextualTourWhenReadyArgs
+} from '../contextual-tours/request-contextual-tour-when-ready'
+import { isWebRuntimeSessionActive } from '@/runtime/web-runtime-session'
 
 export function AddReposAction(props: { reducedMotion: boolean }): React.JSX.Element {
   const openModal = useAppStore((s) => s.openModal)
@@ -31,35 +38,85 @@ export function TwoAgentsAction(props: { reducedMotion: boolean }): React.JSX.El
   const targetWorktree = useSetupTargetWorktree()
   const openModal = useAppStore((s) => s.openModal)
   const closeModal = useAppStore((s) => s.closeModal)
-  const requestContextualTour = useAppStore((s) => s.requestContextualTour)
+  const paneTarget = useSecondPaneTarget(targetWorktree?.id ?? null)
   const handlePrimaryAction = useCallback(() => {
+    cancelPendingSetupGuideTourRequest()
     if (!targetWorktree) {
-      openModal('new-workspace-composer', { telemetrySource: 'unknown' })
-      window.setTimeout(() => {
-        requestContextualTour('workspace-creation', 'setup_guide_try_it_out', false, {
-          force: true
+      const tourRequestId = createSetupGuideTourRequestId()
+      openModal('new-workspace-composer', {
+        telemetrySource: 'unknown',
+        contextualTourSource: 'setup_guide_parallel_work',
+        setupGuideTourRequestId: tourRequestId
+      })
+      requestSetupGuideTourWhenReady({
+        id: 'workspace-creation',
+        source: 'setup_guide_parallel_work',
+        wasFeaturePreviouslyInteracted: false,
+        shouldContinue: () => isSetupGuideWorkspaceComposerRequestCurrent(tourRequestId)
+      })
+      return
+    }
+    if (paneTarget) {
+      closeModal()
+      requestSetupGuideTourAfterFrame(() => {
+        activateAndRevealWorktree(targetWorktree.id)
+        useAppStore.getState().setActiveTabType('terminal')
+        activateTabAndFocusPane(paneTarget.tabId, paneTarget.leafId, {
+          flashFocusedPane: true
         })
-      }, 80)
+      })
+      return
+    }
+    closeModal()
+    requestSetupGuideTourAfterFrame(() => {
+      activateWorktreeTerminalForSetupTour(targetWorktree.id)
+      requestSetupGuideTourWhenReady({
+        id: 'workspace-agent-sessions',
+        source: 'setup_guide_parallel_work',
+        wasFeaturePreviouslyInteracted: false,
+        shouldContinue: () => isWorktreeTerminalStillCurrent(targetWorktree.id)
+      })
+    })
+  }, [closeModal, openModal, paneTarget, targetWorktree])
+
+  const handleSecondaryAction = useCallback(() => {
+    cancelPendingSetupGuideTourRequest()
+    if (!targetWorktree) {
       return
     }
     closeModal()
     window.requestAnimationFrame(() => {
       activateAndRevealWorktree(targetWorktree.id)
-      window.setTimeout(() => {
-        requestContextualTour('workspace-agent-sessions', 'setup_guide_try_it_out', false, {
-          force: true
-        })
-      }, 120)
     })
-  }, [closeModal, openModal, requestContextualTour, targetWorktree])
+  }, [closeModal, targetWorktree])
 
   return (
     <div className="space-y-4">
       <SetupTwoAgentsVisual reducedMotion={props.reducedMotion} />
-      <Button type="button" size="sm" className="w-fit gap-2" onClick={handlePrimaryAction}>
-        <ArrowUpRight className="size-3.5" />
-        Try it out
-      </Button>
+      <div className="space-y-2">
+        <p className="max-w-[48ch] text-xs text-muted-foreground">
+          {paneTarget
+            ? 'You already have room for parallel work. Focus the second pane, then start another agent manually.'
+            : 'Split the terminal first, then start another agent manually in the new pane.'}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" size="sm" className="w-fit gap-2" onClick={handlePrimaryAction}>
+            <ArrowUpRight className="size-3.5" />
+            {paneTarget ? 'Focus second pane' : 'Split terminal'}
+          </Button>
+          {targetWorktree && !paneTarget ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-fit"
+              onClick={handleSecondaryAction}
+            >
+              Start from current workspace
+            </Button>
+          ) : null}
+        </div>
+      </div>
     </div>
   )
 }
@@ -67,7 +124,6 @@ export function TwoAgentsAction(props: { reducedMotion: boolean }): React.JSX.El
 export function WorkspacesAction(props: { reducedMotion: boolean }): React.JSX.Element {
   const openModal = useAppStore((s) => s.openModal)
   const activeRepoId = useAppStore((s) => s.activeRepoId)
-  const requestContextualTour = useAppStore((s) => s.requestContextualTour)
   return (
     <div className="space-y-4">
       <SetupWorkspacesVisual reducedMotion={props.reducedMotion} />
@@ -76,15 +132,20 @@ export function WorkspacesAction(props: { reducedMotion: boolean }): React.JSX.E
         size="sm"
         className="w-fit gap-2"
         onClick={() => {
+          cancelPendingSetupGuideTourRequest()
+          const tourRequestId = createSetupGuideTourRequestId()
           openModal('new-workspace-composer', {
             ...(activeRepoId ? { initialRepoId: activeRepoId } : {}),
-            telemetrySource: 'unknown'
+            telemetrySource: 'unknown',
+            contextualTourSource: 'setup_guide_parallel_work',
+            setupGuideTourRequestId: tourRequestId
           })
-          window.setTimeout(() => {
-            requestContextualTour('workspace-creation', 'setup_guide_try_it_out', false, {
-              force: true
-            })
-          }, 80)
+          requestSetupGuideTourWhenReady({
+            id: 'workspace-creation',
+            source: 'setup_guide_parallel_work',
+            wasFeaturePreviouslyInteracted: false,
+            shouldContinue: () => isSetupGuideWorkspaceComposerRequestCurrent(tourRequestId)
+          })
         }}
       >
         <ArrowUpRight className="size-3.5" />
@@ -209,5 +270,118 @@ function useSetupTargetWorktree(): Worktree | null {
     () =>
       allWorktrees.find((worktree) => worktree.id === activeWorktreeId) ?? allWorktrees[0] ?? null,
     [activeWorktreeId, allWorktrees]
+  )
+}
+
+export function activateWorktreeTerminalForSetupTour(worktreeId: string): string | null {
+  const activation = activateAndRevealWorktree(worktreeId)
+  if (!activation) {
+    return null
+  }
+  const state = useAppStore.getState()
+  const activeRuntimeEnvironmentId = state.settings?.activeRuntimeEnvironmentId ?? null
+  const webRuntimeActive = isWebRuntimeSessionActive(activeRuntimeEnvironmentId)
+  const activeGroupId = state.activeGroupIdByWorktree[worktreeId]
+  const tabs = state.tabsByWorktree[worktreeId] ?? []
+  const activeTerminalTabId =
+    state.activeTabId && tabs.some((tab) => tab.id === state.activeTabId) ? state.activeTabId : null
+  const tabId =
+    activeTerminalTabId ??
+    activation.primaryTabId ??
+    tabs[0]?.id ??
+    (webRuntimeActive ? null : state.createTab(worktreeId, activeGroupId).id)
+  if (!tabId) {
+    return null
+  }
+  // Why: the forced tour's split action targets the visible terminal tab.
+  // Worktree activation can restore an editor/browser as the active surface.
+  state.setActiveTabType('terminal')
+  state.setActiveTab(tabId)
+  focusTerminalTabSurface(tabId)
+  return tabId
+}
+
+function useSecondPaneTarget(worktreeId: string | null): { tabId: string; leafId: string } | null {
+  const activeTabId = useAppStore((s) => s.activeTabId)
+  const tabsByWorktree = useAppStore((s) => s.tabsByWorktree)
+  const terminalLayoutsByTabId = useAppStore((s) => s.terminalLayoutsByTabId)
+  return useMemo(() => {
+    if (!worktreeId) {
+      return null
+    }
+    const tabIds = (tabsByWorktree[worktreeId] ?? []).map((tab) => tab.id)
+    const orderedTabIds =
+      activeTabId && tabIds.includes(activeTabId)
+        ? [activeTabId, ...tabIds.filter((tabId) => tabId !== activeTabId)]
+        : tabIds
+    for (const tabId of orderedTabIds) {
+      const root = terminalLayoutsByTabId[tabId]?.root
+      const secondLeafId = getSecondSplitLeafId(root)
+      if (secondLeafId) {
+        return { tabId, leafId: secondLeafId }
+      }
+    }
+    return null
+  }, [activeTabId, tabsByWorktree, terminalLayoutsByTabId, worktreeId])
+}
+
+function getSecondSplitLeafId(node: TerminalPaneLayoutNode | null | undefined): string | null {
+  if (!node || node.type === 'leaf') {
+    return null
+  }
+  return getLeftmostLeafId(node.second)
+}
+
+function getLeftmostLeafId(node: TerminalPaneLayoutNode): string {
+  return node.type === 'leaf' ? node.leafId : getLeftmostLeafId(node.first)
+}
+
+let pendingSetupGuideTourCancel: (() => void) | null = null
+let pendingSetupGuideFrame: number | null = null
+let setupGuideTourRequestSequence = 0
+
+function createSetupGuideTourRequestId(): string {
+  setupGuideTourRequestSequence += 1
+  return `setup-guide-tour-${setupGuideTourRequestSequence}`
+}
+
+export function cancelPendingSetupGuideTourRequest(): void {
+  pendingSetupGuideTourCancel?.()
+  pendingSetupGuideTourCancel = null
+  if (pendingSetupGuideFrame !== null) {
+    window.cancelAnimationFrame(pendingSetupGuideFrame)
+    pendingSetupGuideFrame = null
+  }
+}
+
+export function requestSetupGuideTourWhenReady(args: RequestContextualTourWhenReadyArgs): void {
+  cancelPendingSetupGuideTourRequest()
+  pendingSetupGuideTourCancel = requestContextualTourWhenReady(args)
+}
+
+export function requestSetupGuideTourAfterFrame(callback: () => void): void {
+  cancelPendingSetupGuideTourRequest()
+  pendingSetupGuideFrame = window.requestAnimationFrame(() => {
+    pendingSetupGuideFrame = null
+    callback()
+  })
+}
+
+export function isSetupGuideWorkspaceComposerRequestCurrent(requestId: string): boolean {
+  const state = useAppStore.getState()
+  const modalData = state.modalData as { setupGuideTourRequestId?: unknown }
+  return (
+    state.activeModal === 'new-workspace-composer' &&
+    modalData.setupGuideTourRequestId === requestId
+  )
+}
+
+function isWorktreeTerminalStillCurrent(worktreeId: string): boolean {
+  const state = useAppStore.getState()
+  return (
+    state.activeModal === 'none' &&
+    state.activeWorktreeId === worktreeId &&
+    state.activeView === 'terminal' &&
+    state.activeTabType === 'terminal'
   )
 }

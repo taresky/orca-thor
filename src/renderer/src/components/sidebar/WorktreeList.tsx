@@ -1916,7 +1916,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   )
 
   return (
-    <div data-worktree-sidebar-container className="relative min-h-0 flex-1">
+    <div
+      data-worktree-sidebar-container
+      data-contextual-tour-target="workspace-list"
+      className="relative min-h-0 flex-1"
+    >
       <div
         ref={scrollRef}
         data-worktree-sidebar
@@ -3409,7 +3413,11 @@ const WorktreeList = React.memo(function WorktreeList({
 
   if (worktrees.length === 0) {
     return (
-      <div data-worktree-sidebar-container className="relative min-h-0 flex-1">
+      <div
+        data-worktree-sidebar-container
+        data-contextual-tour-target="workspace-list"
+        className="relative min-h-0 flex-1"
+      >
         <div className="worktree-sidebar-scrollbar flex h-full flex-col overflow-y-scroll overflow-x-hidden pl-1 scrollbar-sleek pt-px">
           <div className="flex flex-col items-center gap-2 px-4 py-6 text-center text-[11px] text-muted-foreground">
             <span>No workspaces found</span>

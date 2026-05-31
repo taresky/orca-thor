@@ -4,7 +4,7 @@ import type {
   FeatureWallSetupStep,
   FeatureWallSetupStepId
 } from '../../../../shared/feature-wall-setup-steps'
-import { getFeatureWallSetupSteps } from '../../../../shared/feature-wall-setup-steps'
+import { getFeatureWallSetupStepsForSection } from '../../../../shared/feature-wall-setup-steps'
 import { cn } from '@/lib/utils'
 import type { FeatureWallSetupProgress } from './feature-wall-setup-progress'
 import { usePrefersReducedMotion } from './feature-wall-modal-helpers'
@@ -69,22 +69,24 @@ function SetupStepRow(props: {
 
 function SetupSection(props: {
   title: string
-  count: string
+  steps: readonly FeatureWallSetupStep[]
   activeStepId: FeatureWallSetupStepId | null
   progress: FeatureWallSetupProgress
   onSelectStep: (id: FeatureWallSetupStepId) => void
 }): React.JSX.Element {
-  const steps = getFeatureWallSetupSteps()
+  const doneCount = props.steps.filter((step) => props.progress.stepDone[step.id]).length
   return (
     <section className="space-y-2">
       <div className="flex items-center justify-between gap-3">
         <h4 className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
           {props.title}
         </h4>
-        <span className="font-mono text-xs text-muted-foreground">{props.count}</span>
+        <span className="font-mono text-xs text-muted-foreground">
+          {doneCount}/{props.steps.length}
+        </span>
       </div>
       <div className="space-y-1.5">
-        {steps.map((step) => (
+        {props.steps.map((step) => (
           <SetupStepRow
             key={step.id}
             step={step}
@@ -214,13 +216,22 @@ export function FeatureWallSetupChecklist(
 ): React.JSX.Element {
   const { activeStep, progress, onSelectStep } = props
   const activeDone = activeStep ? progress.stepDone[activeStep.id] : false
+  const parallelWorkSteps = getFeatureWallSetupStepsForSection('parallel-work')
+  const setupSteps = getFeatureWallSetupStepsForSection('setup')
 
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(280px,360px)_minmax(0,1fr)]">
       <div className="space-y-5">
         <SetupSection
-          title="Core"
-          count={`${progress.coreDoneCount}/${progress.coreTotal}`}
+          title="Parallel work"
+          steps={parallelWorkSteps}
+          activeStepId={activeStep?.id ?? null}
+          progress={progress}
+          onSelectStep={onSelectStep}
+        />
+        <SetupSection
+          title="Setup"
+          steps={setupSteps}
           activeStepId={activeStep?.id ?? null}
           progress={progress}
           onSelectStep={onSelectStep}

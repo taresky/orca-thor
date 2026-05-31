@@ -109,6 +109,7 @@ const SidebarHeader = React.memo(function SidebarHeader() {
                 }}
                 aria-label="New workspace"
                 disabled={!canCreateWorkspace}
+                data-contextual-tour-target="workspace-create-control"
               >
                 <Plus className="size-3.5" strokeWidth={2.25} />
               </Button>

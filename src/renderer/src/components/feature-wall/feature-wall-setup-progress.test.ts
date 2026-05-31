@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { FeatureWallSetupProgressInput } from './feature-wall-setup-progress'
 import { getFeatureWallSetupProgress } from './feature-wall-setup-progress'
-import { getFeatureWallSetupSteps } from '../../../../shared/feature-wall-setup-steps'
+import {
+  getFeatureWallSetupSteps,
+  getFeatureWallSetupStepsForSection,
+  getFirstIncompleteFeatureWallSetupStepId
+} from '../../../../shared/feature-wall-setup-steps'
 import type { Worktree } from '../../../../shared/types'
 
 function makeInput(
@@ -19,6 +23,7 @@ function makeInput(
     worktreesByRepo: {},
     tabsByWorktree: {},
     agentStatusByPaneKey: {},
+    retainedAgentsByPaneKey: {},
     hasSetupScript: false,
     ...overrides
   }
@@ -40,17 +45,52 @@ describe('getFeatureWallSetupProgress', () => {
     expect(progress.coreTotal).toBe(8)
   })
 
-  it('keeps Add 2 projects as the final core setup task', () => {
+  it('orders visible parallel work before setup tasks', () => {
     expect(getFeatureWallSetupSteps().map((step) => step.id)).toEqual([
-      'default-agent',
-      'notifications',
       'two-agents',
       'three-workspaces',
+      'notifications',
+      'default-agent',
       'task-sources',
-      'agent-capabilities',
       'setup-script',
-      'add-two-repos'
+      'add-two-repos',
+      'agent-capabilities'
     ])
+  })
+
+  it('groups setup guide steps into Parallel work and Setup sections', () => {
+    expect(getFeatureWallSetupStepsForSection('parallel-work').map((step) => step.id)).toEqual([
+      'two-agents',
+      'three-workspaces'
+    ])
+    expect(getFeatureWallSetupStepsForSection('setup').map((step) => step.id)).toEqual([
+      'notifications',
+      'default-agent',
+      'task-sources',
+      'setup-script',
+      'add-two-repos',
+      'agent-capabilities'
+    ])
+  })
+
+  it('auto-selects incomplete parallel work before setup steps', () => {
+    const progress = getFeatureWallSetupProgress(
+      makeInput({
+        settings: {
+          defaultTuiAgent: 'claude',
+          notifications: { enabled: true, agentTaskComplete: true }
+        } as never,
+        hasConnectedTaskSource: true,
+        hasSetupScript: true,
+        gitRepoCount: 2,
+        browserUseSkillInstalled: true,
+        computerUseSkillInstalled: true,
+        computerUsePermissionsReady: true,
+        orchestrationSkillInstalled: true
+      })
+    )
+
+    expect(getFirstIncompleteFeatureWallSetupStepId(progress.stepDone)).toBe('two-agents')
   })
 
   it('does not mark two agents complete from split-pane interaction alone', () => {
@@ -110,6 +150,51 @@ describe('getFeatureWallSetupProgress', () => {
             agentType: 'codex',
             stateHistory: []
           }
+        }
+      })
+    )
+
+    expect(progress.stepDone['two-agents']).toBe(true)
+  })
+
+  it('marks two agents complete across live and retained hook-reported sessions in one worktree', () => {
+    const retainedEntry = {
+      entry: {
+        paneKey: 'tab-2:00000000-0000-4000-8000-000000000002',
+        state: 'done',
+        prompt: 'second task',
+        updatedAt: 2,
+        stateStartedAt: 2,
+        agentType: 'codex',
+        stateHistory: []
+      },
+      worktreeId: 'worktree-1',
+      tab: { id: 'tab-2', title: 'Terminal' },
+      agentType: 'codex',
+      startedAt: 2
+    } as never
+    const progress = getFeatureWallSetupProgress(
+      makeInput({
+        worktreesByRepo: { 'repo-1': [makeWorktree('worktree-1')] },
+        tabsByWorktree: {
+          'worktree-1': [
+            { id: 'tab-1', title: 'Terminal' },
+            { id: 'tab-2', title: 'Terminal' }
+          ] as never
+        },
+        agentStatusByPaneKey: {
+          'tab-1:00000000-0000-4000-8000-000000000001': {
+            paneKey: 'tab-1:00000000-0000-4000-8000-000000000001',
+            state: 'working',
+            prompt: 'first task',
+            updatedAt: 1,
+            stateStartedAt: 1,
+            agentType: 'claude',
+            stateHistory: []
+          }
+        },
+        retainedAgentsByPaneKey: {
+          'tab-2:00000000-0000-4000-8000-000000000002': retainedEntry
         }
       })
     )

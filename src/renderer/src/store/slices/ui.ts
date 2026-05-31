@@ -539,6 +539,7 @@ export type UISlice = {
   activeContextualTourId: ContextualTourId | null
   activeContextualTourStepIndex: number
   activeContextualTourSource: string | null
+  activeContextualTourSourceDetached: boolean
   activeContextualTourWasFeaturePreviouslyInteracted: boolean
   activeContextualTourSuppressed: boolean
   contextualTourShownThisSession: boolean
@@ -555,6 +556,7 @@ export type UISlice = {
     options?: { force?: boolean }
   ) => void
   suppressContextualTour: (id: ContextualTourId, source: string) => void
+  detachContextualTourSource: (id: ContextualTourId, source: string) => void
   advanceContextualTour: () => void
   regressContextualTour: () => void
   dismissContextualTour: (id?: ContextualTourId) => void
@@ -1048,6 +1050,7 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   activeContextualTourId: null,
   activeContextualTourStepIndex: 0,
   activeContextualTourSource: null,
+  activeContextualTourSourceDetached: false,
   activeContextualTourWasFeaturePreviouslyInteracted: false,
   activeContextualTourSuppressed: false,
   contextualTourShownThisSession: false,
@@ -1098,6 +1101,7 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         activeContextualTourId: id,
         activeContextualTourStepIndex: decision.stepIndex,
         activeContextualTourSource: source,
+        activeContextualTourSourceDetached: false,
         activeContextualTourWasFeaturePreviouslyInteracted:
           wasFeaturePreviouslyInteracted ?? hasFeatureInteraction(s.featureInteractions, id),
         activeContextualTourSuppressed: false,
@@ -1107,10 +1111,21 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
     }),
   suppressContextualTour: (id, source) =>
     set((s) => {
-      if (s.activeContextualTourId !== id || s.activeContextualTourSource !== source) {
+      if (
+        s.activeContextualTourId !== id ||
+        s.activeContextualTourSource !== source ||
+        s.activeContextualTourSourceDetached
+      ) {
         return s
       }
       return s.activeContextualTourSuppressed ? s : { activeContextualTourSuppressed: true }
+    }),
+  detachContextualTourSource: (id, source) =>
+    set((s) => {
+      if (s.activeContextualTourId !== id || s.activeContextualTourSource !== source) {
+        return s
+      }
+      return s.activeContextualTourSourceDetached ? s : { activeContextualTourSourceDetached: true }
     }),
   advanceContextualTour: () =>
     set((s) => {
@@ -1159,6 +1174,7 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         activeContextualTourId: null,
         activeContextualTourStepIndex: 0,
         activeContextualTourSource: null,
+        activeContextualTourSourceDetached: false,
         activeContextualTourWasFeaturePreviouslyInteracted: false,
         activeContextualTourSuppressed: false,
         lastCompletedContextualTourId: null
@@ -1182,6 +1198,7 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         activeContextualTourId: null,
         activeContextualTourStepIndex: 0,
         activeContextualTourSource: null,
+        activeContextualTourSourceDetached: false,
         activeContextualTourWasFeaturePreviouslyInteracted: false,
         activeContextualTourSuppressed: false,
         lastCompletedContextualTourId: tourId ?? null
@@ -1200,6 +1217,7 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         activeContextualTourId: null,
         activeContextualTourStepIndex: 0,
         activeContextualTourSource: null,
+        activeContextualTourSourceDetached: false,
         activeContextualTourWasFeaturePreviouslyInteracted: false,
         activeContextualTourSuppressed: false,
         lastCompletedContextualTourId: null,

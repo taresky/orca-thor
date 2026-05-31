@@ -25,6 +25,8 @@ type ComposerModalData = {
    *  `workspace_created.source` carries the right value. Falls back to
    *  `unknown` when omitted. */
   telemetrySource?: WorkspaceCreateTelemetrySource
+  contextualTourSource?: string
+  setupGuideTourRequestId?: string
 }
 
 export default function NewWorkspaceComposerModal(): React.JSX.Element | null {
@@ -207,6 +209,7 @@ function QuickTabBody({
         <DialogTitle className="text-base font-semibold">{primaryActionLabel}</DialogTitle>
       </DialogHeader>
       <NewWorkspaceComposerCard
+        contextualTourSource={modalData.contextualTourSource}
         composerRef={composerRef}
         nameInputRef={nameInputRef}
         quickAgent={quickAgent}

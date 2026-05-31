@@ -24,6 +24,9 @@ export function useContextualTour(
   const activeModal = useAppStore((s) => s.activeModal)
   const activeContextualTourId = useAppStore((s) => s.activeContextualTourId)
   const activeContextualTourSource = useAppStore((s) => s.activeContextualTourSource)
+  const activeContextualTourSourceDetached = useAppStore(
+    (s) => s.activeContextualTourSourceDetached
+  )
   const featureInteractions = useAppStore((s) => s.featureInteractions)
   const contextualToursSeenIds = useAppStore((s) => s.contextualToursSeenIds)
   const contextualToursAutoEligible = useAppStore((s) => s.contextualToursAutoEligible)
@@ -62,12 +65,18 @@ export function useContextualTour(
   useEffect(() => {
     // Why: source disable should end through the overlay so a shown tour gets
     // a cancellation outcome; the store flag also lets pre-render attempts retry.
-    if (!enabled && activeContextualTourId === id && activeContextualTourSource === source) {
+    if (
+      !enabled &&
+      activeContextualTourId === id &&
+      activeContextualTourSource === source &&
+      !activeContextualTourSourceDetached
+    ) {
       suppressContextualTour(id, source)
     }
   }, [
     activeContextualTourId,
     activeContextualTourSource,
+    activeContextualTourSourceDetached,
     enabled,
     id,
     source,
@@ -79,7 +88,11 @@ export function useContextualTour(
       const state = useAppStore.getState()
       // Why: surfaces like sheets can unmount without rendering an `enabled=false`
       // pass, so suppress their active tour during cleanup too.
-      if (state.activeContextualTourId === id && state.activeContextualTourSource === source) {
+      if (
+        state.activeContextualTourId === id &&
+        state.activeContextualTourSource === source &&
+        !state.activeContextualTourSourceDetached
+      ) {
         state.suppressContextualTour(id, source)
       }
     }

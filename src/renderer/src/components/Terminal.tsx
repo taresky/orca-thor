@@ -204,10 +204,21 @@ function Terminal(): React.JSX.Element | null {
   const activeWorktreeBrowserTabIdsKey = activeWorktreeId
     ? (browserTabsByWorktree[activeWorktreeId] ?? []).map((tab) => tab.id).join(',')
     : ''
+  const activeContextualTourId = useAppStore((s) => s.activeContextualTourId)
+  const hasSplitTerminalPane = useAppStore((s) =>
+    Boolean(s.featureInteractions['terminal-pane-split']?.interactionCount)
+  )
 
   useContextualTour(
     'workspace-agent-sessions',
-    Boolean(activeWorktreeId && activeView === 'terminal' && workspaceSessionReady),
+    Boolean(
+      activeWorktreeId &&
+      activeView === 'terminal' &&
+      workspaceSessionReady &&
+      activeTabType === 'terminal' &&
+      Boolean(activeTabId) &&
+      (!hasSplitTerminalPane || activeContextualTourId === 'workspace-agent-sessions')
+    ),
     'workspace_agent_sessions_visible'
   )
 

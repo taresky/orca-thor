@@ -1142,13 +1142,33 @@ describe('createUISlice contextual tours', () => {
 
     store
       .getState()
-      .requestContextualTour('workspace-agent-sessions', 'setup_guide_try_it_out', false, {
+      .requestContextualTour('workspace-agent-sessions', 'setup_guide_parallel_work', false, {
         force: true
       })
 
     expect(store.getState().activeContextualTourId).toBe('workspace-agent-sessions')
-    expect(store.getState().activeContextualTourSource).toBe('setup_guide_try_it_out')
+    expect(store.getState().activeContextualTourSource).toBe('setup_guide_parallel_work')
     expect(store.getState().activeContextualTourWasFeaturePreviouslyInteracted).toBe(false)
+  })
+
+  it('preserves the bounded setup-guide parallel-work source on forced tour requests', () => {
+    const store = createUIStore()
+    stubContextualTourTargets(['[data-contextual-tour-target="workspace-agent-terminal-tip"]'])
+    store.getState().hydratePersistedUI(
+      makePersistedUI({
+        contextualToursAutoEligible: false,
+        contextualToursSeenIds: ['workspace-agent-sessions']
+      })
+    )
+
+    store
+      .getState()
+      .requestContextualTour('workspace-agent-sessions', 'setup_guide_parallel_work', false, {
+        force: true
+      })
+
+    expect(store.getState().activeContextualTourId).toBe('workspace-agent-sessions')
+    expect(store.getState().activeContextualTourSource).toBe('setup_guide_parallel_work')
   })
 
   it('allows only workspace creation over its workspace composer modal', () => {
@@ -1185,7 +1205,7 @@ describe('createUISlice contextual tours', () => {
     expect(store.getState().activeContextualTourStepIndex).toBe(2)
   })
 
-  it('completes the active split-pane tour when the split command interaction is recorded', () => {
+  it('advances the active split step when the split command interaction is recorded', () => {
     const setMock = vi.fn(() => Promise.resolve())
     vi.stubGlobal('window', {
       api: {
@@ -1195,23 +1215,56 @@ describe('createUISlice contextual tours', () => {
       }
     })
     const store = createUIStore()
-    stubContextualTourTargets(['[data-contextual-tour-target="workspace-agent-terminal-tip"]'])
+    stubContextualTourTargets([
+      '[data-contextual-tour-target="workspace-agent-terminal-tip"]',
+      '[data-contextual-tour-target="terminal-pane-split-target"], [data-contextual-tour-target="workspace-agent-terminal-tip"]',
+      '[data-contextual-tour-target="workspace-list"], [data-contextual-tour-target="workspace-create-control"], [data-contextual-tour-target="sidebar-workspaces"]'
+    ])
     store.getState().hydratePersistedUI(makeAutoTourEligibleUI())
     setMock.mockClear()
     store
       .getState()
-      .requestContextualTour('workspace-agent-sessions', 'setup_guide_try_it_out', false, {
+      .requestContextualTour('workspace-agent-sessions', 'setup_guide_parallel_work', false, {
         force: true
       })
+    store.getState().advanceContextualTour()
+
+    store.getState().recordFeatureInteraction('terminal-pane-split')
+
+    expect(store.getState().activeContextualTourId).toBe('workspace-agent-sessions')
+    expect(store.getState().activeContextualTourStepIndex).toBe(2)
+    expect(store.getState().featureInteractions['terminal-pane-split']).toMatchObject({
+      interactionCount: 1
+    })
+  })
+
+  it('completes the split step when no later tour target is visible', () => {
+    const setMock = vi.fn(() => Promise.resolve())
+    vi.stubGlobal('window', {
+      api: {
+        ui: {
+          set: setMock
+        }
+      }
+    })
+    const store = createUIStore()
+    stubContextualTourTargets([
+      '[data-contextual-tour-target="workspace-agent-terminal-tip"]',
+      '[data-contextual-tour-target="terminal-pane-split-target"], [data-contextual-tour-target="workspace-agent-terminal-tip"]'
+    ])
+    store.getState().hydratePersistedUI(makeAutoTourEligibleUI())
+    store
+      .getState()
+      .requestContextualTour('workspace-agent-sessions', 'setup_guide_parallel_work', false, {
+        force: true
+      })
+    store.getState().advanceContextualTour()
 
     store.getState().recordFeatureInteraction('terminal-pane-split')
 
     expect(store.getState().activeContextualTourId).toBeNull()
     expect(store.getState().contextualToursSeenIds).toEqual(['workspace-agent-sessions'])
     expect(store.getState().lastCompletedContextualTourId).toBe('workspace-agent-sessions')
-    expect(store.getState().featureInteractions['terminal-pane-split']).toMatchObject({
-      interactionCount: 1
-    })
   })
 
   it('marks the active contextual tour suppressed when its owning source disables', () => {
@@ -1229,6 +1282,28 @@ describe('createUISlice contextual tours', () => {
 
     store.getState().suppressContextualTour('browser', 'browser_visible')
     expect(store.getState().activeContextualTourSuppressed).toBe(true)
+  })
+
+  it('keeps an intentionally detached contextual tour active when its owning source disables', () => {
+    const store = createUIStore()
+    store.setState({
+      activeContextualTourId: 'workspace-agent-sessions',
+      activeContextualTourStepIndex: 3,
+      activeContextualTourSource: 'workspace_agent_sessions_visible',
+      activeContextualTourWasFeaturePreviouslyInteracted: false,
+      contextualTourShownThisSession: true
+    })
+
+    store
+      .getState()
+      .detachContextualTourSource('workspace-agent-sessions', 'workspace_agent_sessions_visible')
+    store
+      .getState()
+      .suppressContextualTour('workspace-agent-sessions', 'workspace_agent_sessions_visible')
+
+    expect(store.getState().activeContextualTourSourceDetached).toBe(true)
+    expect(store.getState().activeContextualTourSuppressed).toBe(false)
+    expect(store.getState().activeContextualTourId).toBe('workspace-agent-sessions')
   })
 
   it('cancels a not-yet-rendered tour without persistence churn', () => {

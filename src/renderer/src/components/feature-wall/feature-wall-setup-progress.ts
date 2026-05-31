@@ -6,6 +6,7 @@ import {
 import type { GlobalSettings, TerminalTab, Worktree } from '../../../../shared/types'
 import type { AgentStatusEntry } from '../../../../shared/agent-status-types'
 import { parsePaneKey } from '../../../../shared/stable-pane-id'
+import type { RetainedAgentEntry } from '@/store/slices/agent-status'
 
 export type FeatureWallSetupProgressInput = {
   settings: GlobalSettings | null
@@ -19,6 +20,7 @@ export type FeatureWallSetupProgressInput = {
   worktreesByRepo: Record<string, Worktree[]>
   tabsByWorktree: Record<string, TerminalTab[]>
   agentStatusByPaneKey: Record<string, AgentStatusEntry>
+  retainedAgentsByPaneKey: Record<string, RetainedAgentEntry>
   hasSetupScript: boolean
 }
 
@@ -44,7 +46,13 @@ function hasTwoHookReportedAgentsInOneWorktree(input: FeatureWallSetupProgressIn
     }
   }
 
-  const agentCountsByWorktree = new Map<string, number>()
+  const paneKeysByWorktree = new Map<string, Set<string>>()
+  const addPaneKeyForWorktree = (worktreeId: string, paneKey: string): boolean => {
+    const paneKeys = paneKeysByWorktree.get(worktreeId) ?? new Set<string>()
+    paneKeys.add(paneKey)
+    paneKeysByWorktree.set(worktreeId, paneKeys)
+    return paneKeys.size >= 2
+  }
   for (const paneKey of Object.keys(input.agentStatusByPaneKey)) {
     const parsed = parsePaneKey(paneKey)
     if (!parsed) {
@@ -54,11 +62,17 @@ function hasTwoHookReportedAgentsInOneWorktree(input: FeatureWallSetupProgressIn
     if (!worktreeId) {
       continue
     }
-    const count = (agentCountsByWorktree.get(worktreeId) ?? 0) + 1
-    if (count >= 2) {
+    if (addPaneKeyForWorktree(worktreeId, paneKey)) {
       return true
     }
-    agentCountsByWorktree.set(worktreeId, count)
+  }
+  for (const [paneKey, retained] of Object.entries(input.retainedAgentsByPaneKey)) {
+    if (!validWorktreeIds.has(retained.worktreeId)) {
+      continue
+    }
+    if (addPaneKeyForWorktree(retained.worktreeId, paneKey)) {
+      return true
+    }
   }
   return false
 }

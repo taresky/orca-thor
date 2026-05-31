@@ -243,4 +243,35 @@ describe('contextual tour gate', () => {
     expect(getContextualTourOutcomeStepTotal(visibleStepIndexes)).toBe(2)
     expect(getContextualTourOutcomeStepTotal([])).toBe(1)
   })
+
+  it('keeps the full workspace-agent-sessions tour defined while skipping unavailable later targets', () => {
+    const tour = getContextualTour('workspace-agent-sessions')
+    const visibleSelectors = new Set([
+      tour.steps[0]!.targetSelector,
+      tour.steps[1]!.targetSelector,
+      tour.steps[4]!.targetSelector
+    ])
+    const targetExists = (selector: string): boolean => visibleSelectors.has(selector)
+    const visibleStepIndexes = getVisibleContextualTourStepIndexes(tour, targetExists)
+
+    expect(tour.steps.map((step) => step.title)).toEqual([
+      'Work side by side',
+      'Split the terminal',
+      'Keep separate tasks isolated',
+      'Start from real work',
+      'Orchestrate capable agents'
+    ])
+    expect(visibleStepIndexes).toEqual([0, 1, 4])
+    expect(
+      getNextVisibleContextualTourStepIndex({
+        tour,
+        currentStepIndex: 1,
+        targetExists
+      })
+    ).toBe(4)
+    expect(getContextualTourStepProgress({ visibleStepIndexes, stepIndex: 4 })).toEqual({
+      current: 3,
+      total: 3
+    })
+  })
 })

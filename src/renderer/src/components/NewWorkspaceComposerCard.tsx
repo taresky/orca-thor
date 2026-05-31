@@ -39,6 +39,7 @@ import type { SshConnectionStatus } from '../../../shared/ssh-types'
 type RepoOption = React.ComponentProps<typeof RepoCombobox>['repos'][number]
 
 type NewWorkspaceComposerCardProps = {
+  contextualTourSource?: string
   containerClassName?: string
   composerRef?: React.RefObject<HTMLDivElement | null>
   nameInputRef?: React.RefObject<HTMLInputElement | null>
@@ -203,6 +204,7 @@ function useComposerFileDragOver(): {
 }
 
 export default function NewWorkspaceComposerCard({
+  contextualTourSource,
   containerClassName,
   composerRef,
   nameInputRef,
@@ -293,9 +295,10 @@ export default function NewWorkspaceComposerCard({
   useContextualTour(
     'workspace-creation',
     eligibleRepos.length > 0 && Boolean(repoId),
-    activeModal === 'new-workspace-composer'
-      ? 'workspace_creation_modal'
-      : 'workspace_creation_visible'
+    contextualTourSource ??
+      (activeModal === 'new-workspace-composer'
+        ? 'workspace_creation_modal'
+        : 'workspace_creation_visible')
   )
 
   return (

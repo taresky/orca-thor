@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ManagedPane, PaneManager } from '@/lib/pane-manager/pane-manager'
 import type { PtyTransport } from './pty-transport'
 import { getConnectionId } from '@/lib/connection-context'
@@ -8,10 +8,15 @@ import { sendTerminalQuickCommandToPane } from './terminal-quick-command-dispatc
 import { splitWebRuntimeTerminal } from '@/runtime/web-runtime-session'
 import { pasteTerminalText } from './terminal-bracketed-paste'
 import { pasteTerminalClipboard } from './terminal-clipboard-paste'
+import {
+  REQUEST_ACTIVE_TERMINAL_PANE_SPLIT_EVENT,
+  type RequestActiveTerminalPaneSplitDetail
+} from '@/constants/terminal'
 
 const CLOSE_ALL_CONTEXT_MENUS_EVENT = 'orca-close-all-context-menus'
 
 type UseTerminalPaneContextMenuDeps = {
+  tabId: string
   managerRef: React.RefObject<PaneManager | null>
   paneTransportsRef: React.RefObject<Map<number, PtyTransport>>
   paneCwdRef: React.RefObject<PaneCwdMap>
@@ -46,6 +51,7 @@ type TerminalMenuState = {
 }
 
 export function useTerminalPaneContextMenu({
+  tabId,
   managerRef,
   paneTransportsRef,
   paneCwdRef,
@@ -74,7 +80,7 @@ export function useTerminalPaneContextMenu({
     return () => window.removeEventListener(CLOSE_ALL_CONTEXT_MENUS_EVENT, closeMenu)
   }, [])
 
-  const resolveMenuPane = (): ManagedPane | null => {
+  const resolveMenuPane = useCallback((): ManagedPane | null => {
     const manager = managerRef.current
     if (!manager) {
       return null
@@ -87,7 +93,7 @@ export function useTerminalPaneContextMenu({
       }
     }
     return manager.getActivePane() ?? panes[0] ?? null
-  }
+  }, [managerRef])
 
   const onCopy = async (): Promise<void> => {
     const pane = resolveMenuPane()
@@ -131,35 +137,54 @@ export function useTerminalPaneContextMenu({
   // Split-pane CWD inheritance (docs/ssh-split-pane-inherit-cwd.md):
   // mirror the Cmd+D path — sync split on confirmed OSC 7 cache hit,
   // otherwise fall back to async resolveSplitCwd.
-  const splitWithInheritedCwd = (direction: 'vertical' | 'horizontal'): void => {
-    const pane = resolveMenuPane()
-    if (!pane) {
-      return
-    }
-    onSplitPaneCommand?.()
-    const ptyId = paneTransportsRef.current.get(pane.id)?.getPtyId() ?? null
-    if (splitWebRuntimeTerminal(ptyId, direction)) {
-      return
-    }
-    const cached = paneCwdRef.current.get(pane.id)
-    if (cached?.confirmed && cached.cwd) {
-      managerRef.current?.splitPane(pane.id, direction, { cwd: cached.cwd })
-      return
-    }
-    const paneId = pane.id
-    void (async () => {
-      const cwd = await resolveSplitCwd({
-        paneCwdMap: paneCwdRef.current,
-        sourcePaneId: paneId,
-        sourcePtyId: ptyId,
-        fallbackCwd
-      })
-      managerRef.current?.splitPane(paneId, direction, { cwd })
-    })()
-  }
+  const splitWithInheritedCwd = useCallback(
+    (direction: 'vertical' | 'horizontal'): void => {
+      const pane = resolveMenuPane()
+      if (!pane) {
+        return
+      }
+      onSplitPaneCommand?.()
+      const ptyId = paneTransportsRef.current.get(pane.id)?.getPtyId() ?? null
+      if (splitWebRuntimeTerminal(ptyId, direction)) {
+        return
+      }
+      const cached = paneCwdRef.current.get(pane.id)
+      if (cached?.confirmed && cached.cwd) {
+        managerRef.current?.splitPane(pane.id, direction, { cwd: cached.cwd })
+        return
+      }
+      const paneId = pane.id
+      void (async () => {
+        const cwd = await resolveSplitCwd({
+          paneCwdMap: paneCwdRef.current,
+          sourcePaneId: paneId,
+          sourcePtyId: ptyId,
+          fallbackCwd
+        })
+        managerRef.current?.splitPane(paneId, direction, { cwd })
+      })()
+    },
+    [fallbackCwd, managerRef, onSplitPaneCommand, paneCwdRef, paneTransportsRef, resolveMenuPane]
+  )
 
   const onSplitRight = (): void => splitWithInheritedCwd('vertical')
   const onSplitDown = (): void => splitWithInheritedCwd('horizontal')
+
+  useEffect(() => {
+    const onRequestSplit = (event: Event): void => {
+      const detail = (event as CustomEvent<RequestActiveTerminalPaneSplitDetail>).detail
+      if (detail?.tabId && detail.tabId !== tabId) {
+        return
+      }
+      contextPaneIdRef.current = null
+      splitWithInheritedCwd(detail?.direction ?? 'vertical')
+    }
+    window.addEventListener(REQUEST_ACTIVE_TERMINAL_PANE_SPLIT_EVENT, onRequestSplit)
+    return () =>
+      window.removeEventListener(REQUEST_ACTIVE_TERMINAL_PANE_SPLIT_EVENT, onRequestSplit)
+    // splitWithInheritedCwd closes over live refs; re-registering keeps the
+    // tour action aligned with the current focused pane and fallback cwd.
+  }, [tabId, splitWithInheritedCwd])
 
   const onEqualizePaneSizes = (): void => {
     const pane = resolveMenuPane()
