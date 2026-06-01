@@ -1,18 +1,27 @@
+/* eslint-disable max-lines -- Why: resource mirroring keeps ownership markers,
+symlink fallback, and recursive fingerprints together so host and WSL behavior
+does not drift. */
+import { createHash } from 'node:crypto'
 import {
   cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   rmdirSync,
   rmSync,
+  statSync,
   symlinkSync,
   unlinkSync,
   writeFileSync
 } from 'node:fs'
+import type { Stats } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { parseWslUncPath } from '../../shared/wsl-paths'
 
 const CODEX_SYSTEM_RESOURCE_ENTRIES = [
   'skills',
@@ -22,6 +31,29 @@ const CODEX_SYSTEM_RESOURCE_ENTRIES = [
   'themes',
   'prompts'
 ] as const
+
+type ResourceFingerprint = {
+  kind: ResourceKind
+  size: number
+  mtimeMs: number
+  contentDigest?: string
+  entries?: ResourceFingerprintEntry[]
+  linkTarget?: string
+  targetFingerprint?: ResourceFingerprint
+}
+
+type ResourceFingerprintEntry = ResourceFingerprint & {
+  relativePath: string
+}
+
+type ResourceKind = 'directory' | 'file' | 'symlink' | 'other'
+
+type CopiedResourceMarker = {
+  sourcePath: string
+  sourceFingerprint?: ResourceFingerprint
+}
+
+const warnedResourceConflictKeys = new Set<string>()
 
 export function getSystemCodexHomePath(): string {
   return join(homedir(), '.codex')
@@ -51,34 +83,46 @@ function getOrcaUserDataPath(): string {
 export function syncSystemCodexResourcesIntoManagedHome(): void {
   const systemHomePath = getSystemCodexHomePath()
   const managedHomePath = getOrcaManagedCodexHomePath()
+  syncCodexResourcesIntoHome(systemHomePath, managedHomePath)
+}
+
+export function syncCodexResourcesIntoHome(sourceHomePath: string, targetHomePath: string): void {
   for (const entryName of CODEX_SYSTEM_RESOURCE_ENTRIES) {
-    linkSystemCodexResource(systemHomePath, managedHomePath, entryName)
+    try {
+      linkCodexResource(sourceHomePath, targetHomePath, entryName)
+    } catch (error) {
+      console.warn('[codex-home] Failed to sync Codex resource:', entryName, error)
+    }
   }
 }
 
-function linkSystemCodexResource(
-  systemHomePath: string,
-  managedHomePath: string,
+function linkCodexResource(
+  sourceHomePath: string,
+  targetHomePath: string,
   entryName: string
 ): void {
-  const sourcePath = join(systemHomePath, entryName)
-  const targetPath = join(managedHomePath, entryName)
+  const sourcePath = join(sourceHomePath, entryName)
+  const targetPath = join(targetHomePath, entryName)
   if (!existsSync(sourcePath)) {
-    removeCopiedResourceIfOwned(targetPath, managedHomePath, entryName, sourcePath)
+    removeCopiedResourceIfOwned(targetPath, targetHomePath, entryName, sourcePath)
     return
   }
 
   if (targetAlreadyPointsToSource(targetPath, sourcePath)) {
-    clearCopiedResourceMarker(managedHomePath, entryName)
+    clearCopiedResourceMarker(targetHomePath, entryName)
     return
   }
+  const sourceFingerprint = getResourceFingerprint(sourcePath)
   const shouldRefreshFallbackCopy = targetIsOwnedFallbackCopy(
     targetPath,
-    managedHomePath,
+    targetHomePath,
     entryName,
     sourcePath
   )
+    ? copiedResourceNeedsRefresh(targetHomePath, entryName, sourcePath, sourceFingerprint)
+    : false
   if (existsSync(targetPath) && !shouldRefreshFallbackCopy) {
+    warnIfRuntimeResourceBlocksMirror(targetHomePath, entryName, sourcePath)
     return
   }
   if (shouldRefreshFallbackCopy) {
@@ -92,19 +136,68 @@ function linkSystemCodexResource(
       targetPath,
       sourceStat.isDirectory() && process.platform === 'win32' ? 'junction' : undefined
     )
-    clearCopiedResourceMarker(managedHomePath, entryName)
+    clearCopiedResourceMarker(targetHomePath, entryName)
   } catch (error) {
     try {
       rmSync(targetPath, { recursive: true, force: true })
       // Why: Windows can reject file symlinks outside developer mode. Copy is
       // a fallback for launch-time resources; mark ownership so later syncs can
       // refresh the copy without touching user-created runtime resources.
-      cpSync(sourcePath, targetPath, { recursive: true, force: false, errorOnExist: true })
-      markCopiedResource(managedHomePath, entryName, sourcePath)
+      cpSync(sourcePath, targetPath, {
+        recursive: true,
+        force: false,
+        errorOnExist: true,
+        dereference: true
+      })
+      dereferenceCopiedSymlinks(targetPath)
+      markCopiedResource(targetHomePath, entryName, sourcePath, sourceFingerprint)
     } catch {
-      console.warn('[codex-home] Failed to link system Codex resource:', entryName, error)
+      console.warn('[codex-home] Failed to link Codex resource:', entryName, error)
     }
   }
+}
+
+function dereferenceCopiedSymlinks(targetPath: string): void {
+  const targetStat = lstatSync(targetPath)
+  if (targetStat.isSymbolicLink()) {
+    const realPath = realpathSync(targetPath)
+    rmSync(targetPath, { recursive: true, force: true })
+    cpSync(realPath, targetPath, {
+      recursive: true,
+      force: false,
+      errorOnExist: true,
+      dereference: true
+    })
+    dereferenceCopiedSymlinks(targetPath)
+    return
+  }
+  if (!targetStat.isDirectory()) {
+    return
+  }
+  for (const entry of readdirSync(targetPath)) {
+    dereferenceCopiedSymlinks(join(targetPath, entry))
+  }
+}
+
+function warnIfRuntimeResourceBlocksMirror(
+  targetHomePath: string,
+  entryName: string,
+  sourcePath: string
+): void {
+  const marker = readCopiedResourceMarker(targetHomePath, entryName)
+  if (marker?.sourcePath === sourcePath) {
+    return
+  }
+  const warnKey = `${entryName}\0${sourcePath}`
+  if (warnedResourceConflictKeys.has(warnKey)) {
+    return
+  }
+  warnedResourceConflictKeys.add(warnKey)
+  console.warn(
+    '[codex-home] Runtime Codex resource blocks mirrored system resource:',
+    entryName,
+    sourcePath
+  )
 }
 
 function targetAlreadyPointsToSource(targetPath: string, sourcePath: string): boolean {
@@ -119,6 +212,10 @@ function targetAlreadyPointsToSource(targetPath: string, sourcePath: string): bo
 }
 
 function linkTargetsMatch(actualTarget: string, expectedTarget: string): boolean {
+  const expectedWsl = parseWslUncPath(expectedTarget)
+  if (expectedWsl && actualTarget === expectedWsl.linuxPath) {
+    return true
+  }
   if (process.platform !== 'win32') {
     return actualTarget === expectedTarget
   }
@@ -126,35 +223,75 @@ function linkTargetsMatch(actualTarget: string, expectedTarget: string): boolean
 }
 
 function normalizeWindowsLinkTarget(linkTarget: string): string {
-  return linkTarget.replace(/^\\\\\?\\/, '').toLowerCase()
+  return linkTarget
+    .replace(/\//g, '\\')
+    .replace(/^\\\\\?\\UNC\\/i, '\\\\')
+    .replace(/^\\\\\?\\/i, '')
+    .toLowerCase()
 }
 
 function getResourceCopyMarkerPath(managedHomePath: string, entryName: string): string {
   return join(managedHomePath, '.orca-resource-copies', `${entryName}.json`)
 }
 
-function markCopiedResource(managedHomePath: string, entryName: string, sourcePath: string): void {
-  const markerPath = getResourceCopyMarkerPath(managedHomePath, entryName)
+function markCopiedResource(
+  targetHomePath: string,
+  entryName: string,
+  sourcePath: string,
+  sourceFingerprint: ResourceFingerprint
+): void {
+  const markerPath = getResourceCopyMarkerPath(targetHomePath, entryName)
   mkdirSync(dirname(markerPath), { recursive: true })
-  writeFileSync(markerPath, `${JSON.stringify({ sourcePath }, null, 2)}\n`, {
+  writeFileSync(markerPath, `${JSON.stringify({ sourcePath, sourceFingerprint }, null, 2)}\n`, {
     encoding: 'utf-8',
     mode: 0o600
   })
 }
 
-function readCopiedResourceSourcePath(managedHomePath: string, entryName: string): string | null {
+function readCopiedResourceMarker(
+  targetHomePath: string,
+  entryName: string
+): CopiedResourceMarker | null {
   try {
     const parsed: unknown = JSON.parse(
-      readFileSync(getResourceCopyMarkerPath(managedHomePath, entryName), 'utf-8')
+      readFileSync(getResourceCopyMarkerPath(targetHomePath, entryName), 'utf-8')
     )
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return null
     }
     const sourcePath = 'sourcePath' in parsed ? parsed.sourcePath : null
-    return typeof sourcePath === 'string' ? sourcePath : null
+    if (typeof sourcePath !== 'string') {
+      return null
+    }
+    const sourceFingerprint =
+      'sourceFingerprint' in parsed && isResourceFingerprint(parsed.sourceFingerprint)
+        ? parsed.sourceFingerprint
+        : undefined
+    return { sourcePath, sourceFingerprint }
   } catch {
     return null
   }
+}
+
+function isResourceFingerprint(value: unknown): value is ResourceFingerprint {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false
+  }
+  const candidate = value as Partial<ResourceFingerprint>
+  return (
+    isResourceKind(candidate.kind) &&
+    typeof candidate.size === 'number' &&
+    typeof candidate.mtimeMs === 'number' &&
+    (candidate.contentDigest === undefined || typeof candidate.contentDigest === 'string') &&
+    (candidate.entries === undefined || Array.isArray(candidate.entries)) &&
+    (candidate.linkTarget === undefined || typeof candidate.linkTarget === 'string') &&
+    (candidate.targetFingerprint === undefined ||
+      isResourceFingerprint(candidate.targetFingerprint))
+  )
+}
+
+function isResourceKind(value: unknown): value is ResourceKind {
+  return value === 'directory' || value === 'file' || value === 'symlink' || value === 'other'
 }
 
 function clearCopiedResourceMarker(managedHomePath: string, entryName: string): void {
@@ -163,11 +300,11 @@ function clearCopiedResourceMarker(managedHomePath: string, entryName: string): 
 
 function targetIsOwnedFallbackCopy(
   targetPath: string,
-  managedHomePath: string,
+  targetHomePath: string,
   entryName: string,
   sourcePath: string
 ): boolean {
-  if (readCopiedResourceSourcePath(managedHomePath, entryName) !== sourcePath) {
+  if (readCopiedResourceMarker(targetHomePath, entryName)?.sourcePath !== sourcePath) {
     return false
   }
   try {
@@ -175,6 +312,22 @@ function targetIsOwnedFallbackCopy(
   } catch {
     return false
   }
+}
+
+function copiedResourceNeedsRefresh(
+  targetHomePath: string,
+  entryName: string,
+  sourcePath: string,
+  sourceFingerprint: ResourceFingerprint
+): boolean {
+  const marker = readCopiedResourceMarker(targetHomePath, entryName)
+  if (marker?.sourcePath !== sourcePath) {
+    return false
+  }
+  if (!marker.sourceFingerprint) {
+    return true
+  }
+  return JSON.stringify(marker.sourceFingerprint) !== JSON.stringify(sourceFingerprint)
 }
 
 function removeCopiedResourceIfOwned(
@@ -192,6 +345,92 @@ function removeCopiedResourceIfOwned(
   }
   rmSync(targetPath, { recursive: true, force: true })
   clearCopiedResourceMarker(managedHomePath, entryName)
+}
+
+function getResourceFingerprint(sourcePath: string): ResourceFingerprint {
+  const fingerprint = getResourceFingerprintForEntry(sourcePath)
+  if (fingerprint.kind !== 'directory') {
+    return fingerprint
+  }
+  return {
+    ...fingerprint,
+    entries: listDirectoryFingerprintEntries(sourcePath, sourcePath)
+  }
+}
+
+function listDirectoryFingerprintEntries(
+  rootPath: string,
+  directoryPath: string
+): ResourceFingerprintEntry[] {
+  const entries: ResourceFingerprintEntry[] = []
+  for (const entry of readdirSync(directoryPath, { withFileTypes: true }).sort((left, right) =>
+    left.name.localeCompare(right.name)
+  )) {
+    const entryPath = join(directoryPath, entry.name)
+    const fingerprint = getResourceFingerprintForEntry(entryPath)
+    entries.push({
+      relativePath: entryPath.slice(rootPath.length + 1),
+      ...fingerprint
+    })
+    if (fingerprint.kind === 'directory') {
+      entries.push(...listDirectoryFingerprintEntries(rootPath, entryPath))
+    }
+  }
+  return entries
+}
+
+function getResourceFingerprintForEntry(sourcePath: string): ResourceFingerprint {
+  const stat = lstatSync(sourcePath)
+  const fingerprint: ResourceFingerprint = {
+    kind: getResourceKind(stat),
+    size: stat.size,
+    mtimeMs: stat.mtimeMs
+  }
+  if (fingerprint.kind === 'file') {
+    fingerprint.contentDigest = getFileDigest(sourcePath)
+  }
+  if (fingerprint.kind === 'symlink') {
+    fingerprint.linkTarget = readlinkSync(sourcePath)
+    fingerprint.targetFingerprint = getSymlinkTargetFingerprint(sourcePath)
+  }
+  return fingerprint
+}
+
+function getResourceKind(stat: Stats): ResourceKind {
+  if (stat.isDirectory()) {
+    return 'directory'
+  }
+  if (stat.isFile()) {
+    return 'file'
+  }
+  if (stat.isSymbolicLink()) {
+    return 'symlink'
+  }
+  return 'other'
+}
+
+function getFileDigest(sourcePath: string): string {
+  return `sha256:${createHash('sha256').update(readFileSync(sourcePath)).digest('hex')}`
+}
+
+function getSymlinkTargetFingerprint(sourcePath: string): ResourceFingerprint | undefined {
+  try {
+    const targetStat = statSync(sourcePath)
+    const fingerprint: ResourceFingerprint = {
+      kind: getResourceKind(targetStat),
+      size: targetStat.size,
+      mtimeMs: targetStat.mtimeMs
+    }
+    if (fingerprint.kind === 'file') {
+      fingerprint.contentDigest = getFileDigest(sourcePath)
+    }
+    if (fingerprint.kind === 'directory') {
+      fingerprint.entries = listDirectoryFingerprintEntries(sourcePath, sourcePath)
+    }
+    return fingerprint
+  } catch {
+    return undefined
+  }
 }
 
 function removeSymlinkedResourceIfOwned(targetPath: string, sourcePath: string): boolean {

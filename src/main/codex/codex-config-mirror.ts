@@ -1,7 +1,7 @@
 /* eslint-disable max-lines -- Why: keeping Codex config merge policy beside
 the TOML section scanner makes precedence between system config, runtime
 preferences, and trust state auditable in one place. */
-import { existsSync, readFileSync } from 'fs'
+import { existsSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { normalizeRuntimePathForComparison } from '../../shared/cross-platform-path'
 import { writeFileAtomically } from '../codex-accounts/fs-utils'
@@ -22,17 +22,25 @@ function getSystemCodexConfigTomlPath(): string {
   return join(getSystemCodexHomePath(), 'config.toml')
 }
 
+export type CodexConfigSyncOptions = {
+  syncStatePath?: string
+  clearRuntimeConfigWhenSystemMissingWithoutBaseline?: boolean
+}
+
 export function syncSystemConfigIntoManagedCodexHome(): void {
   try {
-    syncSystemConfigIntoManagedCodexHomeUnsafe()
+    syncCodexConfigIntoHome(getSystemCodexConfigTomlPath(), getRuntimeCodexConfigTomlPath())
   } catch (error) {
     console.warn('[codex-config] Failed to mirror system Codex config:', error)
   }
 }
 
-function syncSystemConfigIntoManagedCodexHomeUnsafe(): void {
-  const systemConfigPath = getSystemCodexConfigTomlPath()
-  const runtimeConfigPath = getRuntimeCodexConfigTomlPath()
+export function syncCodexConfigIntoHome(
+  systemConfigPath: string,
+  runtimeConfigPath: string,
+  options: CodexConfigSyncOptions = {}
+): void {
+  const syncStatePath = options.syncStatePath
   const systemConfigExists = existsSync(systemConfigPath)
   const runtimeConfigExists = existsSync(runtimeConfigPath)
   if (!systemConfigExists && !runtimeConfigExists) {
@@ -45,7 +53,7 @@ function syncSystemConfigIntoManagedCodexHomeUnsafe(): void {
   const systemConfigUnits = getSystemConfigUnits(systemConfig)
   const systemConfigUnitDigests = getSystemConfigUnitDigestRecord(systemConfigUnits)
   const mirrorableSystemConfig = getMirrorableSystemCodexConfig(systemConfig)
-  const lastSyncedSystemConfig = readLastSyncedSystemCodexConfigState()
+  const lastSyncedSystemConfig = readLastSyncedSystemCodexConfigState(syncStatePath)
   const lastSyncedMirrorableSystemConfig =
     lastSyncedSystemConfig.status === 'legacy'
       ? {
@@ -69,19 +77,25 @@ function syncSystemConfigIntoManagedCodexHomeUnsafe(): void {
     writeFileAtomically(runtimeConfigPath, stripRuntimeOwnedTomlSections(systemConfig))
     writeLastSyncedMirrorableSystemCodexConfigDigest(
       mirrorableSystemConfig,
-      systemConfigUnitDigests
+      systemConfigUnitDigests,
+      syncStatePath
     )
     return
   }
 
   if (!systemConfigExists) {
     if (lastSyncedMirrorableSystemConfig.status !== 'valid') {
+      if (options.clearRuntimeConfigWhenSystemMissingWithoutBaseline) {
+        clearMirrorableCodexRuntimeConfig(runtimeConfigPath)
+        writeLastSyncedMirrorableSystemCodexConfigDigest('', {}, syncStatePath)
+      }
       return
     }
     if (lastSyncedMirrorableSystemConfig.unitDigests === null) {
       if (lastSyncedMirrorableSystemConfig.needsRewrite) {
         writeLastSyncedMirrorableSystemCodexConfigDigestOnly(
-          lastSyncedMirrorableSystemConfig.digest
+          lastSyncedMirrorableSystemConfig.digest,
+          syncStatePath
         )
       }
       return
@@ -91,7 +105,8 @@ function syncSystemConfigIntoManagedCodexHomeUnsafe(): void {
       // scrub legacy raw config without treating temporary absence as deletion.
       writeLastSyncedMirrorableSystemCodexConfigDigestValue(
         lastSyncedMirrorableSystemConfig.digest,
-        lastSyncedMirrorableSystemConfig.unitDigests
+        lastSyncedMirrorableSystemConfig.unitDigests,
+        syncStatePath
       )
       return
     }
@@ -110,7 +125,8 @@ function syncSystemConfigIntoManagedCodexHomeUnsafe(): void {
     }
     writeLastSyncedMirrorableSystemCodexConfigDigestValue(
       getSystemCodexConfigDigest(mirrorableSystemConfig),
-      nextUnitDigests
+      nextUnitDigests,
+      syncStatePath
     )
     return
   }
@@ -126,7 +142,8 @@ function syncSystemConfigIntoManagedCodexHomeUnsafe(): void {
     }
     writeLastSyncedMirrorableSystemCodexConfigDigest(
       mirrorableSystemConfig,
-      systemConfigUnitDigests
+      systemConfigUnitDigests,
+      syncStatePath
     )
     return
   }
@@ -141,7 +158,8 @@ function syncSystemConfigIntoManagedCodexHomeUnsafe(): void {
     // previously mirrored, so recover the baseline without overwriting TUI prefs.
     writeLastSyncedMirrorableSystemCodexConfigDigest(
       mirrorableSystemConfig,
-      systemConfigUnitDigests
+      systemConfigUnitDigests,
+      syncStatePath
     )
     return
   }
@@ -159,7 +177,8 @@ function syncSystemConfigIntoManagedCodexHomeUnsafe(): void {
       }
       writeLastSyncedMirrorableSystemCodexConfigDigest(
         mirrorableSystemConfig,
-        systemConfigUnitDigests
+        systemConfigUnitDigests,
+        syncStatePath
       )
       return
     }
@@ -174,7 +193,8 @@ function syncSystemConfigIntoManagedCodexHomeUnsafe(): void {
       }
       writeLastSyncedMirrorableSystemCodexConfigDigest(
         mirrorableSystemConfig,
-        systemConfigUnitDigests
+        systemConfigUnitDigests,
+        syncStatePath
       )
       return
     }
@@ -184,7 +204,8 @@ function syncSystemConfigIntoManagedCodexHomeUnsafe(): void {
     }
     writeLastSyncedMirrorableSystemCodexConfigDigest(
       mirrorableSystemConfig,
-      systemConfigUnitDigests
+      systemConfigUnitDigests,
+      syncStatePath
     )
     return
   }
@@ -198,7 +219,45 @@ function syncSystemConfigIntoManagedCodexHomeUnsafe(): void {
   if (mergedConfig !== runtimeConfig) {
     writeFileAtomically(runtimeConfigPath, mergedConfig)
   }
-  writeLastSyncedMirrorableSystemCodexConfigDigest(mirrorableSystemConfig, systemConfigUnitDigests)
+  writeLastSyncedMirrorableSystemCodexConfigDigest(
+    mirrorableSystemConfig,
+    systemConfigUnitDigests,
+    syncStatePath
+  )
+}
+
+export function syncDeletedSystemConfigIntoCodexHome(
+  runtimeConfigPath: string,
+  syncStatePath?: string
+): void {
+  const lastSyncedMirrorableSystemConfig = readLastSyncedSystemCodexConfigState(syncStatePath)
+  if (
+    lastSyncedMirrorableSystemConfig.status !== 'valid' ||
+    lastSyncedMirrorableSystemConfig.unitDigests === null ||
+    lastSyncedMirrorableSystemConfig.needsRewrite ||
+    !existsSync(runtimeConfigPath)
+  ) {
+    return
+  }
+  const runtimeConfig = readFileSync(runtimeConfigPath, 'utf-8')
+  const mergedConfig = mergeChangedSystemConfigUnitsIntoRuntime(
+    runtimeConfig,
+    [],
+    lastSyncedMirrorableSystemConfig.unitDigests
+  )
+  if (mergedConfig !== runtimeConfig) {
+    writeFileAtomically(runtimeConfigPath, mergedConfig)
+  }
+}
+
+export function clearMirrorableCodexRuntimeConfig(runtimeConfigPath: string): void {
+  const runtimeConfig = readFileSync(runtimeConfigPath, 'utf-8')
+  const runtimeOwnedConfig = getRuntimeOwnedTomlConfig(runtimeConfig)
+  if (runtimeOwnedConfig.trim().length === 0) {
+    rmSync(runtimeConfigPath, { force: true })
+    return
+  }
+  writeFileAtomically(runtimeConfigPath, runtimeOwnedConfig)
 }
 
 function normalizeDeprecatedCodexHookFeatureFlag(config: string): string {
@@ -685,6 +744,19 @@ function stripRuntimeOwnedTomlSections(
       )
       .map((section) => section.block)
   ])
+}
+
+function getRuntimeOwnedTomlConfig(config: string): string {
+  const sections = getTomlSections(config)
+  return joinTomlBlocks(
+    sections
+      .filter(
+        (section) =>
+          isRuntimeHookTrustTomlSection(section.header) ||
+          isRuntimeProjectTomlSection(section.header)
+      )
+      .map((section) => section.block)
+  )
 }
 
 function getTomlSections(config: string): TomlSection[] {

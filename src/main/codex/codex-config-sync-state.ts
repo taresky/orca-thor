@@ -29,17 +29,21 @@ type CodexConfigSyncStateRead =
 
 const SYSTEM_CONFIG_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/
 
-function getCodexConfigSyncStatePath(): string {
-  return join(dirname(getOrcaManagedCodexHomePath()), 'config-sync-state.json')
+function getCodexConfigSyncStatePath(syncStatePath?: string): string {
+  return syncStatePath ?? join(dirname(getOrcaManagedCodexHomePath()), 'config-sync-state.json')
 }
 
 export function getSystemCodexConfigDigest(systemConfig: string): string {
   return `sha256:${createHash('sha256').update(systemConfig).digest('hex')}`
 }
 
-export function readLastSyncedSystemCodexConfigState(): CodexConfigSyncStateRead {
+export function readLastSyncedSystemCodexConfigState(
+  syncStatePath?: string
+): CodexConfigSyncStateRead {
   try {
-    const parsed = JSON.parse(readFileSync(getCodexConfigSyncStatePath(), 'utf-8')) as unknown
+    const parsed = JSON.parse(
+      readFileSync(getCodexConfigSyncStatePath(syncStatePath), 'utf-8')
+    ) as unknown
     const isStateObject = parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
     const hasLegacySystemConfig = isStateObject && Object.hasOwn(parsed, 'lastSystemConfig')
     const lastSystemConfig =
@@ -108,17 +112,20 @@ function isValidDigestRecord(value: unknown): value is Record<string, string> {
 
 export function writeLastSyncedMirrorableSystemCodexConfigDigest(
   mirrorableSystemConfig: string,
-  unitDigests: Record<string, string>
+  unitDigests: Record<string, string>,
+  syncStatePath?: string
 ): void {
   writeLastSyncedMirrorableSystemCodexConfigDigestValue(
     getSystemCodexConfigDigest(mirrorableSystemConfig),
-    unitDigests
+    unitDigests,
+    syncStatePath
   )
 }
 
 export function writeLastSyncedMirrorableSystemCodexConfigDigestValue(
   digest: string,
-  unitDigests: Record<string, string>
+  unitDigests: Record<string, string>,
+  syncStatePath?: string
 ): void {
   if (!SYSTEM_CONFIG_DIGEST_PATTERN.test(digest)) {
     throw new Error('Invalid Codex config digest')
@@ -126,26 +133,39 @@ export function writeLastSyncedMirrorableSystemCodexConfigDigestValue(
   if (!isValidDigestRecord(unitDigests)) {
     throw new Error('Invalid Codex config unit digests')
   }
-  writeConfigSyncState({
-    lastMirrorableSystemConfigDigest: digest,
-    lastSystemConfigUnitDigests: unitDigests
-  })
+  writeConfigSyncState(
+    {
+      lastMirrorableSystemConfigDigest: digest,
+      lastSystemConfigUnitDigests: unitDigests
+    },
+    syncStatePath
+  )
 }
 
-export function writeLastSyncedMirrorableSystemCodexConfigDigestOnly(digest: string): void {
+export function writeLastSyncedMirrorableSystemCodexConfigDigestOnly(
+  digest: string,
+  syncStatePath?: string
+): void {
   if (!SYSTEM_CONFIG_DIGEST_PATTERN.test(digest)) {
     throw new Error('Invalid Codex config digest')
   }
-  writeConfigSyncState({ lastMirrorableSystemConfigDigest: digest })
+  writeConfigSyncState({ lastMirrorableSystemConfigDigest: digest }, syncStatePath)
 }
 
-function writeConfigSyncState(state: {
-  lastMirrorableSystemConfigDigest: string
-  lastSystemConfigUnitDigests?: Record<string, string>
-}): void {
+function writeConfigSyncState(
+  state: {
+    lastMirrorableSystemConfigDigest: string
+    lastSystemConfigUnitDigests?: Record<string, string>
+  },
+  syncStatePath?: string
+): void {
   // Why: config.toml can contain provider credentials; a digest is enough to
   // detect user edits without persisting a second copy of the config.
-  writeFileAtomically(getCodexConfigSyncStatePath(), `${JSON.stringify(state, null, 2)}\n`, {
-    mode: 0o600
-  })
+  writeFileAtomically(
+    getCodexConfigSyncStatePath(syncStatePath),
+    `${JSON.stringify(state, null, 2)}\n`,
+    {
+      mode: 0o600
+    }
+  )
 }

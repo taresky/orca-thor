@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- Resource mirror behavior spans symlink, copy,
+ownership, and stale-cleanup cases that need shared fs mocks. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   existsSync,
@@ -8,6 +10,7 @@ import {
   readlinkSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -21,13 +24,23 @@ const { getPathMock, homedirMock } = vi.hoisted(() => ({
 }))
 
 const { fsMockState } = vi.hoisted(() => ({
-  fsMockState: { failSymlink: false }
+  fsMockState: {
+    failSymlink: false,
+    readlinkOverrides: new Map<string, string>()
+  }
 }))
 
 vi.mock('node:fs', async () => {
   const actual = await vi.importActual<typeof NodeFs>('node:fs')
   return {
     ...actual,
+    readlinkSync: (...args: Parameters<typeof actual.readlinkSync>) => {
+      const override = fsMockState.readlinkOverrides.get(String(args[0]))
+      if (override !== undefined) {
+        return override
+      }
+      return actual.readlinkSync(...args)
+    },
     symlinkSync: (...args: Parameters<typeof actual.symlinkSync>) => {
       if (fsMockState.failSymlink) {
         throw new Error('symlink disabled for test')
@@ -51,7 +64,10 @@ vi.mock('node:os', async () => {
   }
 })
 
-import { syncSystemCodexResourcesIntoManagedHome } from './codex-home-paths'
+import {
+  syncCodexResourcesIntoHome,
+  syncSystemCodexResourcesIntoManagedHome
+} from './codex-home-paths'
 
 let fakeHomeDir: string
 let userDataDir: string
@@ -89,6 +105,7 @@ function mockElectronAppPaths(): void {
 beforeEach(() => {
   mockElectronAppPaths()
   fsMockState.failSymlink = false
+  fsMockState.readlinkOverrides.clear()
   fakeHomeDir = mkdtempSync(join(tmpdir(), 'orca-codex-resource-home-'))
   userDataDir = mkdtempSync(join(tmpdir(), 'orca-codex-resource-user-data-'))
   previousUserDataPath = process.env.ORCA_USER_DATA_PATH
@@ -204,6 +221,47 @@ describe('syncSystemCodexResourcesIntoManagedHome', () => {
     expect(readFileSync(join(runtimePluginsPath, 'runtime.md'), 'utf-8')).toBe('runtime\n')
   })
 
+  it('recognizes Windows extended UNC resource links as owned', () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    const sourceHomePath = '\\\\wsl.localhost\\Ubuntu\\home\\alice\\.codex'
+    const targetHomePath = getRuntimeCodexHomePath()
+    const targetSkillsPath = join(targetHomePath, 'skills')
+    const placeholderSourcePath = join(fakeHomeDir, 'placeholder-skills')
+    mkdirSync(placeholderSourcePath, { recursive: true })
+    mkdirSync(targetHomePath, { recursive: true })
+    symlinkSync(placeholderSourcePath, targetSkillsPath, 'junction')
+    fsMockState.readlinkOverrides.set(
+      targetSkillsPath,
+      '\\\\?\\UNC\\wsl.localhost\\Ubuntu\\home\\alice\\.codex\\skills'
+    )
+
+    try {
+      syncCodexResourcesIntoHome(sourceHomePath, targetHomePath)
+
+      expect(() => lstatSync(targetSkillsPath)).toThrow()
+    } finally {
+      if (originalPlatform) {
+        Object.defineProperty(process, 'platform', originalPlatform)
+      }
+    }
+  })
+
+  it('recognizes Linux readlink targets for WSL UNC resource links as owned', () => {
+    const sourceHomePath = '\\\\wsl.localhost\\Ubuntu\\home\\alice\\.codex'
+    const targetHomePath = getRuntimeCodexHomePath()
+    const targetSkillsPath = join(targetHomePath, 'skills')
+    const placeholderSourcePath = join(fakeHomeDir, 'placeholder-skills')
+    mkdirSync(placeholderSourcePath, { recursive: true })
+    mkdirSync(targetHomePath, { recursive: true })
+    symlinkSync(placeholderSourcePath, targetSkillsPath)
+    fsMockState.readlinkOverrides.set(targetSkillsPath, '/home/alice/.codex/skills')
+
+    syncCodexResourcesIntoHome(sourceHomePath, targetHomePath)
+
+    expect(() => lstatSync(targetSkillsPath)).toThrow()
+  })
+
   it('refreshes owned fallback copies when symlinks are unavailable', () => {
     fsMockState.failSymlink = true
     const systemProfilePath = join(getSystemCodexHomePath(), 'profile-v2')
@@ -216,5 +274,108 @@ describe('syncSystemCodexResourcesIntoManagedHome', () => {
 
     expect(lstatSync(runtimeProfilePath).isSymbolicLink()).toBe(false)
     expect(readFileSync(runtimeProfilePath, 'utf-8')).toBe('second\n')
+  })
+
+  it('mirrors resources from explicit source and target homes', () => {
+    const sourceHomePath = join(fakeHomeDir, 'source-codex')
+    const targetHomePath = join(userDataDir, 'target-codex')
+    mkdirSync(join(sourceHomePath, 'prompts'), { recursive: true })
+    writeFileSync(join(sourceHomePath, 'prompts', 'review.md'), 'prompt\n', 'utf-8')
+    writeFileSync(join(sourceHomePath, 'auth.json'), '{"account":"ignored"}\n', 'utf-8')
+
+    syncCodexResourcesIntoHome(sourceHomePath, targetHomePath)
+
+    const targetPromptsPath = join(targetHomePath, 'prompts')
+    expect(readFileSync(join(targetPromptsPath, 'review.md'), 'utf-8')).toBe('prompt\n')
+    expectSymbolicLinkTargetIfLinked(targetPromptsPath, join(sourceHomePath, 'prompts'))
+    expect(existsSync(join(targetHomePath, 'auth.json'))).toBe(false)
+  })
+
+  it('skips unchanged fallback copies and refreshes changed files', () => {
+    fsMockState.failSymlink = true
+    const systemProfilePath = join(getSystemCodexHomePath(), 'profile-v2')
+    const runtimeProfilePath = join(getRuntimeCodexHomePath(), 'profile-v2')
+    writeFileSync(systemProfilePath, 'first\n', 'utf-8')
+
+    syncSystemCodexResourcesIntoManagedHome()
+    writeFileSync(runtimeProfilePath, 'runtime edit\n', 'utf-8')
+    syncSystemCodexResourcesIntoManagedHome()
+
+    expect(readFileSync(runtimeProfilePath, 'utf-8')).toBe('runtime edit\n')
+
+    writeFileSync(systemProfilePath, 'changed source\n', 'utf-8')
+    syncSystemCodexResourcesIntoManagedHome()
+
+    expect(readFileSync(runtimeProfilePath, 'utf-8')).toBe('changed source\n')
+  })
+
+  it('refreshes fallback copies for same-size source edits with unchanged mtime', () => {
+    fsMockState.failSymlink = true
+    const systemProfilePath = join(getSystemCodexHomePath(), 'profile-v2')
+    const runtimeProfilePath = join(getRuntimeCodexHomePath(), 'profile-v2')
+    const fixedTime = new Date('2026-01-01T00:00:00.000Z')
+    writeFileSync(systemProfilePath, 'aaaa\n', 'utf-8')
+    utimesSync(systemProfilePath, fixedTime, fixedTime)
+
+    syncSystemCodexResourcesIntoManagedHome()
+    writeFileSync(systemProfilePath, 'bbbb\n', 'utf-8')
+    utimesSync(systemProfilePath, fixedTime, fixedTime)
+    syncSystemCodexResourcesIntoManagedHome()
+
+    expect(readFileSync(runtimeProfilePath, 'utf-8')).toBe('bbbb\n')
+  })
+
+  it('refreshes fallback directory copies when nested source entries change', () => {
+    fsMockState.failSymlink = true
+    const systemSkillPath = join(getSystemCodexHomePath(), 'skills', 'review')
+    const runtimeSkillFilePath = join(getRuntimeCodexHomePath(), 'skills', 'review', 'SKILL.md')
+    mkdirSync(systemSkillPath, { recursive: true })
+    writeFileSync(join(systemSkillPath, 'SKILL.md'), 'first\n', 'utf-8')
+
+    syncSystemCodexResourcesIntoManagedHome()
+    writeFileSync(runtimeSkillFilePath, 'runtime edit\n', 'utf-8')
+    syncSystemCodexResourcesIntoManagedHome()
+
+    expect(readFileSync(runtimeSkillFilePath, 'utf-8')).toBe('runtime edit\n')
+
+    writeFileSync(join(systemSkillPath, 'SKILL.md'), 'nested source changed\n', 'utf-8')
+    syncSystemCodexResourcesIntoManagedHome()
+
+    expect(readFileSync(runtimeSkillFilePath, 'utf-8')).toBe('nested source changed\n')
+  })
+
+  it('dereferences nested symlinks when fallback-copying resources', () => {
+    const systemSkillPath = join(getSystemCodexHomePath(), 'skills', 'review')
+    const linkedSkillPath = join(fakeHomeDir, 'linked-skill.md')
+    mkdirSync(systemSkillPath, { recursive: true })
+    writeFileSync(linkedSkillPath, 'linked skill\n', 'utf-8')
+    symlinkSync(linkedSkillPath, join(systemSkillPath, 'SKILL.md'))
+    fsMockState.failSymlink = true
+
+    syncSystemCodexResourcesIntoManagedHome()
+
+    const runtimeSkillFilePath = join(getRuntimeCodexHomePath(), 'skills', 'review', 'SKILL.md')
+    expect(lstatSync(runtimeSkillFilePath).isSymbolicLink()).toBe(false)
+    expect(readFileSync(runtimeSkillFilePath, 'utf-8')).toBe('linked skill\n')
+  })
+
+  it('refreshes fallback copies when symlinked directory contents change', () => {
+    const systemSkillsPath = join(getSystemCodexHomePath(), 'skills')
+    const linkedSkillDir = join(fakeHomeDir, 'linked-review-skill')
+    const runtimeSkillFilePath = join(getRuntimeCodexHomePath(), 'skills', 'review', 'SKILL.md')
+    mkdirSync(systemSkillsPath, { recursive: true })
+    mkdirSync(linkedSkillDir, { recursive: true })
+    writeFileSync(join(linkedSkillDir, 'SKILL.md'), 'first linked skill\n', 'utf-8')
+    symlinkSync(linkedSkillDir, join(systemSkillsPath, 'review'))
+    fsMockState.failSymlink = true
+
+    syncSystemCodexResourcesIntoManagedHome()
+    writeFileSync(join(linkedSkillDir, 'SKILL.md'), 'second linked skill\n', 'utf-8')
+    syncSystemCodexResourcesIntoManagedHome()
+
+    expect(lstatSync(join(getRuntimeCodexHomePath(), 'skills', 'review')).isSymbolicLink()).toBe(
+      false
+    )
+    expect(readFileSync(runtimeSkillFilePath, 'utf-8')).toBe('second linked skill\n')
   })
 })

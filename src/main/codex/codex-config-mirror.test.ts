@@ -34,7 +34,10 @@ vi.mock('node:os', async () => {
   }
 })
 
-import { syncSystemConfigIntoManagedCodexHome } from './codex-config-mirror'
+import {
+  syncCodexConfigIntoHome,
+  syncSystemConfigIntoManagedCodexHome
+} from './codex-config-mirror'
 
 let fakeHomeDir: string
 let userDataDir: string
@@ -1074,5 +1077,118 @@ describe('syncSystemConfigIntoManagedCodexHome', () => {
     syncSystemConfigIntoManagedCodexHome()
 
     expect(existsSync(getRuntimeConfigPath())).toBe(false)
+  })
+
+  it('mirrors explicit source and target config paths with runtime trust preserved', () => {
+    const sourceConfigPath = join(fakeHomeDir, 'wsl-source', 'config.toml')
+    const targetConfigPath = join(userDataDir, 'wsl-runtime', 'config.toml')
+    const syncStatePath = join(userDataDir, 'wsl-runtime', 'config-sync-state.json')
+    mkdirSync(join(fakeHomeDir, 'wsl-source'), { recursive: true })
+    mkdirSync(join(userDataDir, 'wsl-runtime'), { recursive: true })
+    writeFileSync(
+      sourceConfigPath,
+      ['model = "runtime"', '', '[projects."/repo"]', 'trust_level = "untrusted"', ''].join('\n'),
+      'utf-8'
+    )
+    writeFileSync(
+      targetConfigPath,
+      [
+        'model = "runtime"',
+        '',
+        '[hooks.state."runtime-hooks:stop:0:0"]',
+        'enabled = true',
+        'trusted_hash = "sha256:runtime"',
+        '',
+        '[projects."/runtime-only"]',
+        'trust_level = "trusted"',
+        ''
+      ].join('\n'),
+      'utf-8'
+    )
+
+    syncCodexConfigIntoHome(sourceConfigPath, targetConfigPath, { syncStatePath })
+    writeFileSync(
+      sourceConfigPath,
+      ['model = "wsl-system"', '', '[projects."/repo"]', 'trust_level = "untrusted"', ''].join(
+        '\n'
+      ),
+      'utf-8'
+    )
+
+    syncCodexConfigIntoHome(sourceConfigPath, targetConfigPath, { syncStatePath })
+
+    const runtimeConfig = readFileSync(targetConfigPath, 'utf-8')
+    expect(runtimeConfig).toContain('model = "wsl-system"')
+    expect(runtimeConfig).not.toContain('model = "runtime"')
+    expect(runtimeConfig).toContain('[hooks.state."runtime-hooks:stop:0:0"]')
+    expect(runtimeConfig).toContain('[projects."/runtime-only"]')
+    expect(runtimeConfig).toContain('[projects."/repo"]')
+  })
+
+  it('keeps explicit source and target config sync state isolated', () => {
+    establishSystemConfigBaseline('model = "host-system"\n')
+    const hostSyncStateBefore = readFileSync(getConfigSyncStatePath(), 'utf-8')
+    const sourceConfigPath = join(fakeHomeDir, 'wsl-source', 'config.toml')
+    const targetConfigPath = join(userDataDir, 'wsl-runtime', 'home', 'config.toml')
+    const syncStatePath = join(userDataDir, 'wsl-runtime', 'config-sync-state.json')
+    mkdirSync(join(fakeHomeDir, 'wsl-source'), { recursive: true })
+    mkdirSync(join(userDataDir, 'wsl-runtime', 'home'), { recursive: true })
+    writeFileSync(sourceConfigPath, 'model = "wsl-system"\n', 'utf-8')
+
+    syncCodexConfigIntoHome(sourceConfigPath, targetConfigPath, { syncStatePath })
+
+    expect(readFileSync(getConfigSyncStatePath(), 'utf-8')).toBe(hostSyncStateBefore)
+    expect(readFileSync(syncStatePath, 'utf-8')).not.toBe(hostSyncStateBefore)
+  })
+
+  it('can clear stale explicit runtime config when source disappears before baseline exists', () => {
+    const sourceConfigPath = join(fakeHomeDir, 'wsl-source', 'config.toml')
+    const targetConfigPath = join(userDataDir, 'wsl-runtime', 'config.toml')
+    const syncStatePath = join(userDataDir, 'wsl-runtime', 'config-sync-state.json')
+    mkdirSync(join(userDataDir, 'wsl-runtime'), { recursive: true })
+    writeFileSync(
+      targetConfigPath,
+      [
+        'model = "stale-wsl-system"',
+        '',
+        '[hooks.state."runtime-hooks:stop:0:0"]',
+        'enabled = true',
+        'trusted_hash = "sha256:runtime"',
+        '',
+        '[projects."/runtime-only"]',
+        'trust_level = "trusted"',
+        ''
+      ].join('\n'),
+      'utf-8'
+    )
+
+    syncCodexConfigIntoHome(sourceConfigPath, targetConfigPath, {
+      clearRuntimeConfigWhenSystemMissingWithoutBaseline: true,
+      syncStatePath
+    })
+
+    const runtimeConfig = readFileSync(targetConfigPath, 'utf-8')
+    expect(runtimeConfig).not.toContain('stale-wsl-system')
+    expect(runtimeConfig).toContain('[hooks.state."runtime-hooks:stop:0:0"]')
+    expect(runtimeConfig).toContain('[projects."/runtime-only"]')
+    expect(existsSync(syncStatePath)).toBe(true)
+  })
+
+  it('mirrors ordinary explicit source config after no-baseline stale config cleanup', () => {
+    const sourceConfigPath = join(fakeHomeDir, 'wsl-source', 'config.toml')
+    const targetConfigPath = join(userDataDir, 'wsl-runtime', 'config.toml')
+    const syncStatePath = join(userDataDir, 'wsl-runtime', 'config-sync-state.json')
+    mkdirSync(join(fakeHomeDir, 'wsl-source'), { recursive: true })
+    mkdirSync(join(userDataDir, 'wsl-runtime'), { recursive: true })
+    writeFileSync(targetConfigPath, 'model = "stale-wsl-system"\n', 'utf-8')
+    syncCodexConfigIntoHome(sourceConfigPath, targetConfigPath, {
+      clearRuntimeConfigWhenSystemMissingWithoutBaseline: true,
+      syncStatePath
+    })
+    writeFileSync(sourceConfigPath, 'model = "wsl-system"\n', 'utf-8')
+
+    syncCodexConfigIntoHome(sourceConfigPath, targetConfigPath, { syncStatePath })
+
+    expect(readFileSync(targetConfigPath, 'utf-8')).toContain('model = "wsl-system"')
   })
 })

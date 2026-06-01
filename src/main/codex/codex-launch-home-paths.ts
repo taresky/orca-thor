@@ -872,7 +872,11 @@ function linkTargetsMatch(actualTarget: string, expectedTarget: string): boolean
 }
 
 function normalizeWindowsLinkTarget(linkTarget: string): string {
-  return linkTarget.replace(/^\\\\\?\\/, '').toLowerCase()
+  return linkTarget
+    .replace(/\//g, '\\')
+    .replace(/^\\\\\?\\UNC\\/i, '\\\\')
+    .replace(/^\\\\\?\\/i, '')
+    .toLowerCase()
 }
 
 function getLaunchEntryMarkerPath(launchHomePath: string, entryName: string): string {

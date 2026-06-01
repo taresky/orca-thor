@@ -13,7 +13,7 @@ import {
   rmSync,
   statSync
 } from 'node:fs'
-import { dirname, extname, join, parse, relative, win32 as pathWin32 } from 'node:path'
+import { dirname, extname, join, parse, relative } from 'node:path'
 import { app } from 'electron'
 import type { CodexManagedAccount } from '../../shared/types'
 import type { Store } from '../persistence'
@@ -21,6 +21,7 @@ import { writeFileAtomically } from './fs-utils'
 import {
   getOrcaManagedCodexHomePath,
   getSystemCodexHomePath,
+  syncCodexResourcesIntoHome,
   syncSystemCodexResourcesIntoManagedHome
 } from '../codex/codex-home-paths'
 import {
@@ -34,7 +35,13 @@ import {
   removeScopedCodexLaunchHome
 } from '../codex/codex-launch-home-paths'
 import { syncSystemCodexSessionsIntoManagedHome } from '../codex/codex-session-bridge'
-import { syncSystemConfigIntoManagedCodexHome } from '../codex/codex-config-mirror'
+import {
+  clearMirrorableCodexRuntimeConfig,
+  syncCodexConfigIntoHome,
+  syncDeletedSystemConfigIntoCodexHome,
+  syncSystemConfigIntoManagedCodexHome
+} from '../codex/codex-config-mirror'
+import { readLastSyncedSystemCodexConfigState } from '../codex/codex-config-sync-state'
 import { trustCodexLaunchHomeHooks } from '../codex/hook-service'
 import { parseWslUncPath } from '../../shared/wsl-paths'
 import {
@@ -44,6 +51,13 @@ import {
   type CodexAccountSelectionTarget
 } from './runtime-selection'
 import { getDefaultWslDistro, getWslHome } from '../wsl'
+import {
+  getWslCodexActiveHomePathFromRuntimeHome,
+  getWslCodexLaunchRootPathFromRuntimeHome,
+  getWslCodexRuntimeHomePath,
+  getWslCodexRuntimeRootPathFromRuntimeHome,
+  joinWslCodexPath
+} from './wsl-codex-runtime-paths'
 
 type CodexAuthIdentity = {
   email: string | null
@@ -74,6 +88,12 @@ type CodexReadBackMatch =
       managedAuthContents: string
     }
   | { kind: 'none' | 'ambiguous' }
+
+type WslRuntimeSyncOptions = {
+  syncResources: boolean
+  syncConfig: boolean
+  clearConfigWithoutBaseline?: boolean
+}
 
 export class CodexRuntimeHomeService {
   // Why: tracks whether the runtime auth.json currently mirrors a managed
@@ -120,8 +140,10 @@ export class CodexRuntimeHomeService {
     if (target?.runtime === 'wsl') {
       const wslTarget = this.resolveWslDefaultTarget(target)
       const launchHomePath =
-        this.syncWslRuntimeForCurrentSelection(wslTarget) ??
-        this.getWslSystemCodexHomePath(wslTarget)
+        this.syncWslRuntimeForCurrentSelection(wslTarget, {
+          syncResources: true,
+          syncConfig: true
+        }) ?? this.getWslSystemCodexHomePath(wslTarget)
       return this.pointWslActiveHomeForLaunch(wslTarget, launchHomePath)
     }
     this.syncForCurrentSelection()
@@ -147,8 +169,10 @@ export class CodexRuntimeHomeService {
     if (target?.runtime === 'wsl') {
       const wslTarget = this.resolveWslDefaultTarget(target)
       return (
-        this.syncWslRuntimeForCurrentSelection(wslTarget) ??
-        this.getWslSystemCodexHomePath(wslTarget)
+        this.syncWslRuntimeForCurrentSelection(wslTarget, {
+          syncResources: false,
+          syncConfig: true
+        }) ?? this.getWslSystemCodexHomePath(wslTarget)
       )
     }
     this.syncForCurrentSelection()
@@ -173,8 +197,10 @@ export class CodexRuntimeHomeService {
     if (target?.runtime === 'wsl') {
       const wslTarget = this.resolveWslDefaultTarget(target)
       const launchHomePath =
-        this.syncWslRuntimeForCurrentSelection(wslTarget) ??
-        this.getWslSystemCodexHomePath(wslTarget)
+        this.syncWslRuntimeForCurrentSelection(wslTarget, {
+          syncResources: true,
+          syncConfig: true
+        }) ?? this.getWslSystemCodexHomePath(wslTarget)
       return this.pointWslActiveHomeForLaunch(wslTarget, launchHomePath)
     }
     return this.refreshCurrentHostActiveHome()
@@ -182,7 +208,10 @@ export class CodexRuntimeHomeService {
 
   syncForCurrentSelection(target?: CodexAccountSelectionTarget): void {
     if (target?.runtime === 'wsl') {
-      this.syncWslRuntimeForCurrentSelection(target)
+      this.syncWslRuntimeForCurrentSelection(target, {
+        syncResources: false,
+        syncConfig: true
+      })
       return
     }
 
@@ -495,27 +524,31 @@ export class CodexRuntimeHomeService {
     if (!account) {
       return null
     }
-    if (account.managedHomeRuntime === 'wsl' && parseWslUncPath(account.managedHomePath)) {
+    if (account.managedHomeRuntime === 'wsl') {
       return account.managedHomePath
     }
     return parseWslUncPath(account.managedHomePath) ? account.managedHomePath : null
   }
 
-  private syncWslRuntimeForCurrentSelection(target: CodexAccountSelectionTarget): string | null {
+  private syncWslRuntimeForCurrentSelection(
+    target: CodexAccountSelectionTarget,
+    options: WslRuntimeSyncOptions
+  ): string | null {
     if (process.platform !== 'win32') {
       return null
     }
 
     const wslTarget = this.resolveWslDefaultTarget(target)
-    const settings = this.store.getSettings()
-    const activeAccount = this.getActiveAccount(
-      settings.codexManagedAccounts,
-      getSelectedCodexAccountIdForTarget(settings, wslTarget)
-    )
-    const distro = wslTarget.wslDistro?.trim() || activeAccount?.wslDistro || getDefaultWslDistro()
+    const distro = wslTarget.wslDistro?.trim() || getDefaultWslDistro()
     if (!distro) {
       return null
     }
+    const settings = this.store.getSettings()
+    const selectedAccount = this.getActiveAccount(
+      settings.codexManagedAccounts,
+      getSelectedCodexAccountIdForTarget(settings, { runtime: 'wsl', wslDistro: distro })
+    )
+    const activeAccount = this.getWslAccountForDistro(selectedAccount, distro)
 
     const runtimeHomePath = this.getWslRuntimeHomePath(distro)
     if (!runtimeHomePath) {
@@ -524,7 +557,10 @@ export class CodexRuntimeHomeService {
     const launchRootPath = this.getWslLaunchRootPathFromRuntimeHome(runtimeHomePath)
 
     mkdirSync(runtimeHomePath, { recursive: true })
-    this.seedWslRuntimeHome(runtimeHomePath, activeAccount, distro)
+    this.syncWslSystemCodexHomeIntoRuntime(distro, runtimeHomePath, {
+      ...options,
+      clearConfigWithoutBaseline: true
+    })
 
     const runtimeAuthPath = join(runtimeHomePath, 'auth.json')
     const hadPreviousWslSelection = this.lastSyncedWslAccountIdByDistro.has(distro)
@@ -540,9 +576,9 @@ export class CodexRuntimeHomeService {
       if (this.skipNextReadBackForAccountId === readBackAccountId) {
         this.skipNextReadBackForAccountId = null
       } else {
-        const previousWslAccount = this.getActiveAccount(
-          settings.codexManagedAccounts,
-          readBackAccountId
+        const previousWslAccount = this.getWslAccountForDistro(
+          this.getActiveAccount(settings.codexManagedAccounts, readBackAccountId),
+          distro
         )
         if (previousWslAccount) {
           this.readBackWslManagedAccountRefresh(
@@ -576,7 +612,7 @@ export class CodexRuntimeHomeService {
         activeCodexManagedAccountIdsByRuntime: setSelectedCodexAccountIdForTarget(
           normalizeCodexRuntimeSelection(settings),
           null,
-          wslTarget
+          { runtime: 'wsl', wslDistro: distro }
         )
       })
     }
@@ -620,11 +656,27 @@ export class CodexRuntimeHomeService {
     return materializeScopedCodexLaunchHome(runtimeHomePath, launchRootPath, null)
   }
 
+  private getWslAccountForDistro(
+    account: CodexManagedAccount | null,
+    distro: string
+  ): CodexManagedAccount | null {
+    if (
+      !account ||
+      (account.managedHomeRuntime !== 'wsl' && !parseWslUncPath(account.managedHomePath))
+    ) {
+      return null
+    }
+    const accountDistro =
+      account.wslDistro?.trim() || parseWslUncPath(account.managedHomePath)?.distro
+    if (!accountDistro || accountDistro.toLowerCase() !== distro.trim().toLowerCase()) {
+      return null
+    }
+    return account
+  }
+
   private getWslRuntimeHomePath(distro: string): string | null {
     const home = getWslHome(distro)
-    return home
-      ? this.joinWslPath(home, '.local', 'share', 'orca', 'codex-runtime-home', 'home')
-      : null
+    return home ? getWslCodexRuntimeHomePath(home) : null
   }
 
   private getWslLaunchRootPath(distro: string): string | null {
@@ -633,7 +685,7 @@ export class CodexRuntimeHomeService {
   }
 
   private getWslLaunchRootPathFromRuntimeHome(runtimeHomePath: string): string {
-    return this.joinWslPath(dirname(runtimeHomePath), 'launch', 'wsl')
+    return getWslCodexLaunchRootPathFromRuntimeHome(runtimeHomePath)
   }
 
   private getWslLaunchAuthPath(launchRootPath: string, accountId: string | null): string {
@@ -755,9 +807,7 @@ export class CodexRuntimeHomeService {
   }
 
   private joinWslPath(basePath: string, ...segments: string[]): string {
-    return parseWslUncPath(basePath)
-      ? pathWin32.join(basePath, ...segments)
-      : join(basePath, ...segments)
+    return joinWslCodexPath(basePath, ...segments)
   }
 
   private resolveWslDefaultTarget(
@@ -775,25 +825,96 @@ export class CodexRuntimeHomeService {
     return home ? this.joinWslPath(home, 'auth.json') : null
   }
 
-  private seedWslRuntimeHome(
+  private syncWslSystemCodexHomeIntoRuntime(
+    distro: string,
     runtimeHomePath: string,
-    activeAccount: CodexManagedAccount | null,
-    distro: string
+    options: WslRuntimeSyncOptions
   ): void {
-    const runtimeConfigPath = join(runtimeHomePath, 'config.toml')
-    if (existsSync(runtimeConfigPath)) {
+    const systemCodexHomePath = this.getWslSystemCodexHomePath({
+      runtime: 'wsl',
+      wslDistro: distro
+    })
+    if (!systemCodexHomePath) {
       return
     }
+    if (options.syncResources) {
+      syncCodexResourcesIntoHome(systemCodexHomePath, runtimeHomePath)
+    }
+    if (options.syncConfig) {
+      const systemConfigPath = this.joinWslPath(systemCodexHomePath, 'config.toml')
+      const runtimeConfigPath = this.joinWslPath(runtimeHomePath, 'config.toml')
+      const syncStatePath = this.joinWslPath(
+        getWslCodexRuntimeRootPathFromRuntimeHome(runtimeHomePath),
+        'config-sync-state.json'
+      )
+      const preSyncConfigState = readLastSyncedSystemCodexConfigState(syncStatePath)
+      const shouldSyncLaunchConfigDeletion =
+        options.clearConfigWithoutBaseline &&
+        !existsSync(systemConfigPath) &&
+        preSyncConfigState.status === 'valid' &&
+        preSyncConfigState.unitDigests !== null &&
+        !preSyncConfigState.needsRewrite
+      const shouldClearLaunchConfigWithoutBaseline =
+        options.clearConfigWithoutBaseline &&
+        !existsSync(systemConfigPath) &&
+        !shouldSyncLaunchConfigDeletion
+      try {
+        if (shouldSyncLaunchConfigDeletion) {
+          this.syncWslLaunchConfigDeletion(
+            this.getWslLaunchRootPathFromRuntimeHome(runtimeHomePath),
+            syncStatePath
+          )
+        }
+        syncCodexConfigIntoHome(systemConfigPath, runtimeConfigPath, {
+          clearRuntimeConfigWhenSystemMissingWithoutBaseline: options.clearConfigWithoutBaseline,
+          syncStatePath
+        })
+        if (shouldClearLaunchConfigWithoutBaseline) {
+          this.clearWslLaunchConfigMirrors(
+            this.getWslLaunchRootPathFromRuntimeHome(runtimeHomePath)
+          )
+        }
+      } catch (error) {
+        console.warn('[codex-runtime-home] Failed to mirror WSL Codex config:', error)
+      }
+    }
+  }
 
-    const candidateHomes = [
-      activeAccount?.managedHomePath,
-      this.getWslSystemCodexHomePath({ runtime: 'wsl', wslDistro: distro })
-    ].filter((value): value is string => Boolean(value))
-    for (const homePath of candidateHomes) {
-      const configPath = join(homePath, 'config.toml')
-      if (existsSync(configPath)) {
-        copyFileSync(configPath, runtimeConfigPath)
-        return
+  private syncWslLaunchConfigDeletion(launchRootPath: string, syncStatePath: string): void {
+    let segments: string[]
+    try {
+      segments = readdirSync(launchRootPath)
+    } catch {
+      return
+    }
+    for (const segment of segments) {
+      try {
+        syncDeletedSystemConfigIntoCodexHome(
+          this.joinWslPath(launchRootPath, segment, 'home', 'config.toml'),
+          syncStatePath
+        )
+      } catch {
+        // Existing launch homes are best-effort upgrade cleanup. Fresh
+        // materialization will still use the cleaned shared runtime config.
+      }
+    }
+  }
+
+  private clearWslLaunchConfigMirrors(launchRootPath: string): void {
+    let segments: string[]
+    try {
+      segments = readdirSync(launchRootPath)
+    } catch {
+      return
+    }
+    for (const segment of segments) {
+      try {
+        clearMirrorableCodexRuntimeConfig(
+          this.joinWslPath(launchRootPath, segment, 'home', 'config.toml')
+        )
+      } catch {
+        // Existing launch homes are best-effort upgrade cleanup. Fresh
+        // materialization will still use the cleaned shared runtime config.
       }
     }
   }
@@ -1098,7 +1219,7 @@ export class CodexRuntimeHomeService {
   }
 
   private pointWslActiveHomeAtLaunchHome(runtimeHomePath: string, launchHomePath: string): string {
-    const activeHomePath = this.joinWslPath(dirname(runtimeHomePath), 'active', 'wsl', 'home')
+    const activeHomePath = getWslCodexActiveHomePathFromRuntimeHome(runtimeHomePath)
     return pointActiveCodexHomeAtLaunchHome(activeHomePath, launchHomePath)
   }
 
