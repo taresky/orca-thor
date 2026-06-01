@@ -2131,9 +2131,15 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
         tabs.every((tab) => !tabHasLivePty(s.ptyIdsByTabId, tab.id))
       const isFirstActivation = worktreeId != null && !s.everActivatedWorktreeIds.has(worktreeId)
       const shouldTagTabs = worktreeId != null && tabs.length > 0 && isFirstActivation
-      shouldPrepareTerminalTabs = Boolean(
-        worktreeId && tabs.length > 0 && (allDead || shouldTagTabs)
-      )
+      // Why: when every PTY for the worktree's tabs is dead, the existing
+      // (hidden) TerminalPane wraps a dead transport. Once activeWorktreeId
+      // commits, that pane becomes visible and accepts keystrokes that the
+      // dead transport silently drops. Bump generation in the SAME set() so
+      // React/Zustand commit activation and the remount key in one render —
+      // no visible-but-dead-transport window. First-activation tagging
+      // (shouldTagTabs without allDead) does not remount panes and stays on
+      // the deferred path below.
+      shouldPrepareTerminalTabs = Boolean(worktreeId && tabs.length > 0 && shouldTagTabs)
       shouldTagTerminalTabs = shouldTagTabs
       const nextEverActivated = isFirstActivation
         ? new Set([...s.everActivatedWorktreeIds, worktreeId!])
@@ -2144,6 +2150,21 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
       const nextDetectedWorktrees = shouldClearUnread
         ? applyDetectedWorktreeUpdates(s.detectedWorktreesByRepo, worktreeId, metaUpdates)
         : s.detectedWorktreesByRepo
+      const tabsByWorktreeUpdate =
+        allDead && worktreeId != null
+          ? {
+              tabsByWorktree: {
+                ...s.tabsByWorktree,
+                [worktreeId]: tabs.map((tab) => ({
+                  ...tab,
+                  generation: (tab.generation ?? 0) + 1,
+                  pendingActivationSpawn: getActivationSpawnSuppression(
+                    s.terminalLayoutsByTabId[tab.id]
+                  )
+                }))
+              }
+            }
+          : {}
 
       return {
         activeWorktreeId: worktreeId,
@@ -2156,7 +2177,8 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
         ...(nextWorktrees !== s.worktreesByRepo ? { worktreesByRepo: nextWorktrees } : {}),
         ...(nextDetectedWorktrees !== s.detectedWorktreesByRepo
           ? { detectedWorktreesByRepo: nextDetectedWorktrees }
-          : {})
+          : {}),
+        ...tabsByWorktreeUpdate
       }
     })
 
