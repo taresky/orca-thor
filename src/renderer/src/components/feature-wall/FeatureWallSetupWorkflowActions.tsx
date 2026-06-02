@@ -24,11 +24,11 @@ export function AddReposAction(props: { reducedMotion: boolean }): React.JSX.Ele
   const openModal = useAppStore((s) => s.openModal)
   return (
     <div className="space-y-4">
-      <AddReposAnimatedVisual reducedMotion={props.reducedMotion} />
       <Button type="button" size="sm" className="w-fit gap-2" onClick={() => openModal('add-repo')}>
         <Plus className="size-3.5" />
         Add project
       </Button>
+      <AddReposAnimatedVisual reducedMotion={props.reducedMotion} />
     </div>
   )
 }
@@ -72,7 +72,6 @@ export function TwoAgentsAction(props: {
 
   return (
     <div className="space-y-4">
-      <SetupTwoAgentsVisual reducedMotion={props.reducedMotion} />
       {!props.done && !paneTarget ? (
         <div>
           <div className="flex flex-wrap gap-2">
@@ -83,6 +82,7 @@ export function TwoAgentsAction(props: {
           </div>
         </div>
       ) : null}
+      <SetupTwoAgentsVisual reducedMotion={props.reducedMotion} />
     </div>
   )
 }
@@ -95,7 +95,6 @@ export function WorkspacesAction(props: {
   const activeRepoId = useAppStore((s) => s.activeRepoId)
   return (
     <div className="space-y-4">
-      <SetupWorkspacesVisual reducedMotion={props.reducedMotion} />
       {!props.done ? (
         <Button
           type="button"
@@ -122,6 +121,7 @@ export function WorkspacesAction(props: {
           Try it out
         </Button>
       ) : null}
+      <SetupWorkspacesVisual reducedMotion={props.reducedMotion} />
     </div>
   )
 }
@@ -191,7 +191,6 @@ export function SetupScriptAction(props: { reducedMotion: boolean }): React.JSX.
 
   return (
     <div className="space-y-4">
-      <SetupScriptAnimatedVisual reducedMotion={props.reducedMotion} />
       <div className="rounded-lg border border-border bg-muted/20 p-3">
         <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
           <Input
@@ -230,6 +229,7 @@ export function SetupScriptAction(props: { reducedMotion: boolean }): React.JSX.
           Add a git project first, then configure the setup script for that repository.
         </p>
       ) : null}
+      <SetupScriptAnimatedVisual reducedMotion={props.reducedMotion} />
     </div>
   )
 }

@@ -103,7 +103,6 @@ export function AgentCapabilitiesSetupAction(props: {
 
   return (
     <div className="space-y-5">
-      <AgentCapabilityAnimationCarousel reducedMotion={reducedMotion} />
       <AgentCapabilitySetupControls
         featureSetup={featureSetup}
         onFeatureSetupChange={handleFeatureSetupChange}
@@ -113,6 +112,7 @@ export function AgentCapabilitiesSetupAction(props: {
         onStartFeatureSetup={() => void handleStartFeatureSetup()}
         installStatus={capabilitySetupStatus.installStatus}
       />
+      <AgentCapabilityAnimationCarousel reducedMotion={reducedMotion} />
     </div>
   )
 }

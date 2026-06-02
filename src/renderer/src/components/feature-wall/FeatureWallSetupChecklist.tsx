@@ -191,9 +191,6 @@ function TaskSourcesAction(props: { reducedMotion: boolean }): React.JSX.Element
   const openTaskPage = useAppStore((s) => s.openTaskPage)
   return (
     <div className="space-y-5">
-      <div className="mx-auto h-[220px] w-full max-w-[480px]">
-        <TasksAnimatedVisual reducedMotion={props.reducedMotion} />
-      </div>
       <div className="grid gap-3 xl:grid-cols-2">
         <GitHubRow compact />
         <LinearRow compact />
@@ -210,6 +207,9 @@ function TaskSourcesAction(props: { reducedMotion: boolean }): React.JSX.Element
         <ArrowUpRight className="size-3.5" />
         See tasks
       </Button>
+      <div className="mx-auto h-[220px] w-full max-w-[480px]">
+        <TasksAnimatedVisual reducedMotion={props.reducedMotion} />
+      </div>
     </div>
   )
 }
