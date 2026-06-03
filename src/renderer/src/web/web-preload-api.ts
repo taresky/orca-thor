@@ -488,6 +488,9 @@ function createWebPreloadApi(): Partial<PreloadApi> {
         writeJson(SESSION_STORAGE_KEY, sanitizeWebRuntimeWorkspaceSession(session))
       }
     },
+    startupTiming: {
+      record: () => {}
+    },
     onboarding: {
       get: () => Promise.resolve(getStoredOnboarding()),
       update: async (updates) => {

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   isStartupDiagnosticsEnabled,
   logStartupDiagnostic,
+  logStartupTimingReport,
   STARTUP_DIAGNOSTICS_ENV,
   writeStartupDiagnosticLine
 } from './startup-diagnostics'
@@ -33,6 +34,43 @@ describe('logStartupDiagnostic', () => {
     expect(write).toHaveBeenCalledWith(
       2,
       '[startup] before-lock packaged=true userData="/tmp/orca"\n'
+    )
+  })
+})
+
+describe('logStartupTimingReport', () => {
+  it('formats structured startup timing records through the diagnostic sink', () => {
+    const write = vi.fn()
+
+    logStartupTimingReport(
+      {
+        origin: 'main',
+        startedAtMs: 1,
+        capturedAtMs: 5,
+        elapsedMs: 4,
+        phases: [
+          {
+            name: 'store.init',
+            status: 'ok',
+            startedAtMs: 1,
+            endedAtMs: 3,
+            durationMs: 2
+          }
+        ],
+        milestones: [
+          {
+            name: 'first-window-visible',
+            atMs: 5,
+            elapsedMs: 4
+          }
+        ]
+      },
+      write
+    )
+
+    expect(write).toHaveBeenCalledWith(
+      2,
+      '[startup] timing-report report={"origin":"main","startedAtMs":1,"capturedAtMs":5,"elapsedMs":4,"phases":[{"name":"store.init","status":"ok","startedAtMs":1,"endedAtMs":3,"durationMs":2}],"milestones":[{"name":"first-window-visible","atMs":5,"elapsedMs":4}]}\n'
     )
   })
 })

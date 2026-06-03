@@ -10,6 +10,7 @@ import type {
 import type { NativeFileDropPayload } from '../shared/native-file-drop'
 import type { AppIdentity } from '../shared/app-identity'
 import type { TerminalPaneSplitSource } from '../shared/feature-education-telemetry'
+import type { StartupTimingReport } from '../shared/startup-phase-timing'
 import type {
   BaseRefDefaultResult,
   BaseRefSearchResult,
@@ -1711,6 +1712,9 @@ export type PreloadApi = {
     set: (args: WorkspaceSessionState) => Promise<void>
     patch: (args: WorkspaceSessionPatch) => Promise<void>
     setSync: (args: WorkspaceSessionState) => void
+  }
+  startupTiming: {
+    record: (report: StartupTimingReport) => void
   }
   remoteWorkspace: {
     get: (args: { targetId: string }) => Promise<RemoteWorkspaceSnapshot | null>

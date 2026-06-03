@@ -38,6 +38,7 @@ import { registerWorkspacePortHandlers } from './workspace-ports'
 import { registerAutomationHandlers } from './automations'
 import { registerKeybindingHandlers } from './keybindings'
 import { registerTelemetryHandlers } from './telemetry'
+import { registerStartupTimingHandlers } from './startup-timing'
 import { registerBrowserHandlers } from './browser'
 import { browserSessionRegistry } from '../browser/browser-session-registry'
 import { registerShellHandlers } from './shell'
@@ -139,6 +140,7 @@ export function registerCoreHandlers(
     registerKeybindingHandlers(keybindings)
   }
   registerTelemetryHandlers(store)
+  registerStartupTimingHandlers()
   registerBrowserHandlers()
   // Why: applyPendingCookieImport MUST run before restorePersistedUserAgent
   // because the latter calls session.fromPartition() which initializes

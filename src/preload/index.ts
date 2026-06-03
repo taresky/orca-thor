@@ -9,6 +9,7 @@ import type { AppIdentity } from '../shared/app-identity'
 import type { CliInstallStatus } from '../shared/cli-install-types'
 import type { AgentHookInstallStatus } from '../shared/agent-hook-types'
 import type { TerminalPaneSplitSource } from '../shared/feature-education-telemetry'
+import type { StartupTimingReport } from '../shared/startup-phase-timing'
 import type {
   BaseRefSearchResult,
   BaseRefDefaultResult,
@@ -2080,6 +2081,12 @@ const api = {
       ipcRenderer.sendSync('session:set-sync', args)
     }
   } satisfies PreloadApi['session'],
+
+  startupTiming: {
+    record: (report: StartupTimingReport): void => {
+      ipcRenderer.send('startup:timing-report', report)
+    }
+  } satisfies PreloadApi['startupTiming'],
 
   remoteWorkspace: {
     get: (args) => ipcRenderer.invoke('remoteWorkspace:get', args),

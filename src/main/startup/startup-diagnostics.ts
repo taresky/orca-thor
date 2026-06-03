@@ -1,4 +1,5 @@
 import { writeSync } from 'node:fs'
+import type { StartupTimingReport } from '../../shared/startup-phase-timing'
 
 export const STARTUP_DIAGNOSTICS_ENV = 'ORCA_STARTUP_DIAGNOSTICS'
 
@@ -28,4 +29,11 @@ export function logStartupDiagnostic(
     .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
     .join(' ')
   writeStartupDiagnosticLine(`[startup] ${event}${detailText ? ` ${detailText}` : ''}`, write)
+}
+
+export function logStartupTimingReport(
+  report: StartupTimingReport,
+  write?: StartupDiagnosticSink
+): void {
+  logStartupDiagnostic('timing-report', { report }, write)
 }

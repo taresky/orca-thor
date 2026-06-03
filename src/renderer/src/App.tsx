@@ -115,6 +115,7 @@ import {
 } from '@/store/slices/worktree-nav-history'
 import type { VirtualizedScrollAnchor } from './hooks/useVirtualizedScrollAnchor'
 import type { RemoteWorkspacePatchResult } from '../../shared/remote-workspace-types'
+import { createStartupPhaseTimer } from '../../shared/startup-phase-timing'
 import type { OnboardingState } from '../../shared/types'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../shared/constants'
 import { ContextualTourOverlay } from './components/contextual-tours/ContextualTourOverlay'
@@ -653,24 +654,54 @@ function App(): React.JSX.Element {
     // workspaceSessionReady — so we still need to force the flag true so the
     // UI mounts.
     let reconnectStarted = false
+    const startupTiming = createStartupPhaseTimer({ origin: 'renderer' })
+    const recordStartupTiming = (details: Record<string, unknown>): void => {
+      window.api.startupTiming.record(startupTiming.snapshot({ details }))
+    }
+    const loadDeferredStartupReads = async (): Promise<void> => {
+      await Promise.allSettled([
+        startupTiming.measure('browser-profiles.fetch', () =>
+          actions.fetchBrowserSessionProfiles()
+        ),
+        startupTiming.measure('onboarding.read', async () => {
+          const onboardingState = await window.api.onboarding.get()
+          if (!cancelled) {
+            setOnboarding(onboardingState)
+            setOnboardingLoaded(true)
+          }
+        })
+      ])
+    }
     void (async () => {
       try {
+        startupTiming.markMilestone('hydration-effect-start')
         // Why: repo/worktree hydration routes through settings.activeRuntimeEnvironmentId.
         // Load settings first so a persisted remote runtime does not boot against
         // the local filesystem and then hydrate stale local workspace state.
-        await actions.fetchSettings()
-        await actions.fetchRepos()
-        await actions.fetchProjectGroups()
-        await actions.fetchAllWorktrees()
-        await actions.fetchWorktreeLineage()
-        const persistedUI = await window.api.ui.get()
+        await startupTiming.measure('settings.fetch', () => actions.fetchSettings())
+        const persistedReads = Promise.all([
+          startupTiming.measure('persisted-ui.read', () => window.api.ui.get()),
+          startupTiming.measure('session.read', () => window.api.session.get())
+        ])
+        const [[persistedUI, session]] = await Promise.all([
+          persistedReads,
+          (async () => {
+            await Promise.all([
+              startupTiming.measure('repos.fetch', () => actions.fetchRepos()),
+              startupTiming.measure('project-groups.fetch', () => actions.fetchProjectGroups()),
+              startupTiming.measure('keybindings.fetch', () => actions.fetchKeybindings())
+            ])
+            await Promise.all([
+              startupTiming.measure('worktrees.fetch-all', () => actions.fetchAllWorktrees()),
+              startupTiming.measure('worktree-lineage.fetch', () => actions.fetchWorktreeLineage())
+            ])
+          })()
+        ])
         uiHydrated = hydratePersistedUIAfterStartupRead({
           persistedUI,
           cancelled,
           hydratePersistedUI: actions.hydratePersistedUI
         })
-        const session = await window.api.session.get()
-        await actions.fetchKeybindings()
         if (!cancelled) {
           actions.hydrateWorkspaceSession(session)
           actions.hydrateTabsSession(session)
@@ -686,12 +717,6 @@ function App(): React.JSX.Element {
           // See docs/cmd-j-empty-query-ordering.md.
           actions.pruneLastVisitedTimestamps()
           actions.seedActiveWorktreeLastVisitedIfMissing()
-          await actions.fetchBrowserSessionProfiles()
-          const onboardingState = await window.api.onboarding.get()
-          if (!cancelled) {
-            setOnboarding(onboardingState)
-            setOnboardingLoaded(true)
-          }
 
           // Why: SSH connections must be re-established BEFORE terminal
           // reconnect so that reconnectPersistedTerminals can route SSH-backed
@@ -699,85 +724,94 @@ function App(): React.JSX.Element {
           // are deferred to tab focus to avoid stacking credential dialogs at
           // startup before the user has context.
           const connectionIds = session.activeConnectionIdsAtShutdown ?? []
-          if (connectionIds.length > 0) {
-            try {
-              const SSH_RECONNECT_TIMEOUT_MS = 15_000
-              const allTargets = await window.api.ssh.listTargets()
-              const targetMap = new Map(allTargets.map((t) => [t.id, t]))
-              const targets = connectionIds.map((targetId) => ({
-                targetId,
-                needsPassphrase: targetMap.get(targetId)?.lastRequiredPassphrase ?? false
-              }))
-
-              const eagerTargets = targets.filter((t) => !t.needsPassphrase)
-              const deferredTargets = targets.filter((t) => t.needsPassphrase)
-
-              if (deferredTargets.length > 0) {
-                actions.setDeferredSshReconnectTargets(deferredTargets.map((t) => t.targetId))
+          await startupTiming.measure(
+            'ssh.reconnect',
+            async () => {
+              if (connectionIds.length === 0) {
+                return
               }
+              try {
+                const SSH_RECONNECT_TIMEOUT_MS = 15_000
+                const allTargets = await window.api.ssh.listTargets()
+                const targetMap = new Map(allTargets.map((t) => [t.id, t]))
+                const targets = connectionIds.map((targetId) => ({
+                  targetId,
+                  needsPassphrase: targetMap.get(targetId)?.lastRequiredPassphrase ?? false
+                }))
 
-              // Why: track which eager targets timed out so we can treat them
-              // as deferred — the underlying ssh.connect() keeps running in the
-              // main process, but reconnectPersistedTerminals won't see them as
-              // connected. Adding them to the deferred list ensures PTYs get
-              // reattached when the user focuses the tab (by which time the
-              // slow connect will likely have succeeded).
-              const timedOutTargets: string[] = []
-              await Promise.allSettled(
-                eagerTargets.map(({ targetId }) =>
-                  Promise.race([
-                    window.api.ssh.connect({ targetId }),
-                    new Promise((_, reject) =>
-                      setTimeout(
-                        () => reject(new Error('SSH reconnect timeout')),
-                        SSH_RECONNECT_TIMEOUT_MS
+                const eagerTargets = targets.filter((t) => !t.needsPassphrase)
+                const deferredTargets = targets.filter((t) => t.needsPassphrase)
+
+                if (deferredTargets.length > 0) {
+                  actions.setDeferredSshReconnectTargets(deferredTargets.map((t) => t.targetId))
+                }
+
+                // Why: track which eager targets timed out so we can treat them
+                // as deferred — the underlying ssh.connect() keeps running in the
+                // main process, but reconnectPersistedTerminals won't see them as
+                // connected. Adding them to the deferred list ensures PTYs get
+                // reattached when the user focuses the tab (by which time the
+                // slow connect will likely have succeeded).
+                const timedOutTargets: string[] = []
+                await Promise.allSettled(
+                  eagerTargets.map(({ targetId }) =>
+                    Promise.race([
+                      window.api.ssh.connect({ targetId }),
+                      new Promise((_, reject) =>
+                        setTimeout(
+                          () => reject(new Error('SSH reconnect timeout')),
+                          SSH_RECONNECT_TIMEOUT_MS
+                        )
                       )
-                    )
-                  ]).catch((err) => {
-                    const isTimeout =
-                      err instanceof Error && err.message === 'SSH reconnect timeout'
-                    if (isTimeout) {
-                      timedOutTargets.push(targetId)
-                    }
-                    console.warn(`SSH auto-reconnect failed for ${targetId}:`, err)
-                  })
-                )
-              )
-              if (timedOutTargets.length > 0) {
-                actions.setDeferredSshReconnectTargets([
-                  ...deferredTargets.map((t) => t.targetId),
-                  ...timedOutTargets
-                ])
-              }
-
-              // Why: ssh.connect() resolves before the ssh:state-changed IPC
-              // event updates sshConnectionStates in the store. Without this,
-              // reconnectPersistedTerminals reads stale state and misclassifies
-              // successfully connected targets as disconnected, stranding their
-              // persisted PTYs. Polling getState ensures the store is current.
-              for (const { targetId } of eagerTargets) {
-                if (timedOutTargets.includes(targetId)) {
-                  continue
-                }
-                try {
-                  const state = await window.api.ssh.getState({ targetId })
-                  console.warn(
-                    `[ssh-restore] Polled state for ${targetId}: status=${state?.status}`
+                    ]).catch((err) => {
+                      const isTimeout =
+                        err instanceof Error && err.message === 'SSH reconnect timeout'
+                      if (isTimeout) {
+                        timedOutTargets.push(targetId)
+                      }
+                      console.warn(`SSH auto-reconnect failed for ${targetId}:`, err)
+                    })
                   )
-                  if (state?.status === 'connected') {
-                    actions.setSshConnectionState(targetId, state)
-                  }
-                } catch {
-                  /* best-effort */
+                )
+                if (timedOutTargets.length > 0) {
+                  actions.setDeferredSshReconnectTargets([
+                    ...deferredTargets.map((t) => t.targetId),
+                    ...timedOutTargets
+                  ])
                 }
+
+                // Why: ssh.connect() resolves before the ssh:state-changed IPC
+                // event updates sshConnectionStates in the store. Without this,
+                // reconnectPersistedTerminals reads stale state and misclassifies
+                // successfully connected targets as disconnected, stranding their
+                // persisted PTYs. Polling getState ensures the store is current.
+                for (const { targetId } of eagerTargets) {
+                  if (timedOutTargets.includes(targetId)) {
+                    continue
+                  }
+                  try {
+                    const state = await window.api.ssh.getState({ targetId })
+                    console.warn(
+                      `[ssh-restore] Polled state for ${targetId}: status=${state?.status}`
+                    )
+                    if (state?.status === 'connected') {
+                      actions.setSshConnectionState(targetId, state)
+                    }
+                  } catch {
+                    /* best-effort */
+                  }
+                }
+              } catch (err) {
+                console.warn('SSH startup reconnect failed:', err)
               }
-            } catch (err) {
-              console.warn('SSH startup reconnect failed:', err)
-            }
-          }
+            },
+            { details: { connectionCount: connectionIds.length } }
+          )
 
           reconnectStarted = true
-          await actions.reconnectPersistedTerminals(abortController.signal)
+          await startupTiming.measure('terminal.reconnect', () =>
+            actions.reconnectPersistedTerminals(abortController.signal)
+          )
           syncZoomCSSVar()
           // Why (issue #1158): unlock the debounced session writer only after
           // hydration AND all dependent startup steps (SSH reconnect, terminal
@@ -787,6 +821,14 @@ function App(): React.JSX.Element {
           // and the writer would serialize a partially-mutated store back to
           // disk — the exact data-loss mode this PR fixes.
           actions.setHydrationSucceeded(true)
+          startupTiming.markMilestone('first-usable-workspace', {
+            sshConnectionCount: connectionIds.length
+          })
+          await loadDeferredStartupReads()
+          startupTiming.markMilestone('deferred-startup-complete')
+          if (!cancelled) {
+            recordStartupTiming({ outcome: 'ok' })
+          }
         }
       } catch (error) {
         // Why (issue #1158): previously this catch called hydrateWorkspaceSession
@@ -797,6 +839,9 @@ function App(): React.JSX.Element {
         // false so the writer stays gated. We still ensure persistedUIReady and
         // workspaceSessionReady flip so the UI can mount without a session.
         const stepLabel = error instanceof Error && error.message ? error.message : String(error)
+        startupTiming.markMilestone('workspace-session-hydration-failed', {
+          step: stepLabel
+        })
         console.error(
           '[startup] Workspace session hydration failed; leaving disk state untouched:',
           stepLabel,
@@ -887,6 +932,9 @@ function App(): React.JSX.Element {
               pendingReconnectPtyIdByTabId: {}
             })
           }
+        }
+        if (!cancelled) {
+          recordStartupTiming({ outcome: 'error', step: stepLabel })
         }
       }
       void actions.initGitHubCache()

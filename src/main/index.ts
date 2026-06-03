@@ -70,7 +70,12 @@ import {
   logSingleInstanceLockFailure,
   shouldBypassSingleInstanceLock
 } from './startup/single-instance-lock'
-import { isStartupDiagnosticsEnabled, logStartupDiagnostic } from './startup/startup-diagnostics'
+import {
+  isStartupDiagnosticsEnabled,
+  logStartupDiagnostic,
+  logStartupTimingReport
+} from './startup/startup-diagnostics'
+import { createStartupPhaseTimer } from '../shared/startup-phase-timing'
 import { RateLimitService } from './rate-limits/service'
 import { getInitialClaudeRateLimitTarget } from './rate-limits/claude-rate-limit-target'
 import { getInitialCodexRateLimitTarget } from './rate-limits/codex-rate-limit-target'
@@ -150,6 +155,8 @@ let runtimeRpc: OrcaRuntimeRpcServer | null = null
 let starNag: StarNagService | null = null
 let agentAwakeService: AgentAwakeService | null = null
 let crashReports: CrashReportStore | null = null
+let firstWindowVisibleRecorded = false
+let firstWindowLoadRecorded = false
 let unsubscribeAgentAwakeStatusChanges: (() => void) | null = null
 let watcherShutdownPromise: Promise<void> | null = null
 let watcherShutdownDone = false
@@ -244,6 +251,15 @@ if (app.isPackaged && process.platform !== 'win32') {
 configureDevUserDataPath(is.dev)
 configureOrcaUserDataPathEnv()
 const startupDiagnosticsEnabled = isStartupDiagnosticsEnabled()
+const mainStartupTiming = createStartupPhaseTimer({
+  origin: 'main',
+  details: {
+    packaged: app.isPackaged,
+    platform: process.platform,
+    serveMode: isServeMode
+  }
+})
+mainStartupTiming.markMilestone('process-entry')
 if (startupDiagnosticsEnabled) {
   logStartupDiagnostic('before-single-instance-lock', {
     version: app.getVersion(),
@@ -253,6 +269,13 @@ if (startupDiagnosticsEnabled) {
     userData: app.getPath('userData'),
     e2eUserData: Boolean(process.env.ORCA_E2E_USER_DATA_DIR)
   })
+}
+
+function logMainStartupTiming(details: Record<string, unknown> = {}): void {
+  if (!startupDiagnosticsEnabled) {
+    return
+  }
+  logStartupTimingReport(mainStartupTiming.snapshot({ details }))
 }
 
 function focusExistingWindow(): void {
@@ -447,6 +470,17 @@ function openMainWindow(): BrowserWindow {
   if (!keybindings) {
     throw new Error('Keybinding service must be initialized before opening the main window')
   }
+  const currentStore = store
+  const currentRuntime = runtime
+  const currentStats = stats
+  const currentClaudeUsage = claudeUsage
+  const currentCodexUsage = codexUsage
+  const currentOpenCodeUsage = openCodeUsage
+  const currentRateLimits = rateLimits
+  const currentAutomations = automations
+  const currentCodexAccounts = codexAccounts
+  const currentClaudeAccounts = claudeAccounts
+  const currentKeybindings = keybindings
 
   // Why: Chromium's BrowserWindow constructor resets the userData DACL to a
   // Protected DACL. Grant explicit Full Control ACEs on all existing children
@@ -461,47 +495,49 @@ function openMainWindow(): BrowserWindow {
     }
   }
 
-  const window = createMainWindow(store, {
-    getIsQuitting: () => isQuitting,
-    onQuitAborted: () => {
-      isQuitting = false
-      clearExpectedRendererReload()
-    },
-    onRendererProcessGone: (details, webContentsId) => {
-      recordProcessGoneCrash(
-        'renderer',
-        'renderer',
-        details.reason,
-        details.exitCode ?? null,
-        {
-          processType: 'renderer'
-        },
-        webContentsId
-      )
-    },
-    shouldRecordRendererCrash: (details, webContentsId) =>
-      shouldRecordProcessGoneCrash({
-        source: 'renderer',
-        processType: 'renderer',
-        reason: details.reason,
-        exitCode: details.exitCode ?? null,
-        expectedTeardown: getExpectedTeardownScope(webContentsId)
-      }),
-    shouldRecoverRenderer: (details, webContentsId) =>
-      shouldRecoverRendererAfterProcessGone({
-        reason: details.reason,
-        expectedTeardown: getExpectedTeardownScope(webContentsId)
-      }),
-    deferLoad: true,
-    title: devInstanceIdentity.name,
-    getKeybindings: () => keybindings?.getOverrides(),
-    onBeforeReload: ({ ignoreCache, webContentsId }) => {
-      if (mainWindow?.webContents.id === webContentsId) {
-        markExpectedRendererReload(webContentsId)
+  const window = mainStartupTiming.measureSync('main-window.create', () =>
+    createMainWindow(currentStore, {
+      getIsQuitting: () => isQuitting,
+      onQuitAborted: () => {
+        isQuitting = false
+        clearExpectedRendererReload()
+      },
+      onRendererProcessGone: (details, webContentsId) => {
+        recordProcessGoneCrash(
+          'renderer',
+          'renderer',
+          details.reason,
+          details.exitCode ?? null,
+          {
+            processType: 'renderer'
+          },
+          webContentsId
+        )
+      },
+      shouldRecordRendererCrash: (details, webContentsId) =>
+        shouldRecordProcessGoneCrash({
+          source: 'renderer',
+          processType: 'renderer',
+          reason: details.reason,
+          exitCode: details.exitCode ?? null,
+          expectedTeardown: getExpectedTeardownScope(webContentsId)
+        }),
+      shouldRecoverRenderer: (details, webContentsId) =>
+        shouldRecoverRendererAfterProcessGone({
+          reason: details.reason,
+          expectedTeardown: getExpectedTeardownScope(webContentsId)
+        }),
+      deferLoad: true,
+      title: devInstanceIdentity.name,
+      getKeybindings: () => keybindings?.getOverrides(),
+      onBeforeReload: ({ ignoreCache, webContentsId }) => {
+        if (mainWindow?.webContents.id === webContentsId) {
+          markExpectedRendererReload(webContentsId)
+        }
+        recordCrashBreadcrumb('manual_reload_requested', { ignoreCache })
       }
-      recordCrashBreadcrumb('manual_reload_requested', { ignoreCache })
-    }
-  })
+    })
+  )
   recordCrashBreadcrumb('main_window_created')
 
   // Why: telemetry-plan.md§First-launch experience anchors default-on
@@ -512,6 +548,11 @@ function openMainWindow(): BrowserWindow {
   const onFirstWindowLoad = (): void => {
     clearExpectedRendererReload(rendererWebContentsId)
     recordCrashBreadcrumb('main_window_loaded')
+    if (!firstWindowLoadRecorded) {
+      firstWindowLoadRecorded = true
+      mainStartupTiming.markMilestone('main-window-did-finish-load', { rendererWebContentsId })
+      logMainStartupTiming({ stage: 'renderer-load' })
+    }
     if (!store) {
       return
     }
@@ -522,33 +563,43 @@ function openMainWindow(): BrowserWindow {
     trackAppOpenedOnce()
   }
   window.webContents.on('did-finish-load', onFirstWindowLoad)
-
-  registerCoreHandlers(
-    store,
-    runtime,
-    stats,
-    claudeUsage,
-    codexUsage,
-    openCodeUsage,
-    codexAccounts,
-    claudeAccounts,
-    rateLimits,
-    rendererWebContentsId,
-    automations,
-    {
-      prepareForCodexLaunch: prepareCodexRuntimeHomeForLaunch,
-      prepareForClaudeLaunch: () => claudeRuntimeAuth!.prepareForClaudeLaunch()
-    },
-    agentAwakeService ?? undefined,
-    crashReports ?? undefined,
-    keybindings,
-    {
-      onBeforeRelaunch: () => {
-        isQuitting = true
-        store?.flush()
-      }
+  window.once('show', () => {
+    if (firstWindowVisibleRecorded) {
+      return
     }
-  )
+    firstWindowVisibleRecorded = true
+    mainStartupTiming.markMilestone('first-window-visible', { rendererWebContentsId })
+    logMainStartupTiming({ stage: 'first-window-visible' })
+  })
+
+  mainStartupTiming.measureSync('core-handlers.register', () => {
+    registerCoreHandlers(
+      currentStore,
+      currentRuntime,
+      currentStats,
+      currentClaudeUsage,
+      currentCodexUsage,
+      currentOpenCodeUsage,
+      currentCodexAccounts,
+      currentClaudeAccounts,
+      currentRateLimits,
+      rendererWebContentsId,
+      currentAutomations,
+      {
+        prepareForCodexLaunch: prepareCodexRuntimeHomeForLaunch,
+        prepareForClaudeLaunch: () => claudeRuntimeAuth!.prepareForClaudeLaunch()
+      },
+      agentAwakeService ?? undefined,
+      crashReports ?? undefined,
+      currentKeybindings,
+      {
+        onBeforeRelaunch: () => {
+          isQuitting = true
+          store?.flush()
+        }
+      }
+    )
+  })
   automations.setWebContents(window.webContents)
   automations.start()
   attachMainWindowServices(
@@ -1033,6 +1084,7 @@ function driveSyntheticTitleFromHook(
 }
 
 app.whenReady().then(async () => {
+  mainStartupTiming.markMilestone('electron-ready')
   electronApp.setAppUserModelId(devInstanceIdentity.appUserModelId)
   app.setName(devInstanceIdentity.name)
 
@@ -1041,17 +1093,19 @@ app.whenReady().then(async () => {
     app.dock?.setIcon(dockIcon)
   }
 
-  store = new Store()
+  store = mainStartupTiming.measureSync('store.init', () => new Store())
   if (shouldSuppressDevEducation({ isDev: is.dev })) {
     suppressDevEducationForStore(store)
   }
-  try {
-    // Why: Dock/Launchpad launches do not inherit shell proxy env vars, so the
-    // persisted proxy must be applied before any app-owned network fetchers run.
-    await applyElectronProxySettings(store.getSettings())
-  } catch {
-    console.warn('[proxy] Failed to apply network proxy settings')
-  }
+  await mainStartupTiming.measure('proxy.apply', async () => {
+    try {
+      // Why: Dock/Launchpad launches do not inherit shell proxy env vars, so the
+      // persisted proxy must be applied before any app-owned network fetchers run.
+      await applyElectronProxySettings(store!.getSettings())
+    } catch {
+      console.warn('[proxy] Failed to apply network proxy settings')
+    }
+  })
   agentAwakeService = new AgentAwakeService()
   agentAwakeService.setEnabled(store.getSettings().keepComputerAwakeWhileAgentsRun)
   // Why: disk-hydrated status rows are UI continuity only. The service starts
@@ -1164,6 +1218,7 @@ app.whenReady().then(async () => {
       onTabsChanged: (worktreeId) => runtimeService.notifyMobileSessionTabsChanged(worktreeId)
     })
   )
+  mainStartupTiming.markMilestone('main-services-ready')
   nativeTheme.themeSource = store.getSettings().theme ?? 'system'
   if (shouldInstallManagedHooks(is.dev)) {
     // Why: the persisted off switch must run before any auto-install path so
@@ -1291,31 +1346,36 @@ app.whenReady().then(async () => {
   registerMobileHandlers(runtimeRpc)
 
   if (!isServeMode) {
-    await startFirstWindowStartupServices({
-      // Why: the persistent-terminal daemon is desktop-only. Headless
-      // `orca serve` registers its PTY runtime below and must not spawn the
-      // desktop daemon or hook loopback listener.
-      startDaemonPtyProvider: () => initDaemonPtyProvider(),
-      // Why: PTY spawn env reads ORCA_AGENT_HOOK_* from the live server state,
-      // so the hook server must start before restored terminals can mount.
-      startAgentHookServer: () =>
-        agentHookServer.start({
-          env: app.isPackaged ? 'production' : 'development',
-          // Why: hooks source this endpoint file at invocation time, so old PTY
-          // env still reaches the current Orca process after an app restart.
-          // Dev uses a namespace because all worktrees share `orca-dev`.
-          userDataPath: app.getPath('userData'),
-          endpointNamespace: devAgentHookEndpointNamespace
-        }),
-      onDaemonError: (error) => {
-        console.error('[daemon] Failed to start daemon PTY provider, falling back to local:', error)
-      },
-      onAgentHookServerError: (error) => {
-        // Why: Claude/Codex/Gemini/OpenCode/Cursor hook callbacks are sidebar
-        // enrichment only. Orca must still boot if the loopback receiver fails.
-        console.error('[agent-hooks] Failed to start local hook server:', error)
-      }
-    })
+    await mainStartupTiming.measure('first-window-services.start', () =>
+      startFirstWindowStartupServices({
+        // Why: the persistent-terminal daemon is desktop-only. Headless
+        // `orca serve` registers its PTY runtime below and must not spawn the
+        // desktop daemon or hook loopback listener.
+        startDaemonPtyProvider: () => initDaemonPtyProvider(),
+        // Why: PTY spawn env reads ORCA_AGENT_HOOK_* from the live server state,
+        // so the hook server must start before restored terminals can mount.
+        startAgentHookServer: () =>
+          agentHookServer.start({
+            env: app.isPackaged ? 'production' : 'development',
+            // Why: hooks source this endpoint file at invocation time, so old PTY
+            // env still reaches the current Orca process after an app restart.
+            // Dev uses a namespace because all worktrees share `orca-dev`.
+            userDataPath: app.getPath('userData'),
+            endpointNamespace: devAgentHookEndpointNamespace
+          }),
+        onDaemonError: (error) => {
+          console.error(
+            '[daemon] Failed to start daemon PTY provider, falling back to local:',
+            error
+          )
+        },
+        onAgentHookServerError: (error) => {
+          // Why: Claude/Codex/Gemini/OpenCode/Cursor hook callbacks are sidebar
+          // enrichment only. Orca must still boot if the loopback receiver fails.
+          console.error('[agent-hooks] Failed to start local hook server:', error)
+        }
+      })
+    )
   }
 
   if (serveOptions) {
@@ -1330,22 +1390,28 @@ app.whenReady().then(async () => {
     // explicit empty graph so status clients see a ready server while
     // renderer-only operations still fail at their own window boundary.
     runtime.syncWindowGraph(0, { tabs: [], leaves: [] })
-    await runtimeRpc.start().catch((error) => {
-      console.error('[runtime] Failed to start headless RPC transport:', error)
-      throw error
-    })
+    await mainStartupTiming.measure('runtime-rpc.start', () =>
+      runtimeRpc!.start().catch((error) => {
+        console.error('[runtime] Failed to start headless RPC transport:', error)
+        throw error
+      })
+    )
     installServeSignalHandlers()
     await printServeReady(serveOptions)
+    mainStartupTiming.markMilestone('headless-server-ready')
+    logMainStartupTiming({ stage: 'headless-server-ready' })
     return
   }
 
   // Why: once the hook server is ready (or has already failed open), window
   // creation and runtime RPC startup are independent.
   const [win] = await Promise.all([
-    Promise.resolve(openMainWindow()),
-    runtimeRpc.start().catch((error) => {
-      console.error('[runtime] Failed to start local RPC transport:', error)
-    })
+    Promise.resolve().then(() => mainStartupTiming.measureSync('main-window.open', openMainWindow)),
+    mainStartupTiming.measure('runtime-rpc.start', () =>
+      runtimeRpc!.start().catch((error) => {
+        console.error('[runtime] Failed to start local RPC transport:', error)
+      })
+    )
   ])
 
   // Why: the macOS notification permission dialog must fire after the window
