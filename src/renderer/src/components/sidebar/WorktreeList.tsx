@@ -106,6 +106,7 @@ import {
   setVisibleWorktreeIds,
   sidebarHasActiveFilters
 } from './visible-worktrees'
+import { getEmptyProjectPlaceholderRepoIds } from './empty-project-placeholder-repos'
 import {
   getVisibleWorktreeBrowserActivityTabs,
   getVisibleWorktreeTerminalActivityTabs,
@@ -3982,17 +3983,8 @@ const WorktreeList = React.memo(function WorktreeList({
     })
   }, [detectedWorktreesByRepo, filterRepoIds, importedWorktreeCardActionState, repos])
   const placeholderRepoIds = useMemo(() => {
-    if (groupBy !== 'repo' || projectGroups.length === 0) {
-      return new Set<string>()
-    }
-    const filterSet = filterRepoIds.length > 0 ? new Set(filterRepoIds) : null
-    return new Set(
-      repos
-        .filter((repo) => (worktreesByRepo[repo.id]?.length ?? 0) === 0)
-        .filter((repo) => filterSet === null || filterSet.has(repo.id))
-        .map((repo) => repo.id)
-    )
-  }, [filterRepoIds, groupBy, projectGroups.length, repos, worktreesByRepo])
+    return getEmptyProjectPlaceholderRepoIds({ groupBy, repos, worktreesByRepo, filterRepoIds })
+  }, [filterRepoIds, groupBy, repos, worktreesByRepo])
   const allRepoIds = useMemo(() => repos.map((r) => r.id), [repos])
   const reorderReposAction = useAppStore((s) => s.reorderRepos)
   const projectGroupOrdering = getProjectGroupOrdering(groupBy, sortBy)
