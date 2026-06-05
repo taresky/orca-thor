@@ -217,7 +217,7 @@ function TaskSourcesAction(): React.JSX.Element {
         <GitHubRow compact />
         <LinearRow compact />
       </div>
-      <div className="flex items-center">
+      <div className="flex items-center pt-2">
         <Button
           type="button"
           size="sm"
