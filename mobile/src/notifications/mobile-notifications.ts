@@ -24,9 +24,25 @@ type SubscribeResult = {
 }
 
 const scheduledNotificationIdsByHostAndNotificationId = new Map<string, string>()
+// Why: serialize show/dismiss per stored key so an interleaved dismiss between
+// the map-delete and the scheduleNotificationAsync resolution cannot silently
+// no-op and leave the new OS notification undismissable.
+const pendingOperationsByStoredKey = new Map<string, Promise<void>>()
 
 function getStoredNotificationKey(hostId: string, notificationId: string): string {
   return `${encodeURIComponent(hostId)}:${encodeURIComponent(notificationId)}`
+}
+
+function runSerializedByStoredKey(storedKey: string, task: () => Promise<void>): Promise<void> {
+  const previous = pendingOperationsByStoredKey.get(storedKey) ?? Promise.resolve()
+  const next = previous.then(task, task)
+  pendingOperationsByStoredKey.set(storedKey, next)
+  void next.finally(() => {
+    if (pendingOperationsByStoredKey.get(storedKey) === next) {
+      pendingOperationsByStoredKey.delete(storedKey)
+    }
+  })
+  return next
 }
 
 export type NotificationPermissionState = {
@@ -82,25 +98,34 @@ async function showLocalNotification(event: NotificationEvent, hostId: string): 
   const storedKey = event.notificationId
     ? getStoredNotificationKey(hostId, event.notificationId)
     : null
-  const previousIdentifier = storedKey
-    ? scheduledNotificationIdsByHostAndNotificationId.get(storedKey)
-    : undefined
-  if (storedKey && previousIdentifier) {
-    await Notifications.dismissNotificationAsync(previousIdentifier).catch(() => {})
-    scheduledNotificationIdsByHostAndNotificationId.delete(storedKey)
+
+  const schedule = async (): Promise<void> => {
+    const previousIdentifier = storedKey
+      ? scheduledNotificationIdsByHostAndNotificationId.get(storedKey)
+      : undefined
+    if (storedKey && previousIdentifier) {
+      await Notifications.dismissNotificationAsync(previousIdentifier).catch(() => {})
+      scheduledNotificationIdsByHostAndNotificationId.delete(storedKey)
+    }
+
+    const scheduledIdentifier = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: event.title,
+        body: event.body,
+        data: buildLocalNotificationData(event, hostId),
+        ...(Platform.OS === 'android' ? { channelId: 'orca-desktop' } : {})
+      },
+      trigger: null
+    })
+    if (storedKey) {
+      scheduledNotificationIdsByHostAndNotificationId.set(storedKey, scheduledIdentifier)
+    }
   }
 
-  const scheduledIdentifier = await Notifications.scheduleNotificationAsync({
-    content: {
-      title: event.title,
-      body: event.body,
-      data: buildLocalNotificationData(event, hostId),
-      ...(Platform.OS === 'android' ? { channelId: 'orca-desktop' } : {})
-    },
-    trigger: null
-  })
   if (storedKey) {
-    scheduledNotificationIdsByHostAndNotificationId.set(storedKey, scheduledIdentifier)
+    await runSerializedByStoredKey(storedKey, schedule)
+  } else {
+    await schedule()
   }
 }
 
@@ -112,12 +137,14 @@ async function dismissLocalNotification(
     return
   }
   const storedKey = getStoredNotificationKey(hostId, event.notificationId)
-  const identifier = scheduledNotificationIdsByHostAndNotificationId.get(storedKey)
-  if (!identifier) {
-    return
-  }
-  scheduledNotificationIdsByHostAndNotificationId.delete(storedKey)
-  await Notifications.dismissNotificationAsync(identifier).catch(() => {})
+  await runSerializedByStoredKey(storedKey, async () => {
+    const identifier = scheduledNotificationIdsByHostAndNotificationId.get(storedKey)
+    if (!identifier) {
+      return
+    }
+    scheduledNotificationIdsByHostAndNotificationId.delete(storedKey)
+    await Notifications.dismissNotificationAsync(identifier).catch(() => {})
+  })
 }
 
 // Why: each host connection gets its own notification subscription. When the
