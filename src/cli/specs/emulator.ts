@@ -26,7 +26,7 @@ export const EMULATOR_COMMAND_SPECS: CommandSpec[] = [
     path: ['emulator', 'type'],
     summary: 'Type text (US ASCII only)',
     usage: 'orca emulator type <text> [--device <id>] [--worktree <selector>] [--json]',
-    allowedFlags: [...GLOBAL_FLAGS, 'text', 'device', 'emulator', 'worktree', 'text'],
+    allowedFlags: [...GLOBAL_FLAGS, 'text', 'device', 'emulator', 'worktree'],
     positionalArgs: ['text']
   },
   {

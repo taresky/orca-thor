@@ -426,7 +426,11 @@ export const KEYBINDING_DEFINITIONS: readonly KeybindingDefinition[] = [
     group: 'Tabs',
     scope: 'tabs',
     searchKeywords: ['shortcut', 'tab', 'simulator', 'emulator', 'mobile', 'ios', 'new'],
-    defaultBindings: platformBindings(['Mod+Shift+E'])
+    defaultBindings: {
+      darwin: ['Mod+Shift+E'],
+      linux: [],
+      win32: []
+    }
   },
   {
     id: 'tab.newMarkdown',

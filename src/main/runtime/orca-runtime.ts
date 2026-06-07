@@ -12220,6 +12220,8 @@ export class OrcaRuntimeService {
   }
 
   private dropDisconnectedPtyRecord(ptyId: string): void {
+    // Why: pruning can remove a PTY without the normal exit callback.
+    serveSimStateWatcher.unbindPty(ptyId)
     this.ptysById.delete(ptyId)
     this.recentPtyOutputById.delete(ptyId)
     this.ptyOutputSequenceById.delete(ptyId)

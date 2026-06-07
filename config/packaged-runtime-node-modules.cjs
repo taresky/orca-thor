@@ -96,6 +96,21 @@ function readPackage(packageName, fromDir = projectDir) {
   }
 }
 
+function isKnownOmittedServeSimDependency(packageName, fromDir) {
+  if (packageName !== 'inspect-webkit') {
+    return false
+  }
+  const serveSimPackageJsonPath = join(projectDir, 'node_modules', 'serve-sim', 'package.json')
+  if (!existsSync(serveSimPackageJsonPath)) {
+    return false
+  }
+  try {
+    return realpathSync(fromDir) === realpathSync(dirname(serveSimPackageJsonPath))
+  } catch {
+    return false
+  }
+}
+
 function collectPackagedRuntimePackages() {
   const packages = new Map()
   const visit = (packageName, fromDir = projectDir) => {
@@ -106,9 +121,13 @@ function collectPackagedRuntimePackages() {
     let packageInfo
     try {
       packageInfo = readPackage(packageName, fromDir)
-    } catch {
-      // Why: serve-sim lists inspect-webkit but some installs omit it until first CLI run; skip missing closure deps.
-      return
+    } catch (error) {
+      // Why: serve-sim declares inspect-webkit, but current installs omit it.
+      // Keep that escape hatch narrow so broken packages still fail packaging.
+      if (isKnownOmittedServeSimDependency(packageName, fromDir)) {
+        return
+      }
+      throw error
     }
     if (packages.has(packageInfo.name)) {
       return

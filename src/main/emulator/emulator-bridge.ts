@@ -19,13 +19,13 @@ import {
   killServeSimHelperProcessesForDevice,
   listServeSimHelperProcessesForDevice
 } from './serve-sim-helper-processes'
-import type { EmulatorBridgeOptions, EmulatorSessionState } from './emulator-bridge-types'
+import type { EmulatorBridgeOptions } from './emulator-bridge-types'
 import { sendEmulatorGestureSequence, type EmulatorGesturePoint } from './emulator-gesture-sender'
 import { parseServeSimDetachedSession } from './serve-sim-detached-session'
+import { EmulatorSessionRegistry } from './emulator-session-registry'
 
 export class EmulatorBridge {
-  private readonly activeByWorktree = new Map<string, string>()
-  private readonly sessions = new Map<string, EmulatorSessionState>()
+  private readonly sessionRegistry = new EmulatorSessionRegistry()
 
   private serveSimExecutable: ServeSimExecutable
   private readonly waitForEndpointReady: (endpoint: string) => Promise<boolean>
@@ -56,42 +56,15 @@ export class EmulatorBridge {
     info: EmulatorSessionInfo,
     options: { managed?: boolean } = {}
   ): void {
-    const key = info.deviceUdid
-    this.sessions.set(key, {
-      deviceUdid: info.deviceUdid,
-      wsUrl: info.wsUrl,
-      streamUrl: info.streamUrl,
-      axUrl: info.axUrl,
-      pid: info.helperPid,
-      managed: options.managed === true,
-      initialized: true
-    })
-    this.activeByWorktree.set(worktreeId, key)
+    this.sessionRegistry.registerActive(worktreeId, info, options)
   }
 
   unregisterActiveEmulator(worktreeId: string): void {
-    this.activeByWorktree.delete(worktreeId)
+    this.sessionRegistry.unregisterWorktree(worktreeId)
   }
 
   getActiveForWorktree(worktreeId?: string): EmulatorSessionInfo | null {
-    if (!worktreeId) {
-      return null
-    }
-    const key = this.activeByWorktree.get(worktreeId)
-    if (!key) {
-      return null
-    }
-    const s = this.sessions.get(key)
-    if (!s) {
-      return null
-    }
-    return {
-      deviceUdid: s.deviceUdid,
-      wsUrl: s.wsUrl,
-      streamUrl: s.streamUrl,
-      axUrl: s.axUrl,
-      helperPid: s.pid
-    }
+    return this.sessionRegistry.getActiveForWorktree(worktreeId)
   }
 
   async getReusableActiveForWorktree(
@@ -126,12 +99,12 @@ export class EmulatorBridge {
     worktreeId: string,
     options: { shutdownDevice?: boolean; managedOnly?: boolean } = {}
   ): Promise<string | null> {
-    const key = this.activeByWorktree.get(worktreeId)
+    const key = this.sessionRegistry.getActiveSessionKey(worktreeId)
     if (!key) {
       return null
     }
-    const session = this.sessions.get(key)
-    this.activeByWorktree.delete(worktreeId)
+    const session = this.sessionRegistry.getSession(key)
+    this.sessionRegistry.unregisterWorktree(worktreeId)
     if (!session || (options.managedOnly && !session.managed)) {
       return null
     }
@@ -142,12 +115,7 @@ export class EmulatorBridge {
     if (options.shutdownDevice) {
       await shutdownSimulatorDevice(session.deviceUdid).catch(() => {})
     }
-    this.sessions.delete(key)
-    for (const [wt, activeKey] of this.activeByWorktree.entries()) {
-      if (activeKey === key) {
-        this.activeByWorktree.delete(wt)
-      }
-    }
+    this.sessionRegistry.clearSessionAndWorktrees(key)
     return session.deviceUdid
   }
 
@@ -193,7 +161,7 @@ export class EmulatorBridge {
     }
     const target = this.getTargetOrThrow(opts)
     const udid = await this.ensureUdid(target.udid)
-    const session = this.sessions.get(udid)
+    const session = this.sessionRegistry.getSession(udid)
     if (!session?.wsUrl) {
       throw new EmulatorError('emulator_no_active', 'No active emulator stream for gesture input')
     }
@@ -298,16 +266,10 @@ export class EmulatorBridge {
       : this.getTargetOrThrow({ worktreeId })
     const udid = target.udid
     await this.stopServeSimForDevice(udid, {
-      helperPid: this.sessions.get(udid)?.pid,
+      helperPid: this.sessionRegistry.getSession(udid)?.pid,
       includeOrphaned: true
     })
-    const key = udid
-    this.sessions.delete(key)
-    for (const [wt, k] of this.activeByWorktree.entries()) {
-      if (k === key) {
-        this.activeByWorktree.delete(wt)
-      }
-    }
+    this.sessionRegistry.clearSessionAndWorktrees(udid)
     return udid
   }
 
@@ -317,23 +279,17 @@ export class EmulatorBridge {
       : this.getTargetOrThrow({ worktreeId })
     const udid = target.udid
     await this.stopServeSimForDevice(udid, {
-      helperPid: this.sessions.get(udid)?.pid,
+      helperPid: this.sessionRegistry.getSession(udid)?.pid,
       includeOrphaned: true
     })
     await shutdownSimulatorDevice(udid)
-    const key = udid
-    this.sessions.delete(key)
-    for (const [wt, k] of this.activeByWorktree.entries()) {
-      if (k === key) {
-        this.activeByWorktree.delete(wt)
-      }
-    }
+    this.sessionRegistry.clearSessionAndWorktrees(udid)
     return udid
   }
 
   async destroyAllSessions(): Promise<void> {
     const promises: Promise<unknown>[] = []
-    for (const session of this.sessions.values()) {
+    for (const session of this.sessionRegistry.listSessions()) {
       if (session.managed) {
         promises.push(
           this.stopServeSimForDevice(session.deviceUdid, { helperPid: session.pid })
@@ -343,8 +299,7 @@ export class EmulatorBridge {
       }
     }
     await Promise.allSettled(promises)
-    this.sessions.clear()
-    this.activeByWorktree.clear()
+    this.sessionRegistry.clear()
   }
 
   async onAppQuit(): Promise<void> {

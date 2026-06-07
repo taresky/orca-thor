@@ -574,11 +574,7 @@ export function useTabGroupWorkspaceModel({
       newSimulatorTab: () => {
         // Why: mobile simulators are most useful beside the current tab group.
         // Re-open focuses the existing worktree simulator instead of spawning duplicates.
-        const wtId = useAppStore.getState().activeWorktreeId
-        if (!wtId) {
-          return
-        }
-        ensureSimulatorTab(wtId, {
+        ensureSimulatorTab(worktreeId, {
           placement: 'rightSplit',
           targetGroupId: groupId,
           surfacePane: true
