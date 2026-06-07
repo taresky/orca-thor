@@ -5,57 +5,54 @@ import {
 } from './markdown-table-of-contents'
 
 describe('markdown table of contents', () => {
-  it('builds a nested h1-h3 outline', () => {
+  it('builds a nested h2-h3 outline excluding h1', () => {
     const toc = buildMarkdownTableOfContents('# Intro\n\n## Setup\n\n### Install\n\n## Usage')
 
     expect(toc).toEqual([
       {
-        id: 'intro',
-        level: 1,
-        title: 'Intro',
+        id: 'setup',
+        level: 2,
+        title: 'Setup',
         children: [
           {
-            id: 'setup',
-            level: 2,
-            title: 'Setup',
-            children: [
-              {
-                id: 'install',
-                level: 3,
-                title: 'Install',
-                children: []
-              }
-            ]
-          },
-          {
-            id: 'usage',
-            level: 2,
-            title: 'Usage',
+            id: 'install',
+            level: 3,
+            title: 'Install',
             children: []
           }
         ]
+      },
+      {
+        id: 'usage',
+        level: 2,
+        title: 'Usage',
+        children: []
       }
     ])
   })
 
-  it('skips front matter and unsupported heading depths', () => {
-    const toc = buildMarkdownTableOfContents('---\ntitle: Doc\n---\n# Visible\n#### Hidden')
+  it('skips front matter, h1, and unsupported heading depths', () => {
+    const toc = buildMarkdownTableOfContents(
+      '---\ntitle: Doc\n---\n# Hidden H1\n## Visible\n#### Hidden H4'
+    )
 
     expect(toc.map((item) => item.title)).toEqual(['Visible'])
   })
 
   it('skips headings inside fenced code blocks', () => {
-    const toc = buildMarkdownTableOfContents('# Install\n\n```sh\n# not a heading\n```\n\n## Real')
+    const toc = buildMarkdownTableOfContents(
+      '# Hidden H1\n\n## Setup\n\n```sh\n# not a heading\n```\n\n## Real'
+    )
 
-    expect(toc[0].children.map((item) => item.title)).toEqual(['Real'])
+    expect(toc.map((item) => item.title)).toEqual(['Setup', 'Real'])
   })
 
   it('includes rendered markdown heading forms', () => {
     const toc = buildMarkdownTableOfContents(
-      '# Intro\n\n  ## Indented\n\nSetext *Title*\n---\n\n### https://example.com'
+      '# Hidden H1\n\n  ## Indented\n\nSetext *Title*\n---\n\n### https://example.com'
     )
 
-    expect(toc[0].children).toEqual([
+    expect(toc).toEqual([
       {
         id: 'indented',
         level: 2,
@@ -79,13 +76,13 @@ describe('markdown table of contents', () => {
   })
 
   it('uses GitHub-compatible duplicate slugs', () => {
-    const toc = buildMarkdownTableOfContents('# Repeat\n# Repeat')
+    const toc = buildMarkdownTableOfContents('## Repeat\n## Repeat')
 
     expect(toc.map((item) => item.id)).toEqual(['repeat', 'repeat-1'])
   })
 
   it('decodes HTML entities before slugging headings', () => {
-    const toc = buildMarkdownTableOfContents('# A &amp; B')
+    const toc = buildMarkdownTableOfContents('## A &amp; B')
 
     expect(toc[0]).toMatchObject({
       id: 'a--b',
