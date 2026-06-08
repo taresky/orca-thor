@@ -63,6 +63,10 @@ describe('applyTerminalGpuAcceleration', () => {
   })
 
   it('keeps complex-script panes on WebGL when switching from forced WebGL back to auto', () => {
+    vi.stubGlobal('navigator', {
+      platform: 'MacIntel',
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)'
+    })
     const pane = createPane()
     pane.hasComplexScriptOutput = true
     const options: PaneManagerOptions = { terminalGpuAcceleration: 'on' }
