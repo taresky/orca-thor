@@ -10,11 +10,14 @@ import { GitHubRateLimitPanel } from '../github/github-rate-limit-display'
 import { GitLabRateLimitPanel } from '../gitlab/gitlab-rate-limit-display'
 import { AutoRenameBranchFromWorkSetting } from './AutoRenameBranchFromWorkSetting'
 import { getAutoRenameBranchSearchEntries } from './auto-rename-branch-search'
+import {
+  KEEP_LOCAL_MAIN_UP_TO_DATE_SECTION_ID,
+  getKeepLocalMainUpToDateTitle
+} from './keep-local-main-up-to-date-setting'
 import { translate } from '@/i18n/i18n'
 
 export { getGitPaneSearchEntries }
 
-const KEEP_LOCAL_MAIN_UP_TO_DATE_TITLE = 'Keep Local Main Up to Date'
 const KEEP_LOCAL_MAIN_UP_TO_DATE_DESCRIPTION =
   'When you create a workspace, Orca refreshes the remote base and safely fast-forwards your matching local branch, such as main or master. This keeps commands like git diff main...HEAD from comparing against stale history. Orca skips the update if that branch has uncommitted changes or local-only commits.'
 const KEEP_LOCAL_MAIN_UP_TO_DATE_KEYWORDS = [
@@ -65,6 +68,7 @@ export function GitPane({
 }: GitPaneProps): React.JSX.Element {
   const storeSearchQuery = useAppStore((s) => s.settingsSearchQuery)
   const searchQuery = settingsSearchQuery ?? storeSearchQuery
+  const keepLocalMainUpToDateTitle = getKeepLocalMainUpToDateTitle()
 
   const visibleSections = [
     matchesSettingsSearch(searchQuery, {
@@ -140,19 +144,20 @@ export function GitPane({
       </SearchableSetting>
     ) : null,
     matchesSettingsSearch(searchQuery, {
-      title: KEEP_LOCAL_MAIN_UP_TO_DATE_TITLE,
+      title: keepLocalMainUpToDateTitle,
       description: KEEP_LOCAL_MAIN_UP_TO_DATE_DESCRIPTION,
       keywords: KEEP_LOCAL_MAIN_UP_TO_DATE_KEYWORDS
     }) ? (
       <SearchableSetting
         key="refresh-base-ref"
-        title={KEEP_LOCAL_MAIN_UP_TO_DATE_TITLE}
+        id={KEEP_LOCAL_MAIN_UP_TO_DATE_SECTION_ID}
+        title={keepLocalMainUpToDateTitle}
         description={KEEP_LOCAL_MAIN_UP_TO_DATE_DESCRIPTION}
         keywords={KEEP_LOCAL_MAIN_UP_TO_DATE_KEYWORDS}
         className="flex items-center justify-between gap-4 py-2"
       >
         <div className="space-y-0.5">
-          <Label>{KEEP_LOCAL_MAIN_UP_TO_DATE_TITLE}</Label>
+          <Label>{keepLocalMainUpToDateTitle}</Label>
           <p className="text-xs text-muted-foreground">
             {translate(
               'auto.components.settings.GitPane.976afc6b3e',

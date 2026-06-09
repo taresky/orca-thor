@@ -2939,6 +2939,23 @@
         }
       },
       "sidebar": {
+        "local": {
+          "base": {
+            "ref": {
+              "suggestion": {
+                "toast": {
+                  "670864ab52": "Keeping local {{value0}} up to date",
+                  "84c62e4d7f": "Could not turn on {{value0}}",
+                  "442552c656": "Open Settings and try again.",
+                  "f15fd80989": "Your new worktree is current, but local {{value0}} is {{value1}} {{value2}} behind, so AI diffs may compare to stale history. Let Orca keep it up to date automatically. Change this anytime in",
+                  "3d260e1a5d": "Settings › {{value0}}",
+                  "34a03a6565": "Keep {{value0}} up to date",
+                  "4a18052018": "Local {{value0}} is behind {{value1}}"
+                }
+              }
+            }
+          }
+        },
         "AddProjectFromFolderDialog": {
           "7d1f51678c": "Add Project",
           "7726a16374": "Cancel",
@@ -3701,6 +3718,21 @@
         }
       },
       "settings": {
+        "keep": {
+          "local": {
+            "main": {
+              "up": {
+                "to": {
+                  "date": {
+                    "setting": {
+                      "f8bda25f29": "Keep Local Main Up to Date"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
         "AccountsPane": {
           "c2d2751587": "Remove Account",
           "dbb9626ed1": "Cancel",

@@ -6,7 +6,6 @@ import type {
   TerminalLayoutSnapshot,
   TerminalPaneLayoutNode,
   LocalBaseRefRefreshResult,
-  LocalBaseRefUpdateSuggestion,
   ForceDeleteWorktreeBranchResult,
   GitHubPrStartPoint,
   Worktree,
@@ -38,6 +37,7 @@ import { toast } from 'sonner'
 import { requestVirtualizedScrollAnchorRecord } from '@/hooks/requestVirtualizedScrollAnchorRecord'
 import { branchName } from '@/lib/git-utils'
 import { markInputQuietSchedulerInput, scheduleAfterInputQuiet } from '@/lib/input-quiet-scheduler'
+import { showLocalBaseRefUpdateSuggestionToast } from '@/components/sidebar/local-base-ref-suggestion-toast'
 import { translate } from '@/i18n/i18n'
 export type { WorktreeSlice, WorktreeDeleteState } from './worktree-helpers'
 
@@ -94,71 +94,18 @@ function showLocalBaseRefRefreshToast(result: LocalBaseRefRefreshResult | undefi
       break
   }
 
-  toast.warning(translate("auto.store.slices.worktrees.14bc053a47", "Local {{value0}} was not refreshed", { value0: result.localBranch }), {
-    description: translate("auto.store.slices.worktrees.903b51c2ed", "Workspace created from {{value0}}, but Orca could not fast-forward local {{value1}} because {{value2}}", { value0: result.baseRef, value1: result.localBranch, value2: reason })
-  })
-}
-
-function showLocalBaseRefUpdateSuggestionToast(
-  suggestion: LocalBaseRefUpdateSuggestion | undefined,
-  updateSettings: AppState['updateSettings'],
-  getSettings: () => AppState['settings']
-): void {
-  if (!suggestion) {
-    return
-  }
-
-  const toastId = `local-base-ref-update-suggestion:${suggestion.baseRef}:${suggestion.localBranch}`
-  const commitNoun = suggestion.behind === 1 ? 'commit' : 'commits'
-
-  // Why: an explicit dismissal (Dismiss button, close X, or swipe) persists a
-  // flag so the nudge never shows again — the backend probe is gated on it too.
-  // Skip when the feature is now enabled: the Turn On success path also dismisses
-  // the toast (which fires onDismiss), and "dismissed" should mean "declined".
-  const persistDismissal = (): void => {
-    if (getSettings()?.refreshLocalBaseRefOnWorktreeCreate === true) {
-      return
+  toast.warning(
+    translate('auto.store.slices.worktrees.14bc053a47', 'Local {{value0}} was not refreshed', {
+      value0: result.localBranch
+    }),
+    {
+      description: translate(
+        'auto.store.slices.worktrees.903b51c2ed',
+        'Workspace created from {{value0}}, but Orca could not fast-forward local {{value1}} because {{value2}}',
+        { value0: result.baseRef, value1: result.localBranch, value2: reason }
+      )
     }
-    void Promise.resolve(updateSettings({ localBaseRefSuggestionDismissed: true })).catch(() => {})
-  }
-
-  // Why (matches the sticky "Session restore failed" toast): stay on screen until
-  // the user acts, so a ~4s auto-expire can't bury this one-time, opt-in nudge.
-  toast.warning(translate("auto.store.slices.worktrees.4a18052018", "Local {{value0}} is behind {{value1}}", { value0: suggestion.localBranch, value1: suggestion.baseRef }), {
-    id: toastId,
-    description: translate("auto.store.slices.worktrees.fa9299a66f", "Your new worktree is current, but local {{value0}} is {{value1}} {{value2}} behind. AI diffs may miss recent commits.", { value0: suggestion.localBranch, value1: suggestion.behind, value2: commitNoun }),
-    duration: Infinity,
-    dismissible: true,
-    // Fires for the close (X) button and swipe; the Dismiss button uses its own
-    // handler since sonner's cancel action does not trigger onDismiss.
-    onDismiss: persistDismissal,
-    action: {
-      label: translate("auto.store.slices.worktrees.34a03a6565", "Keep {{value0}} up to date", { value0: suggestion.localBranch }),
-      onClick: () => {
-        void Promise.resolve(
-          updateSettings({
-            refreshLocalBaseRefOnWorktreeCreate: true
-          })
-        )
-          .then(() => {
-            if (getSettings()?.refreshLocalBaseRefOnWorktreeCreate !== true) {
-              throw new Error('settings_not_persisted')
-            }
-            toast.dismiss(toastId)
-            toast.success(translate("auto.store.slices.worktrees.670864ab52", "Keeping local {{value0}} up to date", { value0: suggestion.localBranch }))
-          })
-          .catch(() => {
-            toast.error(translate("auto.store.slices.worktrees.2b0afc7f14", "Could not keep local {{value0}} up to date", { value0: suggestion.localBranch }), {
-              description: translate("auto.store.slices.worktrees.f4503ca505", "Open Settings > Git and try again.")
-            })
-          })
-      }
-    },
-    cancel: {
-      label: translate("auto.store.slices.worktrees.889487d8bb", "Dismiss"),
-      onClick: persistDismissal
-    }
-  })
+  )
 }
 
 function showPreservedBranchToast(
@@ -178,14 +125,23 @@ function showPreservedBranchToast(
   const expectedHead = preservedBranch.head
   const action = expectedHead
     ? {
-        label: translate("auto.store.slices.worktrees.e50495aae6", "Force Delete Branch"),
+        label: translate('auto.store.slices.worktrees.e50495aae6', 'Force Delete Branch'),
         onClick: () => onForceDelete(branch, expectedHead)
       }
     : undefined
-  toast.warning(translate("auto.store.slices.worktrees.4e6496f3d2", "{{value0}} deleted, branch kept", { value0: targetTitle }), {
-    description: translate("auto.store.slices.worktrees.d1d78a7baa", "Git could not safely delete branch \"{{value0}}\"{{value1}}, so Orca kept it to avoid losing local commits.", { value0: branch, value1: deletedTarget }),
-    ...(action ? { action } : {})
-  })
+  toast.warning(
+    translate('auto.store.slices.worktrees.4e6496f3d2', '{{value0}} deleted, branch kept', {
+      value0: targetTitle
+    }),
+    {
+      description: translate(
+        'auto.store.slices.worktrees.d1d78a7baa',
+        'Git could not safely delete branch "{{value0}}"{{value1}}, so Orca kept it to avoid losing local commits.',
+        { value0: branch, value1: deletedTarget }
+      ),
+      ...(action ? { action } : {})
+    }
+  )
 }
 
 function arraysShallowEqual(a: string[] | undefined, b: string[] | undefined): boolean {
@@ -1207,11 +1163,12 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
             }
           })
           showLocalBaseRefRefreshToast(result.localBaseRefRefresh)
-          showLocalBaseRefUpdateSuggestionToast(
-            result.localBaseRefUpdateSuggestion,
-            get().updateSettings,
-            () => get().settings
-          )
+          showLocalBaseRefUpdateSuggestionToast(result.localBaseRefUpdateSuggestion, {
+            updateSettings: get().updateSettings,
+            getSettings: () => get().settings,
+            openSettingsPage: get().openSettingsPage,
+            openSettingsTarget: get().openSettingsTarget
+          })
           return result
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
@@ -1612,13 +1569,15 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
             { worktree: toRuntimeWorktreeSelector(worktreeId), branchName, expectedHead },
             { timeoutMs: 15_000 }
           ))
-      toast.success(translate("auto.store.slices.worktrees.19db0085fb", "Local branch deleted"), {
-        description: translate("auto.store.slices.worktrees.5a58e03a26", "Deleted \"{{value0}}\".", { value0: branchName })
+      toast.success(translate('auto.store.slices.worktrees.19db0085fb', 'Local branch deleted'), {
+        description: translate('auto.store.slices.worktrees.5a58e03a26', 'Deleted "{{value0}}".', {
+          value0: branchName
+        })
       })
       return { ok: true as const, ...result }
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err)
-      toast.error(translate("auto.store.slices.worktrees.0216895fb5", "Failed to delete branch"), {
+      toast.error(translate('auto.store.slices.worktrees.0216895fb5', 'Failed to delete branch'), {
         description: error
       })
       return { ok: false as const, error }
