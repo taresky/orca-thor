@@ -169,7 +169,7 @@ export const CONTEXTUAL_TOURS = [
     steps: [
       {
         title: 'Your portable command center',
-        body: 'Use the floating workspace for repo-root work: agents, quick commands, notes, browser tabs, and cross-cutting side work you keep with you.',
+        body: 'Use the floating workspace for repo-root work — agents, quick commands, notes, and browser tabs that follow you across worktrees.',
         targetSelector:
           '[data-contextual-tour-target="floating-workspace-actions"], [data-contextual-tour-target="floating-workspace-surface"]',
         requiredForStart: true,

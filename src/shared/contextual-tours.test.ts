@@ -172,7 +172,7 @@ describe('contextual tour definitions', () => {
       'Keep side work out of the way'
     ])
     expect(tour?.steps.map((step) => step.body)).toEqual([
-      'Use the floating workspace for repo-root work: agents, quick commands, notes, browser tabs, and cross-cutting side work you keep with you.',
+      'Use the floating workspace for repo-root work — agents, quick commands, notes, and browser tabs that follow you across worktrees.',
       'Park scratch terminals, references, and long-running remote sessions here without cluttering the task you’re focused on.'
     ])
     expect(tour?.steps[0]).toMatchObject({
