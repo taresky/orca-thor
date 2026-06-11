@@ -193,7 +193,10 @@ async function addLocalRepoFromPath(
     ...(repoKind === 'git'
       ? {
           externalWorktreeVisibility: 'hide' as const,
-          externalWorktreeVisibilityLegacy: false
+          externalWorktreeVisibilityLegacy: false,
+          // Why: new Add Project imports should become explicit ready host
+          // setups; `legacy-repo` is reserved for older records/projection.
+          projectHostSetupMethod: 'imported-existing-folder' as const
         }
       : {})
   }
@@ -209,6 +212,7 @@ async function addRemoteRepoFromPath(
     remotePath: string
     displayName?: string
     kind?: 'git' | 'folder'
+    setupMethod?: Repo['projectHostSetupMethod']
   }
 ): Promise<{ repo: Repo; alreadyExisted: boolean } | { error: string }> {
   const gitProvider = getSshGitProvider(args.connectionId)
@@ -288,7 +292,8 @@ async function addRemoteRepoFromPath(
     ...(repoKind === 'git'
       ? {
           externalWorktreeVisibility: 'hide' as const,
-          externalWorktreeVisibilityLegacy: false
+          externalWorktreeVisibilityLegacy: false,
+          projectHostSetupMethod: args.setupMethod ?? ('imported-existing-folder' as const)
         }
       : {})
   }
@@ -394,7 +399,10 @@ async function cloneRemoteRepo(
     }
   }
   if (existing && isFolderRepo(existing)) {
-    const updated = store.updateRepo(existing.id, { kind: 'git' })
+    const updated = store.updateRepo(existing.id, {
+      kind: 'git',
+      projectHostSetupMethod: 'cloned'
+    })
     if (updated) {
       emitRepoAdded('clone_url', false)
       getActiveMultiplexer(args.connectionId)?.notify('session.registerRoot', {
@@ -406,7 +414,8 @@ async function cloneRemoteRepo(
   const result = await addRemoteRepoFromPath(store, {
     connectionId: args.connectionId,
     remotePath: clonePath,
-    kind: 'git'
+    kind: 'git',
+    setupMethod: 'cloned'
   })
   if ('error' in result) {
     throw new Error(result.error)
@@ -1448,6 +1457,7 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
             ...(args.connectionId ? { connectionId: args.connectionId } : {}),
             externalWorktreeVisibility: 'hide',
             externalWorktreeVisibilityLegacy: false,
+            projectHostSetupMethod: 'imported-existing-folder',
             ...(group
               ? {
                   projectGroupId: group.id,
@@ -1741,7 +1751,8 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
         ...(repoKind === 'git'
           ? {
               externalWorktreeVisibility: 'hide' as const,
-              externalWorktreeVisibilityLegacy: false
+              externalWorktreeVisibilityLegacy: false,
+              projectHostSetupMethod: 'imported-existing-folder' as const
             }
           : {})
       }
@@ -2122,7 +2133,10 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
             .find((r) => getClonePathComparisonKey(r.path) === clonePathKey)
           if (existing) {
             if (isFolderRepo(existing)) {
-              const updated = store.updateRepo(existing.id, { kind: 'git' })
+              const updated = store.updateRepo(existing.id, {
+                kind: 'git',
+                projectHostSetupMethod: 'cloned'
+              })
               if (updated) {
                 notifyReposChanged(mainWindow)
                 // Why: folder→git upgrade is a real new git repo provisioning event.
@@ -2144,7 +2158,8 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
             addedAt: Date.now(),
             kind: 'git',
             externalWorktreeVisibility: 'hide',
-            externalWorktreeVisibilityLegacy: false
+            externalWorktreeVisibilityLegacy: false,
+            projectHostSetupMethod: 'cloned'
           }
 
           store.addRepo(repo)

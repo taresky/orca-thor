@@ -881,7 +881,8 @@ describe('repos:addRemote', () => {
         displayName: 'project',
         badgeColor: DEFAULT_REPO_BADGE_COLOR,
         externalWorktreeVisibility: 'hide',
-        externalWorktreeVisibilityLegacy: false
+        externalWorktreeVisibilityLegacy: false,
+        projectHostSetupMethod: 'imported-existing-folder'
       })
     )
     expect(result).toHaveProperty('repo.id')
@@ -1015,7 +1016,10 @@ describe('repos:addRemote', () => {
         onProgress: expect.any(Function)
       })
     )
-    expect(mockStore.updateRepo).toHaveBeenCalledWith('existing-folder', { kind: 'git' })
+    expect(mockStore.updateRepo).toHaveBeenCalledWith('existing-folder', {
+      kind: 'git',
+      projectHostSetupMethod: 'cloned'
+    })
     expect(mockStore.addRepo).not.toHaveBeenCalled()
     expect(result).toBe(updated)
   })
@@ -1478,7 +1482,8 @@ describe('repos:add + repos:clone', () => {
         path: '/tmp/from-add',
         kind: 'git',
         externalWorktreeVisibility: 'hide',
-        externalWorktreeVisibilityLegacy: false
+        externalWorktreeVisibilityLegacy: false,
+        projectHostSetupMethod: 'imported-existing-folder'
       })
     )
     expect(result).toHaveProperty('repo.externalWorktreeVisibility', 'hide')
@@ -1547,7 +1552,10 @@ describe('repos:add + repos:clone', () => {
       destination
     })
 
-    expect(mockStore.updateRepo).toHaveBeenCalledWith(existing.id, { kind: 'git' })
+    expect(mockStore.updateRepo).toHaveBeenCalledWith(existing.id, {
+      kind: 'git',
+      projectHostSetupMethod: 'cloned'
+    })
     expect(result).toEqual(upgraded)
     expect(result).toHaveProperty('badgeColor', '#8b5cf6')
     expect(mockStore.addRepo).not.toHaveBeenCalled()
