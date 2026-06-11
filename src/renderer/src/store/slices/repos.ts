@@ -12,6 +12,7 @@ import type {
   ProjectHostSetup,
   ProjectGroupImportResult,
   NestedRepoScanResult,
+  ProjectHostSetupCloneArgs,
   ProjectHostSetupExistingFolderArgs,
   ProjectHostSetupResult
 } from '../../../../shared/types'
@@ -278,6 +279,7 @@ export type RepoSlice = {
   setupProjectExistingFolder: (
     args: ProjectHostSetupExistingFolderArgs
   ) => Promise<ProjectHostSetupResult | null>
+  setupProjectClone: (args: ProjectHostSetupCloneArgs) => Promise<ProjectHostSetupResult | null>
   addNonGitFolder: (path: string) => Promise<Repo | null>
   scanNestedRepos: (
     path: string,
@@ -705,6 +707,50 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
       return { ...result, repo, setup }
     } catch (err) {
       console.error('Failed to set up project on host:', err)
+      const message = err instanceof Error ? err.message : String(err)
+      toast.error(translate('auto.store.slices.repos.c6e022ddfc', 'Failed to add project'), {
+        description: message,
+        duration: ERROR_TOAST_DURATION
+      })
+      return null
+    }
+  },
+
+  setupProjectClone: async (args) => {
+    try {
+      const parsedHost = parseExecutionHostId(args.hostId)
+      if (parsedHost?.kind === 'ssh') {
+        throw new Error(
+          'Clone setup is not available for SSH hosts yet. Import an existing folder on that host instead.'
+        )
+      }
+      const target = getProjectSetupRuntimeTarget(args.hostId)
+      const repo =
+        target.kind === 'local'
+          ? await window.api.repos.clone({
+              url: args.url,
+              destination: args.destination
+            })
+          : (
+              await callRuntimeRpc<{ repo: Repo }>(
+                target,
+                'repo.clone',
+                {
+                  url: args.url,
+                  destination: args.destination
+                },
+                { timeoutMs: 10 * 60_000 }
+              )
+            ).repo
+      return await get().setupProjectExistingFolder({
+        projectId: args.projectId,
+        hostId: args.hostId,
+        path: repo.path,
+        kind: 'git',
+        displayName: args.displayName
+      })
+    } catch (err) {
+      console.error('Failed to clone project on host:', err)
       const message = err instanceof Error ? err.message : String(err)
       toast.error(translate('auto.store.slices.repos.c6e022ddfc', 'Failed to add project'), {
         description: message,

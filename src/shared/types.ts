@@ -133,6 +133,14 @@ export type ProjectHostSetupExistingFolderArgs = {
   displayName?: string
 }
 
+export type ProjectHostSetupCloneArgs = {
+  projectId: string
+  hostId: ExecutionHostId
+  url: string
+  destination: string
+  displayName?: string
+}
+
 export type ProjectHostSetupResult = {
   project: Project
   setup: ProjectHostSetup

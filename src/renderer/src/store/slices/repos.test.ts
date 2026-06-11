@@ -36,6 +36,7 @@ const sshRepo: Repo = {
 const reposList = vi.fn()
 const reposAdd = vi.fn()
 const reposPickFolder = vi.fn()
+const reposClone = vi.fn()
 const reposRemove = vi.fn()
 const reposUpdate = vi.fn()
 const reposReorder = vi.fn()
@@ -50,6 +51,7 @@ beforeEach(() => {
   reposList.mockReset()
   reposAdd.mockReset()
   reposPickFolder.mockReset()
+  reposClone.mockReset()
   reposRemove.mockReset()
   reposUpdate.mockReset()
   reposReorder.mockReset()
@@ -66,6 +68,7 @@ beforeEach(() => {
       repos: {
         list: reposList,
         add: reposAdd,
+        clone: reposClone,
         pickFolder: reposPickFolder,
         remove: reposRemove,
         update: reposUpdate,
@@ -408,6 +411,133 @@ describe('repo slice runtime routing', () => {
       kind: 'git'
     })
     expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
+  })
+
+  it('clones a project locally before aligning it as a host setup', async () => {
+    const project: Project = {
+      id: 'project-1',
+      displayName: 'Project',
+      badgeColor: '#000',
+      sourceRepoIds: ['local-repo'],
+      createdAt: 1,
+      updatedAt: 1
+    }
+    const clonedRepo = { ...localRepo, path: '/workspace/project' }
+    const setup: ProjectHostSetup = {
+      id: clonedRepo.id,
+      projectId: project.id,
+      hostId: 'local',
+      repoId: clonedRepo.id,
+      path: clonedRepo.path,
+      displayName: clonedRepo.displayName,
+      setupState: 'ready',
+      setupMethod: 'legacy-repo',
+      createdAt: 1,
+      updatedAt: 1
+    }
+    reposClone.mockResolvedValue(clonedRepo)
+    projectsSetupExistingFolder.mockResolvedValue({ project, setup, repo: clonedRepo })
+    const store = createTestStore()
+
+    await expect(
+      store.getState().setupProjectClone({
+        projectId: project.id,
+        hostId: 'local',
+        url: 'https://github.com/stablyai/orca.git',
+        destination: '/workspace',
+        displayName: 'Project'
+      })
+    ).resolves.toEqual({
+      project,
+      setup,
+      repo: { ...clonedRepo, executionHostId: 'local' }
+    })
+
+    expect(reposClone).toHaveBeenCalledWith({
+      url: 'https://github.com/stablyai/orca.git',
+      destination: '/workspace'
+    })
+    expect(projectsSetupExistingFolder).toHaveBeenCalledWith({
+      projectId: project.id,
+      hostId: 'local',
+      path: clonedRepo.path,
+      kind: 'git',
+      displayName: 'Project'
+    })
+  })
+
+  it('clones a project on a runtime host before aligning it as a host setup', async () => {
+    const project: Project = {
+      id: 'project-1',
+      displayName: 'Project',
+      badgeColor: '#000',
+      sourceRepoIds: ['remote-repo'],
+      createdAt: 1,
+      updatedAt: 1
+    }
+    const clonedRepo = { ...remoteRepo, path: '/srv/project' }
+    const setup: ProjectHostSetup = {
+      id: clonedRepo.id,
+      projectId: project.id,
+      hostId: 'local',
+      repoId: clonedRepo.id,
+      path: clonedRepo.path,
+      displayName: clonedRepo.displayName,
+      setupState: 'ready',
+      setupMethod: 'legacy-repo',
+      createdAt: 1,
+      updatedAt: 1
+    }
+    runtimeEnvironmentCall
+      .mockResolvedValueOnce({
+        id: 'rpc-clone',
+        ok: true,
+        result: { repo: clonedRepo },
+        _meta: { runtimeId: 'runtime-remote' }
+      })
+      .mockResolvedValueOnce({
+        id: 'rpc-setup',
+        ok: true,
+        result: { result: { project, setup, repo: clonedRepo } },
+        _meta: { runtimeId: 'runtime-remote' }
+      })
+    const store = createTestStore()
+
+    await expect(
+      store.getState().setupProjectClone({
+        projectId: project.id,
+        hostId: 'runtime:env-1',
+        url: 'https://github.com/stablyai/orca.git',
+        destination: '/srv',
+        displayName: 'Project'
+      })
+    ).resolves.toEqual({
+      project,
+      setup: { ...setup, hostId: 'runtime:env-1', executionHostId: 'runtime:env-1' },
+      repo: { ...clonedRepo, executionHostId: 'runtime:env-1' }
+    })
+
+    expect(runtimeEnvironmentCall).toHaveBeenNthCalledWith(1, {
+      selector: 'env-1',
+      method: 'repo.clone',
+      params: {
+        url: 'https://github.com/stablyai/orca.git',
+        destination: '/srv'
+      },
+      timeoutMs: 10 * 60_000
+    })
+    expect(runtimeEnvironmentCall).toHaveBeenNthCalledWith(2, {
+      selector: 'env-1',
+      method: 'projectHostSetup.setupExistingFolder',
+      params: {
+        projectId: project.id,
+        hostId: 'runtime:env-1',
+        path: clonedRepo.path,
+        kind: 'git',
+        displayName: 'Project'
+      },
+      timeoutMs: 15_000
+    })
   })
 
   it('keeps runtime ownership when a runtime repo is moved between groups', async () => {

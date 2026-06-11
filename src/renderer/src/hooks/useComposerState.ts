@@ -89,6 +89,7 @@ import {
   type NeedsSetupProjectHostOption,
   type ProjectHostSetupOption
 } from '@/lib/project-host-setup-options'
+import { getProjectHostCloneUrl } from '@/lib/project-host-clone-url'
 import { buildExecutionHostRegistry } from '../../../shared/execution-host-registry'
 import { getHostDisplayLabelOverrides } from '../../../shared/host-setting-overrides'
 import { queueNewWorkspaceTerminalFocus } from '@/lib/new-workspace-terminal-focus'
@@ -164,6 +165,12 @@ export type ComposerCardProps = {
     option: NeedsSetupProjectHostOption,
     path: string,
     kind: 'git' | 'folder'
+  ) => Promise<boolean>
+  projectHostCloneUrl: string | null
+  onProjectHostCloneSetup: (
+    option: NeedsSetupProjectHostOption,
+    url: string,
+    destination: string
   ) => Promise<boolean>
   name: string
   onNameValueChange: (value: string) => void
@@ -311,6 +318,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       openSettingsPage: s.openSettingsPage,
       openSettingsTarget: s.openSettingsTarget,
       setupProjectExistingFolder: s.setupProjectExistingFolder,
+      setupProjectClone: s.setupProjectClone,
       prefetchWorktreeCreateBase: s.prefetchWorktreeCreateBase,
       prefetchWorkItems: s.prefetchWorkItems,
       fetchSparsePresets: s.fetchSparsePresets
@@ -326,6 +334,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     openSettingsPage,
     openSettingsTarget,
     setupProjectExistingFolder,
+    setupProjectClone,
     prefetchWorktreeCreateBase,
     prefetchWorkItems,
     fetchSparsePresets
@@ -390,6 +399,10 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
   const selectedRepo = eligibleRepos.find((repo) => repo.id === repoId)
   const selectedProjectId =
     selectedWorkspaceTarget.status === 'ready' ? selectedWorkspaceTarget.target.projectId : null
+  const selectedProject = selectedProjectId
+    ? (projects.find((project) => project.id === selectedProjectId) ?? null)
+    : null
+  const projectHostCloneUrl = getProjectHostCloneUrl(selectedProject)
   const selectedProjectHostSetupId =
     selectedWorkspaceTarget.status === 'ready'
       ? selectedWorkspaceTarget.target.projectHostSetupId
@@ -1732,6 +1745,27 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     },
     [handleRepoChange, selectedRepo?.displayName, setupProjectExistingFolder]
   )
+  const handleProjectHostCloneSetup = useCallback(
+    async (
+      option: NeedsSetupProjectHostOption,
+      url: string,
+      destination: string
+    ): Promise<boolean> => {
+      const result = await setupProjectClone({
+        projectId: option.projectId,
+        hostId: option.hostId,
+        url,
+        destination,
+        displayName: selectedRepo?.displayName
+      })
+      if (!result) {
+        return false
+      }
+      handleRepoChange(result.repo.id)
+      return true
+    },
+    [handleRepoChange, selectedRepo?.displayName, setupProjectClone]
+  )
 
   const showProjectRequiredError = useCallback((): void => {
     setProjectError('Choose or add a project before creating a workspace.')
@@ -2602,6 +2636,8 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     selectedProjectHostSetupId,
     onProjectHostSetupChange: handleProjectHostSetupChange,
     onProjectHostExistingFolderSetup: handleProjectHostExistingFolderSetup,
+    projectHostCloneUrl,
+    onProjectHostCloneSetup: handleProjectHostCloneSetup,
     name,
     onNameValueChange: handleNameValueChange,
     onSmartGitHubItemSelect: handleSmartGitHubItemSelect,

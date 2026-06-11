@@ -750,12 +750,18 @@ Landed so far:
 - Added an inline composer action for those not-yet-set-up hosts to import an
   existing folder on that host. After import, the composer switches to the new
   ready setup so workspace creation can continue on that host.
+- Added an inline composer clone action for not-yet-set-up non-SSH hosts. It
+  seeds a GitHub HTTPS clone URL when durable project identity is available,
+  lets the user paste a different URL, clones into the selected parent
+  directory through the existing local/runtime clone APIs, then links the
+  resulting checkout as the project's host setup.
 - Added tests for local repos, SSH repos, same-provider multi-host grouping,
   no-identity same-name non-grouping, selector cache behavior, persistence
-  backfill, repo mutation synchronization, renderer hydration, and runtime RPC
-  routing. Sidebar row-builder tests now cover project-first multi-host grouping
-  and same-name repo separation without project identity. Workspace target tests
-  cover local-only fallback, focused-host setup selection, explicit
+  backfill, repo mutation synchronization, renderer hydration, runtime RPC
+  routing, local/runtime clone setup composition, and GitHub clone URL
+  inference. Sidebar row-builder tests now cover project-first multi-host
+  grouping and same-name repo separation without project identity. Workspace
+  target tests cover local-only fallback, focused-host setup selection, explicit
   project-plus-host resolution, same-name non-merging, and unavailable setup
   reasons.
 
@@ -768,13 +774,18 @@ Important limitation:
   through their repo compatibility record. Settings now expose setup-specific
   host panes and existing-folder setup, but still use repo compatibility records
   underneath.
+- SSH clone setup is not implemented yet. SSH hosts can import an existing
+  folder today; true SSH clone should either reuse a remote git-provider exec
+  path or add a remote clone flow with progress, abort, safe path derivation,
+  cleanup, and auth parity.
+- The current clone setup action records the resulting checkout by calling the
+  existing-folder setup path, so durable `setupMethod: cloned` semantics are not
+  complete while the compatibility projection remains repo-backed.
 
 Remaining end-to-end work:
 
-- add inline clone/provision actions for `Run on` hosts where the project is not
-  set up yet
 - broaden setup-on-host flows beyond known local, SSH, and active runtime hosts
-- add clone/provision setup-on-host flows
+- finish SSH clone, provisioning, and bulk setup-on-host flows
 - split settings into explicit client, host, project, and project-host setup
   scopes
 - validate the default project-first sidebar view in Electron and continue
