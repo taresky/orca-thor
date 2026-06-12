@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import type { LaunchSource } from '../../../../shared/telemetry-events'
 import type {
   SourceControlActionRecipe,
@@ -87,6 +87,7 @@ export function useSourceControlAgentActionStart({
     status: 'idle'
   })
   const [isStarting, setIsStarting] = useState(false)
+  const isStartingRef = useRef(false)
   const resetDeliveryPlan = useCallback(() => setDeliveryPlan({ status: 'idle' }), [])
 
   const buildPlan = useCallback(
@@ -118,13 +119,14 @@ export function useSourceControlAgentActionStart({
       detectedAgents: nextAgents,
       saveTargetValueOverride
     }: SourceControlAgentActionStartWithDetectedAgentsArgs): Promise<boolean> => {
-      if (!selectedAgent || isStarting) {
+      if (!selectedAgent || isStartingRef.current) {
         return false
       }
       if (connectionUnavailable) {
         setDeliveryPlan(buildSourceControlAgentConnectionErrorPlan())
         return false
       }
+      isStartingRef.current = true
       setIsStarting(true)
       try {
         const nextPlan = await buildPlan(nextAgents)
@@ -157,6 +159,7 @@ export function useSourceControlAgentActionStart({
           }
         })
       } finally {
+        isStartingRef.current = false
         setIsStarting(false)
       }
     },
@@ -167,7 +170,6 @@ export function useSourceControlAgentActionStart({
       commandTemplate,
       connectionUnavailable,
       groupId,
-      isStarting,
       launchSource,
       launchPlatform,
       onClose,
@@ -188,14 +190,14 @@ export function useSourceControlAgentActionStart({
   )
 
   const handleStart = useCallback(async () => {
-    if (!selectedAgent || isStarting) {
+    if (!selectedAgent || isStartingRef.current) {
       return
     }
     // Why: manual starts intentionally re-check the current host, while the
     // saved-receipt bypass reuses the detection result that unlocked it.
     const nextAgents = await refreshDetectedAgents()
     await startWithDetectedAgents({ detectedAgents: nextAgents })
-  }, [isStarting, refreshDetectedAgents, selectedAgent, startWithDetectedAgents])
+  }, [refreshDetectedAgents, selectedAgent, startWithDetectedAgents])
 
   return { deliveryPlan, resetDeliveryPlan, isStarting, handleStart, startWithDetectedAgents }
 }

@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import path from 'node:path'
 import React, { type ReactNode, useState } from 'react'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -67,7 +68,7 @@ function settingsWithGlobalRecipe(
   },
   disabledTuiAgents: GlobalSettings['disabledTuiAgents'] = []
 ): GlobalSettings {
-  const base = getDefaultSettings('/tmp')
+  const base = getDefaultSettings(path.resolve('tmp'))
   return {
     ...base,
     defaultTuiAgent: 'codex',
