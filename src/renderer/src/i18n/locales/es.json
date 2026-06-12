@@ -3692,7 +3692,9 @@
                   "3d162cc76f": "Proyecto remoto",
                   "fb4fc5380e": "Proyecto local, repo de Git o carpeta con muchos repos",
                   "2281fdc8c7": "Explorar carpeta",
-                  "sshCreateUnavailable": "Not available for SSH hosts yet"
+                  "sshCreateUnavailable": "Not available for SSH hosts yet",
+                  "sshBrowseTitle": "Open SSH project",
+                  "sshBrowseDescription": "Existing Git repository or folder on this SSH host"
                 }
               }
             }
@@ -5177,7 +5179,8 @@
           "cloningHost": "Cloning...",
           "cloneHost": "Clone",
           "creatingPendingSetup": "Creating...",
-          "createPendingSetup": "Track setup"
+          "createPendingSetup": "Track setup",
+          "hostSetupCheckingCapability": "Checking host capabilities"
         },
         "RepositorySourceControlAiActionRows": {
           "548a6e1281": "Plantilla de comando",

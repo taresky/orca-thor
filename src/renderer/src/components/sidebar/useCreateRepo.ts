@@ -20,7 +20,11 @@ export function useCreateRepo(
   ) => Promise<boolean>,
   closeModal: () => void,
   onGitRepoReady?: (repoId: string) => void | Promise<void>,
-  options: { hostId?: string | null; sshTargetId?: string | null } = {}
+  options: {
+    hostId?: string | null
+    runtimeEnvironmentId?: string | null
+    sshTargetId?: string | null
+  } = {}
 ) {
   const [createName, setCreateName] = useState('')
   const [createParent, setCreateParent] = useState('')
@@ -58,7 +62,7 @@ export function useCreateRepo(
       )
       return null
     }
-    if (useAppStore.getState().settings?.activeRuntimeEnvironmentId?.trim()) {
+    if (options.runtimeEnvironmentId?.trim()) {
       // Why: the native folder picker returns a client-local path. Runtime
       // project creation needs an explicit server parent path.
       toast.error(
@@ -77,7 +81,7 @@ export function useCreateRepo(
       return dir
     }
     return null
-  }, [mountedRef, options.sshTargetId])
+  }, [mountedRef, options.runtimeEnvironmentId, options.sshTargetId])
 
   const handleCreate = useCallback(async () => {
     const name = createName.trim()
@@ -90,7 +94,12 @@ export function useCreateRepo(
     setIsCreating(true)
     setCreateError(null)
     try {
-      const target = getActiveRuntimeTarget(useAppStore.getState().settings)
+      const target = options.runtimeEnvironmentId?.trim()
+        ? { kind: 'environment' as const, environmentId: options.runtimeEnvironmentId.trim() }
+        : getActiveRuntimeTarget({
+            ...useAppStore.getState().settings,
+            activeRuntimeEnvironmentId: null
+          })
       const result = options.sshTargetId
         ? await window.api.repos.createRemote({
             connectionId: options.sshTargetId,
@@ -221,6 +230,7 @@ export function useCreateRepo(
     mountedRef,
     closeModal,
     onGitRepoReady,
+    options.runtimeEnvironmentId,
     options.sshTargetId
   ])
 

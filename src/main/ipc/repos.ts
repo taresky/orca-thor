@@ -222,28 +222,16 @@ async function addRemoteRepoFromPath(
   }
 
   let repoKind: 'git' | 'folder' = args.kind ?? 'git'
-  let resolvedPath = args.remotePath
-
-  // Why: `~` is a shell expansion that Node's fs APIs don't understand.
-  // Resolve tilde paths to absolute paths via the relay before storing,
-  // so all downstream fs operations (readDir, stat, etc.) work correctly.
-  if (resolvedPath === '~' || resolvedPath === '~/' || resolvedPath.startsWith('~/')) {
-    const mux = getActiveMultiplexer(args.connectionId)
-    if (mux) {
-      try {
-        const result = (await mux.request('session.resolveHome', {
-          path: resolvedPath
-        })) as { resolvedPath: string }
-        resolvedPath = result.resolvedPath
-      } catch {
-        // Relay may not support resolveHome yet — fall through to raw path
-      }
-    }
-  }
+  let resolvedPath = await resolveRemoteHomePath(args.connectionId, args.remotePath)
 
   const existing = store
     .getRepos()
-    .find((r) => r.connectionId === args.connectionId && r.path === resolvedPath)
+    .find(
+      (repo) =>
+        repo.connectionId === args.connectionId &&
+        normalizeRuntimePathForComparison(repo.path) ===
+          normalizeRuntimePathForComparison(resolvedPath)
+    )
   if (existing) {
     return { repo: existing, alreadyExisted: true }
   }
@@ -265,6 +253,18 @@ async function addRemoteRepoFromPath(
       }
       return { error: `Not a valid git repository: ${args.remotePath}` }
     }
+  }
+
+  const existingAfterRootResolve = store
+    .getRepos()
+    .find(
+      (repo) =>
+        repo.connectionId === args.connectionId &&
+        normalizeRuntimePathForComparison(repo.path) ===
+          normalizeRuntimePathForComparison(resolvedPath)
+    )
+  if (existingAfterRootResolve) {
+    return { repo: existingAfterRootResolve, alreadyExisted: true }
   }
 
   const folderName = getRemoteRepoFolderName(resolvedPath)
@@ -333,7 +333,7 @@ async function cloneRemoteRepo(
   if (!host) {
     throw new Error('SSH host platform is unavailable. Reconnect the SSH target before cloning.')
   }
-  const trimmedDestination = args.destination.trim()
+  const trimmedDestination = await resolveRemoteHomePath(args.connectionId, args.destination.trim())
   if (!isRuntimePathAbsolute(trimmedDestination, host.pathFlavor)) {
     throw new Error('Clone destination must be an absolute path on the SSH host')
   }
@@ -354,14 +354,10 @@ async function cloneRemoteRepo(
     return existing
   }
 
-  const fsProvider = getSshFilesystemProvider(args.connectionId)
-  const canCleanupCloneTarget =
-    !existing &&
-    !!fsProvider &&
-    !(await fsProvider
-      .stat(clonePath)
-      .then(() => true)
-      .catch(() => false))
+  const remoteCloneKey = `${args.connectionId}:${clonePathKey}`
+  if (remoteCloneInFlightByPath.has(remoteCloneKey)) {
+    throw new Error('A clone is already in progress for this SSH destination')
+  }
   const controller = new AbortController()
   const metadata: ActiveRemoteCloneMetadata = {
     connectionId: args.connectionId,
@@ -369,6 +365,7 @@ async function cloneRemoteRepo(
     controller
   }
   activeRemoteClone = metadata
+  remoteCloneInFlightByPath.add(remoteCloneKey)
   try {
     // Why: the SSH relay exposes argv-based git execution, not a shell. Use
     // the repo folder name as the target so git creates it inside the chosen
@@ -387,9 +384,6 @@ async function cloneRemoteRepo(
       }
     )
   } catch (err) {
-    if (canCleanupCloneTarget) {
-      await fsProvider?.deletePath(clonePath, true).catch(() => undefined)
-    }
     if (controller.signal.aborted) {
       throw new Error('Clone aborted')
     }
@@ -398,6 +392,7 @@ async function cloneRemoteRepo(
     if (activeRemoteClone === metadata) {
       activeRemoteClone = null
     }
+    remoteCloneInFlightByPath.delete(remoteCloneKey)
   }
   if (existing && isFolderRepo(existing)) {
     const updated = store.updateRepo(existing.id, {
@@ -435,7 +430,7 @@ async function createRemoteRepo(
   }
 ): Promise<{ repo: Repo } | { error: string }> {
   const name = args.name?.trim() ?? ''
-  const parentPath = args.parentPath?.trim() ?? ''
+  const parentPath = await resolveRemoteHomePath(args.connectionId, args.parentPath?.trim() ?? '')
   const repoKind: 'git' | 'folder' = args.kind === 'folder' ? 'folder' : 'git'
   if (!name) {
     return { error: 'Name cannot be empty' }
@@ -564,6 +559,24 @@ async function createRemoteRepo(
   return { repo: result.repo }
 }
 
+async function resolveRemoteHomePath(connectionId: string, path: string): Promise<string> {
+  if (path !== '~' && path !== '~/' && !path.startsWith('~/')) {
+    return path
+  }
+  const mux = getActiveMultiplexer(connectionId)
+  if (!mux) {
+    return path
+  }
+  try {
+    const result = (await mux.request('session.resolveHome', { path })) as { resolvedPath: string }
+    return result.resolvedPath
+  } catch {
+    // Why: older relays may not support this yet; callers will surface the
+    // original path validation error instead of failing during resolution.
+    return path
+  }
+}
+
 type ActiveCloneMetadata = {
   path: string
   pathKey: string
@@ -590,6 +603,7 @@ let nextCloneGeneration = 1
 const latestCloneGenerationByPath = new Map<string, number>()
 const pendingAbortCleanupByPath = new Map<string, Promise<void>>()
 const cloneInFlightByPath = new Map<string, Promise<void>>()
+const remoteCloneInFlightByPath = new Set<string>()
 const activeNestedRepoScans = new Map<string, AbortController>()
 type CompletedNestedRepoScan = {
   scan: NestedRepoScanResult

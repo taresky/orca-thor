@@ -57,9 +57,9 @@ describe('AddRepoHostSelector', () => {
 
     expect(html).toContain('Builder')
     expect(html).toContain('Disconnected')
-    expect(html).toContain('aria-disabled="true"')
-    expect(html).toContain('cursor-not-allowed')
-    expect(html).toContain('opacity-55')
+    expect(html).toContain('aria-disabled="false"')
+    expect(html).not.toContain('cursor-not-allowed')
+    expect(html).not.toContain('opacity-55')
   })
 
   it('shows exact update guidance for incompatible runtime hosts', () => {

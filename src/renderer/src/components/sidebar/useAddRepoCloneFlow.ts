@@ -116,7 +116,12 @@ export function useAddRepoCloneFlow({
     setCloneError(null)
     setCloneProgress(null)
     try {
-      const target = getActiveRuntimeTarget(useAppStore.getState().settings)
+      const target = activeRuntimeEnvironmentId?.trim()
+        ? { kind: 'environment' as const, environmentId: activeRuntimeEnvironmentId.trim() }
+        : getActiveRuntimeTarget({
+            ...useAppStore.getState().settings,
+            activeRuntimeEnvironmentId: null
+          })
       const repo = sshTargetId?.trim()
         ? await window.api.repos.cloneRemote({
             connectionId: sshTargetId.trim(),
@@ -174,7 +179,14 @@ export function useAddRepoCloneFlow({
         setIsCloning(false)
       }
     }
-  }, [cloneUrl, cloneDestination, fetchWorktrees, onGitRepoReady, sshTargetId])
+  }, [
+    activeRuntimeEnvironmentId,
+    cloneUrl,
+    cloneDestination,
+    fetchWorktrees,
+    onGitRepoReady,
+    sshTargetId
+  ])
 
   return {
     cloneUrl,

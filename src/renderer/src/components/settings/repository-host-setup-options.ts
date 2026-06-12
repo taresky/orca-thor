@@ -69,17 +69,25 @@ function getHostSetupAvailability(host: ExecutionHostRegistryEntry): {
       )
     }
   }
-  if (
-    host.kind === 'runtime' &&
-    host.capabilities &&
-    !host.capabilities?.includes(PROJECT_HOST_SETUP_RUNTIME_CAPABILITY)
-  ) {
-    return {
-      isAvailable: false,
-      detail: translate(
-        'auto.components.settings.RepositoryPane.hostSetupMissingCapability',
-        'Update Orca on this host to set up projects'
-      )
+  if (host.kind === 'runtime') {
+    const capabilities = host.capabilities
+    if (!capabilities) {
+      return {
+        isAvailable: false,
+        detail: translate(
+          'auto.components.settings.RepositoryPane.hostSetupCheckingCapability',
+          'Checking host capabilities'
+        )
+      }
+    }
+    if (!capabilities.includes(PROJECT_HOST_SETUP_RUNTIME_CAPABILITY)) {
+      return {
+        isAvailable: false,
+        detail: translate(
+          'auto.components.settings.RepositoryPane.hostSetupMissingCapability',
+          'Update Orca on this host to set up projects'
+        )
+      }
     }
   }
   return {

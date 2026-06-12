@@ -5,8 +5,9 @@
  * Extracted from git-handler-ops.ts to keep both files under the limit.
  */
 
-// Why: only read-only git subcommands are allowed via exec. config is restricted
-// to read-only flags; branch rejects destructive flags; fetch/worktree removed.
+// Why: only read-only git subcommands are allowed via exec, except for the
+// exact init/empty-commit shapes used by SSH Create Project after the parent
+// directory has already been validated by main.
 const ALLOWED_GIT_SUBCOMMANDS = new Set([
   'rev-parse',
   'branch',
@@ -19,6 +20,8 @@ const ALLOWED_GIT_SUBCOMMANDS = new Set([
   'diff',
   'ls-files',
   'clone',
+  'init',
+  'commit',
   'for-each-ref',
   'check-ref-format',
   'config'
@@ -102,6 +105,18 @@ function validateCloneArgs(args: string[]): void {
   }
 }
 
+function validateInitArgs(args: string[]): void {
+  if (args.length !== 1) {
+    throw new Error('git init via exec is restricted to init with no arguments')
+  }
+}
+
+function validateCommitArgs(args: string[]): void {
+  if (args.length !== 4 || args[1] !== '--allow-empty' || args[2] !== '-m' || !args[3]) {
+    throw new Error('git commit via exec is restricted to commit --allow-empty -m <message>')
+  }
+}
+
 // Why: git accepts --flag=value compound syntax (e.g. --file=/etc/passwd),
 // which bypasses exact-match Set.has() checks. This helper catches both forms.
 function matchesDeniedFlag(arg: string, denySet: Set<string>): boolean {
@@ -144,6 +159,12 @@ export function validateGitExecArgs(args: string[]): void {
     if (restArgs.some((a) => matchesDeniedFlag(a, CONFIG_WRITE_FLAGS))) {
       throw new Error('git config write operations are not allowed via exec')
     }
+  }
+  if (subcommand === 'init') {
+    validateInitArgs(args)
+  }
+  if (subcommand === 'commit') {
+    validateCommitArgs(args)
   }
   if (subcommand === 'branch') {
     if (restArgs.some((a) => matchesDeniedFlag(a, BRANCH_DESTRUCTIVE_FLAGS))) {

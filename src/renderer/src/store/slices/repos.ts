@@ -280,6 +280,31 @@ function projectCompatibilityFromRepos(
   }
 }
 
+function mergeProjectHostSetupCompatibility(
+  derived: Pick<RepoSlice, 'projects' | 'projectHostSetups'>,
+  fetched: ProjectHostSetupProjection
+): Pick<RepoSlice, 'projects' | 'projectHostSetups'> {
+  return {
+    projects: mergeById(derived.projects, fetched.projects),
+    projectHostSetups: mergeById(derived.projectHostSetups, fetched.setups)
+  }
+}
+
+function mergeById<T extends { id: string }>(base: readonly T[], overlay: readonly T[]): T[] {
+  const merged = [...base]
+  const indexById = new Map(merged.map((entry, index) => [entry.id, index]))
+  for (const entry of overlay) {
+    const index = indexById.get(entry.id)
+    if (index === undefined) {
+      indexById.set(entry.id, merged.length)
+      merged.push(entry)
+    } else {
+      merged[index] = entry
+    }
+  }
+  return merged
+}
+
 function mergeFetchedReposForHost(
   previous: readonly Repo[],
   fetched: Repo[],
@@ -580,7 +605,10 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
                 projects: fetchedProjectCompatibility.projects,
                 projectHostSetups: fetchedProjectCompatibility.setups
               }
-            : projectCompatibilityFromRepos(reconciledRepos)
+            : mergeProjectHostSetupCompatibility(
+                projectCompatibilityFromRepos(reconciledRepos),
+                fetchedProjectCompatibility
+              )
         return {
           repos: reconciledRepos,
           ...projectCompatibility,

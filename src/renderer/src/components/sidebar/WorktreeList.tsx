@@ -184,6 +184,8 @@ import {
 import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
 import { splitWorktreeSortOrderByHost } from '@/lib/worktree-sort-order-host-split'
 import {
+  ALL_EXECUTION_HOSTS_SCOPE,
+  getRepoExecutionHostId,
   getSettingsFocusedExecutionHostId,
   type ExecutionHostId,
   parseExecutionHostId
@@ -4519,6 +4521,50 @@ const WorktreeList = React.memo(function WorktreeList({
     worktreeLineageById,
     worktreeMap
   ])
+  const defaultHostId = getSettingsFocusedExecutionHostId(settings)
+  const visibleHostIdSet = useMemo(() => {
+    const visibleHostIds =
+      visibleWorkspaceHostIds ??
+      (workspaceHostScope === ALL_EXECUTION_HOSTS_SCOPE ? null : [workspaceHostScope])
+    return visibleHostIds ? new Set<ExecutionHostId>(visibleHostIds) : null
+  }, [visibleWorkspaceHostIds, workspaceHostScope])
+  const visibleReposForRows = useMemo(() => {
+    if (!visibleHostIdSet) {
+      return repos
+    }
+    return repos.filter((repo) => {
+      const hostId =
+        repo.connectionId || repo.executionHostId ? getRepoExecutionHostId(repo) : defaultHostId
+      return visibleHostIdSet.has(hostId)
+    })
+  }, [defaultHostId, repos, visibleHostIdSet])
+  const visibleProjectGroupsForRows = useMemo(() => {
+    if (!visibleHostIdSet) {
+      return projectGroups
+    }
+    return projectGroups.filter((group) => {
+      const hostId = group.connectionId
+        ? (`ssh:${encodeURIComponent(group.connectionId)}` as ExecutionHostId)
+        : defaultHostId
+      return visibleHostIdSet.has(hostId)
+    })
+  }, [defaultHostId, projectGroups, visibleHostIdSet])
+  const visibleFolderWorkspacesForRows = useMemo(() => {
+    if (!visibleHostIdSet) {
+      return folderWorkspaces
+    }
+    const projectGroupById = new Map(projectGroups.map((group) => [group.id, group]))
+    return folderWorkspaces.filter((folderWorkspace) => {
+      const connectionId =
+        folderWorkspace.connectionId ??
+        projectGroupById.get(folderWorkspace.projectGroupId)?.connectionId ??
+        null
+      const hostId = connectionId
+        ? (`ssh:${encodeURIComponent(connectionId)}` as ExecutionHostId)
+        : defaultHostId
+      return visibleHostIdSet.has(hostId)
+    })
+  }, [defaultHostId, folderWorkspaces, projectGroups, visibleHostIdSet])
   const repoOrder = useMemo(() => {
     const map = new Map<string, number>()
     repos.forEach((r, i) => map.set(r.id, i))
@@ -4534,15 +4580,20 @@ const WorktreeList = React.memo(function WorktreeList({
         .map(([repoId]) => repoId)
     )
     return buildImportedWorktreesCardCandidates({
-      repos,
+      repos: visibleReposForRows,
       detectedWorktreesByRepo,
       filterRepoIds,
       forceVisibleRepoIds
     })
-  }, [detectedWorktreesByRepo, filterRepoIds, importedWorktreeCardActionState, repos])
+  }, [detectedWorktreesByRepo, filterRepoIds, importedWorktreeCardActionState, visibleReposForRows])
   const placeholderRepoIds = useMemo(() => {
-    return getEmptyProjectPlaceholderRepoIds({ groupBy, repos, worktreesByRepo, filterRepoIds })
-  }, [filterRepoIds, groupBy, repos, worktreesByRepo])
+    return getEmptyProjectPlaceholderRepoIds({
+      groupBy,
+      repos: visibleReposForRows,
+      worktreesByRepo,
+      filterRepoIds
+    })
+  }, [filterRepoIds, groupBy, visibleReposForRows, worktreesByRepo])
   const allRepoIds = useMemo(() => repos.map((r) => r.id), [repos])
 
   // Why: buildRows only needs which creates exist and their repo. Subscribe on a
@@ -4582,12 +4633,12 @@ const WorktreeList = React.memo(function WorktreeList({
         worktreeMap,
         true,
         settings,
-        projectGroups,
+        visibleProjectGroupsForRows,
         placeholderRepoIds,
         importedWorktreesByRepo,
         pendingCreations,
         projectGrouping,
-        folderWorkspaces
+        visibleFolderWorkspacesForRows
       ),
     [
       groupBy,
@@ -4601,15 +4652,14 @@ const WorktreeList = React.memo(function WorktreeList({
       worktreeLineageById,
       worktreeMap,
       settings,
-      projectGroups,
       projectGrouping,
+      visibleProjectGroupsForRows,
+      visibleFolderWorkspacesForRows,
       placeholderRepoIds,
       importedWorktreesByRepo,
-      pendingCreations,
-      folderWorkspaces
+      pendingCreations
     ]
   )
-  const defaultHostId = getSettingsFocusedExecutionHostId(settings)
   const hostOptions = useMemo(
     () =>
       buildSidebarHostOptions({

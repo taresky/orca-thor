@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Project, ProjectHostSetup } from '../../../../shared/types'
+import type { Project, ProjectHostSetup, Repo } from '../../../../shared/types'
 import {
   createCompatibleRuntimeStatusResponseIfNeeded,
   type RuntimeEnvironmentCallRequest
@@ -20,6 +20,15 @@ const project: Project = {
   sourceRepoIds: ['local-repo'],
   createdAt: 1,
   updatedAt: 1
+}
+
+const runtimeRepo: Repo = {
+  id: 'runtime-repo',
+  path: '/srv/project',
+  displayName: 'Project',
+  badgeColor: '#111',
+  addedAt: 1,
+  executionHostId: 'runtime:env-1'
 }
 
 const runtimeSetup: ProjectHostSetup = {
@@ -47,6 +56,9 @@ beforeEach(() => {
   })
   vi.stubGlobal('window', {
     api: {
+      repos: {
+        list: vi.fn()
+      },
       projects: {
         createHostSetup: projectsCreateHostSetup,
         updateHostSetup: projectsUpdateHostSetup,
@@ -159,5 +171,56 @@ describe('repo slice project host setup lifecycle', () => {
       params: { setupId: runtimeSetup.id },
       timeoutMs: 15_000
     })
+  })
+
+  it('preserves runtime-fetched setup-only states during repo hydration', async () => {
+    const pendingSetup: ProjectHostSetup = {
+      ...runtimeSetup,
+      id: 'setup-pending',
+      repoId: '',
+      path: '',
+      setupState: 'setting-up'
+    }
+    runtimeEnvironmentCall.mockImplementation((args: RuntimeEnvironmentCallRequest) => {
+      if (args.method === 'repo.list') {
+        return {
+          id: 'rpc-repos',
+          ok: true,
+          result: { repos: [runtimeRepo] },
+          _meta: { runtimeId: 'runtime-remote' }
+        }
+      }
+      if (args.method === 'project.list') {
+        return {
+          id: 'rpc-projects',
+          ok: true,
+          result: { projects: [project] },
+          _meta: { runtimeId: 'runtime-remote' }
+        }
+      }
+      if (args.method === 'projectHostSetup.list') {
+        return {
+          id: 'rpc-setups',
+          ok: true,
+          result: { setups: [pendingSetup] },
+          _meta: { runtimeId: 'runtime-remote' }
+        }
+      }
+      throw new Error(`Unexpected runtime method: ${args.method}`)
+    })
+    const store = createTestStore()
+    store.setState({ settings: { activeRuntimeEnvironmentId: 'env-1' } as never })
+
+    await store.getState().fetchRepos()
+
+    expect(store.getState().projectHostSetups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'setup-pending',
+          hostId: 'runtime:env-1',
+          setupState: 'setting-up'
+        })
+      ])
+    )
   })
 })

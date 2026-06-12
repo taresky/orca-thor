@@ -3683,7 +3683,9 @@
                   "a6c20dca96": "从 SSH 目标打开项目",
                   "3d162cc76f": "远程项目",
                   "fb4fc5380e": "本地项目、Git repo 或包含多个 repos 的文件夹",
-                  "2281fdc8c7": "浏览文件夹"
+                  "2281fdc8c7": "浏览文件夹",
+                  "sshBrowseTitle": "Open SSH project",
+                  "sshBrowseDescription": "Existing Git repository or folder on this SSH host"
                 }
               }
             }
@@ -5162,7 +5164,8 @@
           "cloneHost": "克隆",
           "creatingPendingSetup": "正在创建...",
           "createPendingSetup": "跟踪设置",
-          "499a437335": "身份"
+          "499a437335": "身份",
+          "hostSetupCheckingCapability": "Checking host capabilities"
         },
         "RepositorySourceControlAiActionRows": {
           "548a6e1281": "命令模板",

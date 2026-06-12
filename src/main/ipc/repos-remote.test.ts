@@ -1024,7 +1024,7 @@ describe('repos:addRemote', () => {
     expect(result).toBe(updated)
   })
 
-  it('cleans up a fresh SSH clone target after git clone fails', async () => {
+  it('does not delete a fresh SSH clone target after git clone fails', async () => {
     mockGitProvider.clone.mockRejectedValueOnce(new Error('repository not found'))
     mockFilesystemProvider.stat.mockRejectedValueOnce(new Error('not found'))
 
@@ -1036,7 +1036,54 @@ describe('repos:addRemote', () => {
       })
     ).rejects.toThrow('repository not found')
 
-    expect(mockFilesystemProvider.deletePath).toHaveBeenCalledWith('/home/user/orca', true)
+    expect(mockFilesystemProvider.deletePath).not.toHaveBeenCalled()
+  })
+
+  it('rejects concurrent SSH clones to the same destination', async () => {
+    let releaseClone!: () => void
+    mockGitProvider.clone.mockImplementationOnce(
+      async () =>
+        new Promise<{ stdout: string; stderr: string }>((resolve) => {
+          releaseClone = () => resolve({ stdout: '', stderr: '' })
+        })
+    )
+
+    const firstClone = handlers.get('repos:cloneRemote')!(null, {
+      connectionId: 'conn-1',
+      url: 'https://github.com/stablyai/orca.git',
+      destination: '/home/user'
+    })
+    await waitForAssertion(() => expect(mockGitProvider.clone).toHaveBeenCalledTimes(1))
+
+    await expect(
+      handlers.get('repos:cloneRemote')!(null, {
+        connectionId: 'conn-1',
+        url: 'https://github.com/stablyai/orca.git',
+        destination: '/home/user'
+      })
+    ).rejects.toThrow('A clone is already in progress for this SSH destination')
+
+    releaseClone()
+    await firstClone
+  })
+
+  it('resolves SSH clone destinations under home before validating the path', async () => {
+    mockMultiplexer.request.mockResolvedValueOnce({ resolvedPath: '/home/ubuntu/projects' })
+
+    await handlers.get('repos:cloneRemote')!(null, {
+      connectionId: 'conn-1',
+      url: 'https://github.com/stablyai/orca.git',
+      destination: '~/projects'
+    })
+
+    expect(mockMultiplexer.request).toHaveBeenCalledWith('session.resolveHome', {
+      path: '~/projects'
+    })
+    expect(mockGitProvider.clone).toHaveBeenCalledWith(
+      ['clone', '--progress', '--', 'https://github.com/stablyai/orca.git', 'orca'],
+      '/home/ubuntu/projects',
+      expect.any(Object)
+    )
   })
 
   it('does not clean up a pre-existing SSH clone target after git clone fails', async () => {
@@ -1115,6 +1162,25 @@ describe('repos:addRemote', () => {
     )
     expect(result).toHaveProperty('repo.path', '/home/user/created')
     expect(result).toHaveProperty('repo.connectionId', 'conn-1')
+  })
+
+  it('resolves SSH create parents under home before validating the path', async () => {
+    mockMultiplexer.request.mockResolvedValueOnce({ resolvedPath: '/home/ubuntu/projects' })
+
+    const result = await handlers.get('repos:createRemote')!(null, {
+      connectionId: 'conn-1',
+      parentPath: '~/projects',
+      name: 'created',
+      kind: 'folder'
+    })
+
+    expect(mockMultiplexer.request).toHaveBeenCalledWith('session.resolveHome', {
+      path: '~/projects'
+    })
+    expect(mockFilesystemProvider.createDirNoClobber).toHaveBeenCalledWith(
+      '/home/ubuntu/projects/created'
+    )
+    expect(result).toHaveProperty('repo.path', '/home/ubuntu/projects/created')
   })
 
   it('creates a new folder project on an SSH target without git init', async () => {
@@ -1372,6 +1438,31 @@ describe('repos:addRemote', () => {
       })
     )
     expect(result).toHaveProperty('repo.path', '/home/ubuntu/subdir')
+  })
+
+  it('returns an existing SSH repo when a selected subdirectory resolves to the repo root', async () => {
+    const existing = {
+      id: 'existing-id',
+      path: '/home/user/orca',
+      connectionId: 'conn-1',
+      displayName: 'orca',
+      badgeColor: '#fff',
+      addedAt: 1000,
+      kind: 'git'
+    }
+    mockStore.getRepos.mockReturnValue([existing])
+    mockGitProvider.isGitRepoAsync.mockResolvedValueOnce({
+      isRepo: true,
+      rootPath: '/home/user/orca'
+    })
+
+    const result = await handlers.get('repos:addRemote')!(null, {
+      connectionId: 'conn-1',
+      remotePath: '/home/user/orca/src'
+    })
+
+    expect(result).toEqual({ repo: existing })
+    expect(mockStore.addRepo).not.toHaveBeenCalled()
   })
 
   it('ignores SSH target label when custom displayName is provided', async () => {

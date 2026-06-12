@@ -48,6 +48,7 @@ type AddRepoDialogStepContentProps = {
   showRemoteAction?: boolean
   canCreateProject?: boolean
   manualCreateParentEntry?: boolean
+  browseHostKind?: 'local' | 'ssh'
   createDefaultParent: string
   createGitAvailability: GitAvailability
   createRuntimeParentStatus: 'idle' | 'checking' | 'failed'
@@ -117,6 +118,7 @@ export function AddRepoDialogStepContent({
   showRemoteAction = true,
   canCreateProject = true,
   manualCreateParentEntry = isRuntimeEnvironmentActive,
+  browseHostKind = 'local',
   createDefaultParent,
   createGitAvailability,
   createRuntimeParentStatus,
@@ -175,6 +177,7 @@ export function AddRepoDialogStepContent({
         hostSelector={hostSelector}
         showRemoteAction={showRemoteAction}
         canCreateProject={canCreateProject}
+        browseHostKind={browseHostKind}
         onBrowse={onBrowse}
         onOpenCloneStep={onOpenCloneStep}
         onOpenRemoteStep={onOpenRemoteStep}

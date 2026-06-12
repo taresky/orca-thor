@@ -54,7 +54,6 @@ describe('validateGitExecArgs', () => {
     it.each([
       'push',
       'pull',
-      'commit',
       'checkout',
       'reset',
       'rebase',
@@ -224,6 +223,24 @@ describe('validateGitExecArgs', () => {
       [['clone', '--', 'https://github.com/stablyai/orca.git', 'nested\\orca']]
     ])('rejects unsafe clone args %j', (args) => {
       expectBlocked(args, 'git clone')
+    })
+  })
+
+  describe('git init and empty commit', () => {
+    it('allows only the SSH create-project init and empty commit shapes', () => {
+      expectAllowed(['init'])
+      expectAllowed(['commit', '--allow-empty', '-m', 'Initial commit'])
+    })
+
+    it.each([
+      [['init', '--bare']],
+      [['init', '/tmp/other']],
+      [['commit']],
+      [['commit', '-am', 'message']],
+      [['commit', '--allow-empty']],
+      [['commit', '--allow-empty', '-m', '']]
+    ])('rejects unsafe create-project write args %j', (args) => {
+      expectBlocked(args, 'via exec is restricted')
     })
   })
 })

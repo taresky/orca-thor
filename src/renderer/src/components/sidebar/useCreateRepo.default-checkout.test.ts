@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   },
   createRepo: vi.fn(),
   createRemoteRepo: vi.fn(),
+  callRuntimeRpc: vi.fn(),
   fetchWorktrees: vi.fn(),
   onGitRepoReady: vi.fn(),
   activateAndRevealWorktree: vi.fn(),
@@ -71,6 +72,11 @@ vi.mock('sonner', () => ({
     success: vi.fn(),
     info: vi.fn()
   }
+}))
+
+vi.mock('@/runtime/runtime-rpc-client', () => ({
+  getActiveRuntimeTarget: () => ({ kind: 'local' }),
+  callRuntimeRpc: mocks.callRuntimeRpc
 }))
 
 function makeRepo(overrides: Partial<Repo> = {}): Repo {
@@ -139,10 +145,11 @@ describe('useCreateRepo default-checkout handoff', () => {
   })
 
   it('does not return a parent path when the runtime target blocks the local picker', async () => {
-    mocks.storeState.settings.activeRuntimeEnvironmentId = 'env-1'
     const { useCreateRepo } = await import('./useCreateRepo')
 
-    const result = useCreateRepo(mocks.fetchWorktrees, vi.fn(), mocks.onGitRepoReady)
+    const result = useCreateRepo(mocks.fetchWorktrees, vi.fn(), mocks.onGitRepoReady, {
+      runtimeEnvironmentId: 'env-1'
+    })
     await expect(result.handlePickParent()).resolves.toBeNull()
 
     expect(window.api.repos.pickDirectory).not.toHaveBeenCalled()
@@ -214,6 +221,36 @@ describe('useCreateRepo default-checkout handoff', () => {
       kind: 'git'
     })
     expect(mocks.createRepo).not.toHaveBeenCalled()
+    expect(mocks.fetchWorktrees).toHaveBeenCalledWith(repo.id, {
+      requireAuthoritative: true
+    })
+    expect(mocks.onGitRepoReady).toHaveBeenCalledWith(repo.id)
+  })
+
+  it('creates projects through the selected runtime environment', async () => {
+    const repo = makeRepo({ executionHostId: 'runtime:env-1', path: '/srv/created' })
+    mocks.callRuntimeRpc.mockResolvedValue({ repo })
+    mocks.fetchWorktrees.mockResolvedValue(true)
+    const { useCreateRepo } = await import('./useCreateRepo')
+
+    const result = useCreateRepo(mocks.fetchWorktrees, vi.fn(), mocks.onGitRepoReady, {
+      hostId: 'runtime:env-1',
+      runtimeEnvironmentId: 'env-1'
+    })
+    await result.handleCreate()
+
+    expect(mocks.callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'environment', environmentId: 'env-1' },
+      'repo.create',
+      {
+        parentPath: '/projects',
+        name: 'created',
+        kind: 'git'
+      },
+      { timeoutMs: 60_000 }
+    )
+    expect(mocks.createRepo).not.toHaveBeenCalled()
+    expect(mocks.createRemoteRepo).not.toHaveBeenCalled()
     expect(mocks.fetchWorktrees).toHaveBeenCalledWith(repo.id, {
       requireAuthoritative: true
     })

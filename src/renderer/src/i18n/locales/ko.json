@@ -3683,7 +3683,9 @@
                   "a6c20dca96": "SSH 대상에서 프로젝트 열기",
                   "3d162cc76f": "원격 프로젝트",
                   "fb4fc5380e": "로컬 프로젝트, Git repo 또는 repos가 많은 폴더",
-                  "2281fdc8c7": "폴더 찾아보기"
+                  "2281fdc8c7": "폴더 찾아보기",
+                  "sshBrowseTitle": "Open SSH project",
+                  "sshBrowseDescription": "Existing Git repository or folder on this SSH host"
                 }
               }
             }
@@ -5162,7 +5164,8 @@
           "cloneHost": "클론",
           "creatingPendingSetup": "생성 중...",
           "createPendingSetup": "설정 추적",
-          "499a437335": "신원"
+          "499a437335": "신원",
+          "hostSetupCheckingCapability": "Checking host capabilities"
         },
         "RepositorySourceControlAiActionRows": {
           "548a6e1281": "명령 템플릿",

@@ -9,6 +9,7 @@ export type AddRepoLocalStartActionHandlers = {
   onOpenCreateStep: () => void
   showRemoteAction?: boolean
   canCreateProject?: boolean
+  browseHostKind?: 'local' | 'ssh'
 }
 
 export type AddRepoLocalStartAction = {
@@ -27,7 +28,8 @@ export function getAddRepoLocalStartActions({
   onOpenRemoteStep,
   onOpenCreateStep,
   showRemoteAction = true,
-  canCreateProject = true
+  canCreateProject = true,
+  browseHostKind = 'local'
 }: { isSshLikely: boolean } & AddRepoLocalStartActionHandlers): {
   primaryAction: AddRepoLocalStartAction
   secondaryActions: AddRepoLocalStartAction[]
@@ -35,14 +37,26 @@ export function getAddRepoLocalStartActions({
   const primaryAction = {
     kind: 'browse' as const,
     icon: FolderOpen,
-    title: translate(
-      'auto.components.sidebar.add.repo.local.start.actions.2281fdc8c7',
-      'Browse folder'
-    ),
-    description: translate(
-      'auto.components.sidebar.add.repo.local.start.actions.fb4fc5380e',
-      'Local project, Git repo, or folder with many repos'
-    ),
+    title:
+      browseHostKind === 'ssh'
+        ? translate(
+            'auto.components.sidebar.add.repo.local.start.actions.sshBrowseTitle',
+            'Open SSH project'
+          )
+        : translate(
+            'auto.components.sidebar.add.repo.local.start.actions.2281fdc8c7',
+            'Browse folder'
+          ),
+    description:
+      browseHostKind === 'ssh'
+        ? translate(
+            'auto.components.sidebar.add.repo.local.start.actions.sshBrowseDescription',
+            'Existing Git repository or folder on this SSH host'
+          )
+        : translate(
+            'auto.components.sidebar.add.repo.local.start.actions.fb4fc5380e',
+            'Local project, Git repo, or folder with many repos'
+          ),
     onClick: onBrowse
   }
 

@@ -46,6 +46,8 @@ export function RemoteStep({
   const selectedTargetLabel =
     selectedTarget?.label ||
     (selectedTarget ? `${selectedTarget.username}@${selectedTarget.host}` : selectedTargetId)
+  const selectedTargetStatus = selectedTarget?.state?.status ?? 'disconnected'
+  const selectedTargetConnected = selectedTargetStatus === 'connected'
 
   if (browsing && selectedTargetId) {
     return (
@@ -138,6 +140,18 @@ export function RemoteStep({
               </div>
             )}
           </div>
+        ) : selectedTarget ? (
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-muted-foreground">
+              {translate('auto.components.sidebar.AddRepoRemoteStep.44637f43bd', 'SSH target')}
+            </label>
+            <SshTargetRow
+              target={selectedTarget}
+              isSelected
+              onSelect={() => undefined}
+              onConnect={onConnectTarget}
+            />
+          </div>
         ) : null}
 
         <div className="space-y-1">
@@ -161,14 +175,14 @@ export function RemoteStep({
                 '/home/user/project'
               )}
               className="h-8 text-xs flex-1"
-              disabled={isAddingRemote || !selectedTargetId}
+              disabled={isAddingRemote || !selectedTargetId || !selectedTargetConnected}
             />
             <Button
               variant="outline"
               size="sm"
               className="h-8 px-2 shrink-0"
               onClick={() => setBrowsing(true)}
-              disabled={!selectedTargetId || isAddingRemote}
+              disabled={!selectedTargetId || !selectedTargetConnected || isAddingRemote}
             >
               <FolderOpen className="size-3.5" />
             </Button>
@@ -179,7 +193,9 @@ export function RemoteStep({
 
         <Button
           onClick={onAdd}
-          disabled={!selectedTargetId || !remotePath.trim() || isAddingRemote}
+          disabled={
+            !selectedTargetId || !selectedTargetConnected || !remotePath.trim() || isAddingRemote
+          }
           className="w-full"
         >
           {isAddingRemote

@@ -3706,7 +3706,9 @@
                   "sshCreateUnavailable": "Not available for SSH hosts yet",
                   "3d162cc76f": "Remote project",
                   "fb4fc5380e": "Local project, Git repo, or folder with many repos",
-                  "2281fdc8c7": "Browse folder"
+                  "2281fdc8c7": "Browse folder",
+                  "sshBrowseTitle": "Open SSH project",
+                  "sshBrowseDescription": "Existing Git repository or folder on this SSH host"
                 }
               }
             }
@@ -5213,7 +5215,8 @@
           "cloneHost": "Clone",
           "creatingPendingSetup": "Creating...",
           "createPendingSetup": "Track setup",
-          "499a437335": "Identity"
+          "499a437335": "Identity",
+          "hostSetupCheckingCapability": "Checking host capabilities"
         },
         "RepositorySourceControlAiActionRows": {
           "548a6e1281": "Command template",

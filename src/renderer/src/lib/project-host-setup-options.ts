@@ -153,14 +153,18 @@ function getHostSetupAvailability(host: ExecutionHostRegistryEntry): {
       detail: 'Orca server version is incompatible'
     }
   }
-  if (
-    host.kind === 'runtime' &&
-    host.capabilities &&
-    !host.capabilities?.includes(PROJECT_HOST_SETUP_RUNTIME_CAPABILITY)
-  ) {
-    return {
-      isAvailable: false,
-      detail: 'Update Orca on this host to set up projects'
+  if (host.kind === 'runtime') {
+    if (!host.capabilities) {
+      return {
+        isAvailable: false,
+        detail: 'Checking host capabilities'
+      }
+    }
+    if (!host.capabilities.includes(PROJECT_HOST_SETUP_RUNTIME_CAPABILITY)) {
+      return {
+        isAvailable: false,
+        detail: 'Update Orca on this host to set up projects'
+      }
     }
   }
   return {

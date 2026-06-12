@@ -211,8 +211,47 @@ describe('AddRepoDialogStepContent nested imports', () => {
     expect(html).toContain('Open remote project')
     expect(html).toContain('openclaw 2')
     expect(html).toContain('Remote path')
-    expect(html).not.toContain('SSH target')
+    expect(html).toContain('SSH target')
     expect(html).not.toContain('github.com')
     expect(html).not.toContain('Connect')
+  })
+
+  it('shows a connect affordance for a selected disconnected SSH host', () => {
+    const html = renderStepContent({
+      step: 'remote',
+      lockSshTargetSelection: true,
+      selectedTargetId: 'openclaw-2',
+      sshTargets: [
+        {
+          id: 'openclaw-2',
+          label: 'openclaw 2',
+          host: 'openclaw.example.com',
+          port: 22,
+          username: 'dev',
+          state: {
+            targetId: 'openclaw-2',
+            status: 'disconnected',
+            error: null,
+            reconnectAttempt: 0
+          }
+        }
+      ]
+    })
+
+    expect(html).toContain('openclaw 2')
+    expect(html).toContain('Connect')
+    expect(html).toContain('placeholder="/home/user/project"')
+    expect(html).toContain('disabled=""')
+  })
+
+  it('uses SSH-aware copy on the add step when an SSH host is selected', () => {
+    const html = renderStepContent({
+      step: 'add',
+      browseHostKind: 'ssh'
+    })
+
+    expect(html).toContain('Open SSH project')
+    expect(html).toContain('Existing Git repository or folder on this SSH host')
+    expect(html).not.toContain('Local project, Git repo, or folder with many repos')
   })
 })

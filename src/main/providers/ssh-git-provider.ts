@@ -595,6 +595,13 @@ export class SshGitProvider implements IGitProvider {
         stdout: string
         stderr: string
       }
+    } catch (error) {
+      if (isJsonRpcMethodNotFoundError(error)) {
+        throw new Error(
+          'SSH clone support is unavailable on this relay. Reconnect the SSH target to update Orca on the host, then try again.'
+        )
+      }
+      throw error
     } finally {
       unsubscribe?.()
     }

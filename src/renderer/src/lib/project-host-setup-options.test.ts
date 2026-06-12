@@ -227,4 +227,20 @@ describe('buildProjectHostSetupOptions', () => {
       isAvailable: false
     })
   })
+
+  it('marks runtime hosts with unknown capabilities as unavailable while checking', () => {
+    const options = buildProjectHostSetupOptions({
+      projectId: 'project-1',
+      eligibleRepos: [repo('local-repo')],
+      hosts: [host('local'), host('runtime:gpu', { label: 'GPU VM' })],
+      projectHostSetups: [setup('local', 'project-1', 'local', 'local-repo')]
+    })
+
+    expect(options.at(-1)).toMatchObject({
+      id: 'needs-setup:runtime:gpu',
+      kind: 'needs-setup',
+      detail: 'Checking host capabilities',
+      isAvailable: false
+    })
+  })
 })

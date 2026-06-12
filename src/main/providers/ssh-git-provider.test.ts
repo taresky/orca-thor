@@ -123,6 +123,18 @@ describe('SshGitProvider', () => {
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
+  it('reports an actionable reconnect message when the relay does not support cloning', async () => {
+    const methodNotFound = new Error('Method not found: git.clone') as Error & { code?: number }
+    methodNotFound.code = -32601
+    mux.request.mockRejectedValueOnce(methodNotFound)
+
+    await expect(
+      provider.clone(['clone', '--progress', '--', 'url', 'repo'], '/home/user')
+    ).rejects.toThrow(
+      'SSH clone support is unavailable on this relay. Reconnect the SSH target to update Orca on the host, then try again.'
+    )
+  })
+
   it('getHistory sends git.history request', async () => {
     const historyResult = {
       items: [],

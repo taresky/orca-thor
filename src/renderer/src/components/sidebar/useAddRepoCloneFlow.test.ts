@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   cloneLocal: vi.fn(),
   pickDirectory: vi.fn(),
   onCloneProgress: vi.fn(() => vi.fn()),
+  callRuntimeRpc: vi.fn(),
   fetchWorktrees: vi.fn(),
   onGitRepoReady: vi.fn()
 }))
@@ -64,7 +65,7 @@ vi.mock('@/store', () => {
 
 vi.mock('@/runtime/runtime-rpc-client', () => ({
   getActiveRuntimeTarget: () => ({ kind: 'local' }),
-  callRuntimeRpc: vi.fn()
+  callRuntimeRpc: mocks.callRuntimeRpc
 }))
 
 vi.mock('sonner', () => ({
@@ -110,6 +111,7 @@ describe('useAddRepoCloneFlow', () => {
   it('clones through the selected SSH target', async () => {
     const repo = makeRepo({ connectionId: 'ssh-1' })
     mocks.cloneRemote.mockResolvedValue(repo)
+    mocks.callRuntimeRpc.mockReset()
     mocks.fetchWorktrees.mockResolvedValue(true)
     const { useAddRepoCloneFlow } = await import('./useAddRepoCloneFlow')
 
@@ -173,5 +175,38 @@ describe('useAddRepoCloneFlow', () => {
     expect(mocks.stateSetters[3]).toHaveBeenCalledWith(
       "Clone failed: fatal: destination path 'orca' already exists and is not an empty directory."
     )
+  })
+
+  it('clones through the selected runtime environment', async () => {
+    const repo = makeRepo({ id: 'runtime-repo', executionHostId: 'runtime:env-1' })
+    mocks.callRuntimeRpc.mockResolvedValue({ repo })
+    mocks.fetchWorktrees.mockResolvedValue(true)
+    const { useAddRepoCloneFlow } = await import('./useAddRepoCloneFlow')
+
+    const result = useAddRepoCloneFlow({
+      step: 'clone',
+      activeRuntimeEnvironmentId: 'env-1',
+      sshTargetId: null,
+      workspaceDir: '/local/workspace',
+      fetchWorktrees: mocks.fetchWorktrees,
+      onGitRepoReady: mocks.onGitRepoReady
+    })
+    await result.handleClone()
+
+    expect(mocks.callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'environment', environmentId: 'env-1' },
+      'repo.clone',
+      {
+        url: 'https://github.com/stablyai/orca.git',
+        destination: '/srv'
+      },
+      { timeoutMs: 10 * 60_000 }
+    )
+    expect(mocks.cloneLocal).not.toHaveBeenCalled()
+    expect(mocks.cloneRemote).not.toHaveBeenCalled()
+    expect(mocks.fetchWorktrees).toHaveBeenCalledWith(repo.id, {
+      requireAuthoritative: true
+    })
+    expect(mocks.onGitRepoReady).toHaveBeenCalledWith(repo.id, 'clone_url')
   })
 })

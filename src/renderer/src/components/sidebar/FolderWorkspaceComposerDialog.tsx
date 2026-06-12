@@ -83,7 +83,7 @@ export function FolderWorkspaceComposerDialog({
       connectionId: selectedRepoConnectionId,
       status: selectedRepoSshState?.status ?? null
     })
-  const { detectedIds } = useDetectedAgents(null)
+  const { detectedIds } = useDetectedAgents(selectedRepoConnectionId)
   const detectedAgentIds = useMemo(() => (detectedIds ? new Set(detectedIds) : null), [detectedIds])
   const [name, setName] = useState('')
   const [note, setNote] = useState('')
