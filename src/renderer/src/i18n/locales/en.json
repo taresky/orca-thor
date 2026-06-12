@@ -1629,7 +1629,9 @@
               "331ebe1170": "Add this pull request to the GitHub merge queue",
               "b169f943e1": "Merge when ready",
               "62703b1dc4": "GitHub auto-merge is enabled for this pull request",
-              "48d75ae118": "Disable auto-merge"
+              "48d75ae118": "Disable auto-merge",
+              "a5b66afb58": "Checks passed",
+              "fbd4f57f0a": "Checks passed. Merge eligibility will be checked again before merging."
             }
           }
         },
@@ -3067,14 +3069,22 @@
           "2f8298f3c3": "Stop scan",
           "c157f31a95": "Import as group",
           "40199ef7b3": "Group name",
-          "b20bb7c24f": "Keeps these repos together in one group. Best for related repos like microservices.",
           "787412361a": "What is a group name?",
           "5f857ba8e6": "in",
           "4df0d08cc5": "Found",
           "8db50afe1a": "Import repositories from folder",
           "5b2e6fe3c8": "Import separately",
           "cf9d382ca1": "Import",
-          "220dd32d83": "Scanning..."
+          "220dd32d83": "Scanning...",
+          "fb33359f69": "Is this a monorepo?",
+          "d75170194e": "Import them as a group if they're a monorepo or otherwise belong together. Orca will group them and let you work from the parent folder.",
+          "39d51212cc": "Group name",
+          "aa0247680d": "No, import separately",
+          "a0bc4d1f8e": "Import as group",
+          "8401a7a0d0": "1 repository",
+          "d4f1df62ef": "{{value0}} repositories",
+          "b4263a2ac4": "Found {{value0}} in {{value1}}.",
+          "24eda6c8b2": "Scanning... {{value0}}"
         },
         "AddRepoRemoteStep": {
           "5b205b5281": "Stop scan",
@@ -3554,7 +3564,8 @@
           "f50603c6b2": "Mark Unread",
           "8dacff1fe0": "Mark Read",
           "3baa7d6507": "Pin",
-          "697d0f6e1b": "Unpin"
+          "697d0f6e1b": "Unpin",
+          "250de158fd": "Remove Workspace"
         },
         "WorktreeList": {
           "d880ea0744": "Create a group and move this project into it.",
@@ -3588,6 +3599,7 @@
           "c1f4a31623": "Show {{value0}} child workspaces",
           "e97297cb75": "Hide {{value0}} child workspace",
           "0cd15956d4": "Hide {{value0}} child workspaces",
+          "bd37a57ac8": "Create workspace for {{value0}}",
           "b667b59632": "Some projects could not be removed from Orca",
           "f94466bc39": "{{value0}} of {{value1}} contained project{{value2}} remained after deleting the group.",
           "groupDeleteFailed": "Failed to delete group",
@@ -3795,6 +3807,14 @@
         },
         "index": {
           "b826a98b6f": "busy"
+        },
+        "FolderWorkspaceComposerDialog": {
+          "connectFailed": "Failed to connect to project.",
+          "noRepos": "Add a Git project under this folder to attach GitHub or GitLab tasks.",
+          "title": "Create Folder Workspace",
+          "create": "Create workspace",
+          "sourceProject": "Task Source",
+          "chooseSourceProject": "Choose task source"
         }
       },
       "shared": {
@@ -7460,6 +7480,9 @@
             "71026ca2cb": "Refreshing…",
             "889cdfba04": "Create {{value0}}",
             "98f4c37b33": "Push & Create {{value0}}",
+            "b6ce28da5b": "{{value0}} #{{value1}} is already open",
+            "cf9e69f3be": "{{value0}} is already open",
+            "192e686e57": "Open on {{value0}}",
             "6633c7a1fb": "Publish Branch",
             "fdb27637f2": "Publishing…",
             "e56c42122e": "destructive",
@@ -7494,6 +7517,9 @@
             "21c7a1daa0": "{{value0}} is already open",
             "db9cee18f7": "Create {{value0}}"
           },
+          "CreateHostedReviewComposer": {
+            "741ff8a0d2": "Push & Create {{value0}}"
+          },
           "CreatePullRequestGenerateButton": {
             "4012459f8a": "Generate with AI",
             "a0501572c1": "Generate {{value0}} details with AI",
@@ -7505,7 +7531,9 @@
             "e041998cad": "Stop generating"
           },
           "FileExplorer": {
-            "79b1537dd3": "Select a workspace to browse files"
+            "79b1537dd3": "Select a workspace to browse files",
+            "4da4d89845": "Back to Explorer",
+            "6ed5ce817b": "Search"
           },
           "FileExplorerBackgroundMenu": {
             "3b5e2dcb8d": "New Folder",
@@ -7541,7 +7569,8 @@
             "78f133232c": "Show Dotfiles",
             "31b4c3195d": "More Explorer Actions",
             "d95e30fe28": "Refresh Explorer",
-            "6026b16950": "Collapse All"
+            "6026b16950": "Collapse All",
+            "693cbeadd0": "Search"
           },
           "FileExplorerTreeStatus": {
             "ce03835e1f": "No files in this workspace",
@@ -7712,6 +7741,9 @@
             "30b8d4f181": "Fix commit failure with AI",
             "4b37ae99b0": "Start the default AI agent to fix this commit failure",
             "ae743199cd": "Choose a different base branch before creating a {{value0}}.",
+            "318e2a7f88": "Wait for AI generation to finish.",
+            "f76307c1f7": "Choose a base branch.",
+            "4f76c0a9de": "Base branch must differ from the head branch.",
             "c5e4175139": "More {{value0}} and remote actions",
             "78ddfd0bb4": "Create as draft",
             "e64a632456": "main",
@@ -7953,7 +7985,7 @@
                 "ae8a04ef17": "Conflict file details are unavailable",
                 "73d0675356": "Refreshing conflict details…",
                 "5dc3af25c0": "Select comment",
-                "d7a2f9c401": "Send unresolved {{value0}} comments",
+                "d7a2f9c401": "Send all unresolved",
                 "d91f2a6c39": "Send {{value0}} queued comments",
                 "a6de3e5a20": "Clear queued comments",
                 "49ea0937e4": "Add comment to resolve list",

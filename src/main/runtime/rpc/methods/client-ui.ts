@@ -148,6 +148,7 @@ const UiUpdate = z
     rightSidebarTab: z
       .enum(['explorer', 'search', 'vault', 'source-control', 'checks', 'ports'])
       .optional(),
+    rightSidebarExplorerView: z.enum(['files', 'search']).optional(),
     rightSidebarWidth: z.number().finite().optional(),
     groupBy: z.enum(['none', 'workspace-status', 'repo', 'pr-status']).optional(),
     showWorkspaceLineage: z.boolean().optional(),

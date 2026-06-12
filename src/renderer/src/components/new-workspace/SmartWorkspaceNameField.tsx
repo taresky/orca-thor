@@ -88,6 +88,7 @@ type SmartWorkspaceNameFieldProps = {
   disabled?: boolean
   disabledPlaceholder?: string
   textOnly?: boolean
+  branchesEnabled?: boolean
 }
 
 export type SmartWorkspaceNameSelection = {
@@ -117,7 +118,8 @@ export default function SmartWorkspaceNameField({
   onPlainEnter,
   disabled = false,
   disabledPlaceholder,
-  textOnly = false
+  textOnly = false,
+  branchesEnabled = true
 }: SmartWorkspaceNameFieldProps): React.JSX.Element {
   // Why: tab/filter labels use the lightweight translate() helper; subscribing
   // here makes them refresh even when language changes don't remount the field.
@@ -206,6 +208,9 @@ export default function SmartWorkspaceNameField({
     }
     if (item.id === 'linear') {
       return linearAvailable
+    }
+    if (item.id === 'branches') {
+      return branchesEnabled
     }
     return true
   })
@@ -470,13 +475,14 @@ export default function SmartWorkspaceNameField({
     () =>
       getBranchSearchRequest({
         disabled,
+        branchesEnabled,
         textOnly,
         mode,
         selectedRepoId: selectedRepo?.id ?? null,
         query: debouncedQuery,
         limit: RESULT_LIMIT
       }),
-    [debouncedQuery, disabled, mode, selectedRepo?.id, textOnly]
+    [branchesEnabled, debouncedQuery, disabled, mode, selectedRepo?.id, textOnly]
   )
 
   useEffect(() => {
@@ -852,8 +858,12 @@ export default function SmartWorkspaceNameField({
     ? (disabledPlaceholder ?? 'Unavailable')
     : mode === 'smart'
       ? linearAvailable
-        ? 'Type a name, #1234, branch, GitHub or Linear URL'
-        : 'Type a name, #1234, branch, or GitHub URL'
+        ? branchesEnabled
+          ? 'Type a name, #1234, branch, GitHub or Linear URL'
+          : 'Type a name, #1234, GitHub or Linear URL'
+        : branchesEnabled
+          ? 'Type a name, #1234, branch, or GitHub URL'
+          : 'Type a name, #1234, or GitHub URL'
       : mode === 'github'
         ? 'Search GitHub PRs and issues'
         : mode === 'branches'

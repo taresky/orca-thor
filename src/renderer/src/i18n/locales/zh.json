@@ -1629,7 +1629,9 @@
               "331ebe1170": "将此PR添加到 GitHub 合并队列",
               "b169f943e1": "准备好后合并",
               "62703b1dc4": "为此PR启用了 GitHub 自动合并",
-              "48d75ae118": "禁用自动合并"
+              "48d75ae118": "禁用自动合并",
+              "a5b66afb58": "检查已通过",
+              "fbd4f57f0a": "检查已通过。合并资格将在合并前再次验证。"
             }
           }
         },
@@ -3048,14 +3050,22 @@
           "2f8298f3c3": "停止扫描",
           "c157f31a95": "作为组导入",
           "40199ef7b3": "团体名称",
-          "b20bb7c24f": "将这些 repos 放在一组中。最适合微服务等相关 repos。",
           "787412361a": "什么是群组名称？",
           "5f857ba8e6": "在",
           "4df0d08cc5": "成立",
           "8db50afe1a": "从文件夹导入存储库",
           "5b2e6fe3c8": "单独导入",
           "cf9d382ca1": "导入",
-          "220dd32d83": "扫描..."
+          "220dd32d83": "扫描...",
+          "fb33359f69": "这是 Monorepo 吗？",
+          "d75170194e": "如果它们是 Monorepo，或本来就应该放在一起，请将它们作为组导入。Orca 会将它们分组，并让你从父文件夹开始工作。",
+          "39d51212cc": "组名称",
+          "aa0247680d": "否，单独导入",
+          "a0bc4d1f8e": "作为组导入",
+          "8401a7a0d0": "1 个仓库",
+          "d4f1df62ef": "{{value0}} 个仓库",
+          "b4263a2ac4": "在 {{value1}} 中找到 {{value0}}。",
+          "24eda6c8b2": "正在扫描... {{value0}}"
         },
         "AddRepoRemoteStep": {
           "5b205b5281": "停止扫描",
@@ -3535,7 +3545,8 @@
           "f50603c6b2": "标记为未读",
           "8dacff1fe0": "马克·里德",
           "3baa7d6507": "别针",
-          "697d0f6e1b": "取消固定"
+          "697d0f6e1b": "取消固定",
+          "250de158fd": "Remove Workspace"
         },
         "WorktreeList": {
           "d880ea0744": "创建一个组并将该项目移入其中。",
@@ -3569,6 +3580,7 @@
           "c1f4a31623": "显示 {{value0}} 个子工作区",
           "e97297cb75": "隐藏 {{value0}} 个子工作区",
           "0cd15956d4": "隐藏 {{value0}} 个子工作区",
+          "bd37a57ac8": "为 {{value0}} 创建工作区",
           "b667b59632": "Some projects could not be removed from Orca",
           "f94466bc39": "{{value0}} of {{value1}} contained project{{value2}} remained after deleting the group.",
           "groupDeleteFailed": "Failed to delete group",
@@ -3795,6 +3807,14 @@
               }
             }
           }
+        },
+        "FolderWorkspaceComposerDialog": {
+          "connectFailed": "Failed to connect to project.",
+          "noRepos": "Add a Git project under this folder to attach GitHub or GitLab tasks.",
+          "title": "Create Folder Workspace",
+          "create": "创建工作区",
+          "sourceProject": "Task Source",
+          "chooseSourceProject": "Choose task source"
         }
       },
       "shared": {
@@ -7460,6 +7480,9 @@
             "71026ca2cb": "刷新中…",
             "889cdfba04": "创建 {{value0}}",
             "98f4c37b33": "推送并创建 {{value0}}",
+            "b6ce28da5b": "{{value0}} #{{value1}} 已打开",
+            "cf9e69f3be": "{{value0}} 已打开",
+            "192e686e57": "打开于 {{value0}}",
             "6633c7a1fb": "发布分支",
             "fdb27637f2": "出版…",
             "e56c42122e": "destructive",
@@ -7494,6 +7517,9 @@
             "21c7a1daa0": "{{value0}} 已打开",
             "db9cee18f7": "创建 {{value0}}"
           },
+          "CreateHostedReviewComposer": {
+            "741ff8a0d2": "推送并创建 {{value0}}"
+          },
           "CreatePullRequestGenerateButton": {
             "4012459f8a": "用 AI 生成",
             "a0501572c1": "使用 AI 生成 {{value0}} 详细信息",
@@ -7505,7 +7531,9 @@
             "e041998cad": "停止生成"
           },
           "FileExplorer": {
-            "79b1537dd3": "选择一个工作区来浏览文件"
+            "79b1537dd3": "选择一个工作区来浏览文件",
+            "4da4d89845": "返回资源管理器",
+            "6ed5ce817b": "搜索"
           },
           "FileExplorerBackgroundMenu": {
             "3b5e2dcb8d": "新建文件夹",
@@ -7541,7 +7569,8 @@
             "78f133232c": "显示点文件",
             "31b4c3195d": "更多资源管理器操作",
             "d95e30fe28": "刷新资源管理器",
-            "6026b16950": "全部折叠"
+            "6026b16950": "全部折叠",
+            "693cbeadd0": "搜索"
           },
           "FileExplorerTreeStatus": {
             "ce03835e1f": "此工作区中没有文件",
@@ -7712,6 +7741,9 @@
             "30b8d4f181": "使用 AI 修复 commit 失败",
             "4b37ae99b0": "启动默认的AIAgent 来修复此 commit 失败",
             "ae743199cd": "在创建 {{value0}} 之前，请选择其他基础分支。",
+            "318e2a7f88": "请等待 AI 生成完成。",
+            "f76307c1f7": "请选择基础分支。",
+            "4f76c0a9de": "基础分支必须与 head 分支不同。",
             "c5e4175139": "更多 {{value0}} 和远程操作",
             "78ddfd0bb4": "创建为草稿",
             "e64a632456": "主要的",
@@ -7953,7 +7985,7 @@
                 "ae8a04ef17": "冲突文件详细信息不可用",
                 "73d0675356": "刷新冲突细节...",
                 "5dc3af25c0": "选择评论",
-                "d7a2f9c401": "发送未解决的 {{value0}} 评论",
+                "d7a2f9c401": "发送所有未解决",
                 "d91f2a6c39": "发送 {{value0}} 条已排队评论",
                 "a6de3e5a20": "清除已排队评论",
                 "49ea0937e4": "将评论添加到解决列表",

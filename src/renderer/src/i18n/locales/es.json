@@ -1629,7 +1629,9 @@
               "331ebe1170": "Agregue esta solicitud de extracción a la cola de combinación de GitHub",
               "b169f943e1": "Fusionar cuando esté listo",
               "62703b1dc4": "La fusión automática de GitHub está habilitada para esta solicitud de extracción",
-              "48d75ae118": "Deshabilitar la fusión automática"
+              "48d75ae118": "Deshabilitar la fusión automática",
+              "a5b66afb58": "Comprobaciones aprobadas",
+              "fbd4f57f0a": "Comprobaciones aprobadas. La elegibilidad de fusión se volverá a comprobar antes de fusionar."
             }
           }
         },
@@ -3067,14 +3069,22 @@
           "2f8298f3c3": "Detener escaneo",
           "c157f31a95": "Importar como grupo",
           "40199ef7b3": "Nombre del grupo",
-          "b20bb7c24f": "Mantiene estos repos juntos en un grupo. Lo mejor para repos relacionados como microservicios.",
           "787412361a": "¿Qué es el nombre de un grupo?",
           "5f857ba8e6": "en",
           "4df0d08cc5": "Encontró",
           "8db50afe1a": "Importar repositorios desde la carpeta",
           "5b2e6fe3c8": "Importar por separado",
           "cf9d382ca1": "Importar",
-          "220dd32d83": "Exploración..."
+          "220dd32d83": "Exploración...",
+          "fb33359f69": "¿Es esto un monorepo?",
+          "d75170194e": "Impórtalos como grupo si son un monorepo o si pertenecen juntos. Orca los agrupará y te permitirá trabajar desde la carpeta principal.",
+          "39d51212cc": "Nombre del grupo",
+          "aa0247680d": "No, importar por separado",
+          "a0bc4d1f8e": "Importar como grupo",
+          "8401a7a0d0": "1 repositorio",
+          "d4f1df62ef": "{{value0}} repositorios",
+          "b4263a2ac4": "Se encontraron {{value0}} en {{value1}}.",
+          "24eda6c8b2": "Explorando... {{value0}}"
         },
         "AddRepoRemoteStep": {
           "5b205b5281": "Detener escaneo",
@@ -3554,7 +3564,8 @@
           "f50603c6b2": "Marcar como no leído",
           "8dacff1fe0": "Marcar como leído",
           "3baa7d6507": "Alfiler",
-          "697d0f6e1b": "Desprender"
+          "697d0f6e1b": "Desprender",
+          "250de158fd": "Remove Workspace"
         },
         "WorktreeList": {
           "d880ea0744": "Crea un grupo y mueve este proyecto a él.",
@@ -3588,6 +3599,7 @@
           "c1f4a31623": "Mostrar {{value0}} espacios de trabajo secundarios",
           "e97297cb75": "Ocultar {{value0}} espacio de trabajo secundario",
           "0cd15956d4": "Ocultar {{value0}} espacios de trabajo secundarios",
+          "bd37a57ac8": "Create workspace for {{value0}}",
           "b667b59632": "Some projects could not be removed from Orca",
           "f94466bc39": "{{value0}} of {{value1}} contained project{{value2}} remained after deleting the group.",
           "groupDeleteFailed": "Failed to delete group",
@@ -3795,6 +3807,14 @@
         },
         "index": {
           "b826a98b6f": "ocupado"
+        },
+        "FolderWorkspaceComposerDialog": {
+          "connectFailed": "Failed to connect to project.",
+          "noRepos": "Add a Git project under this folder to attach GitHub or GitLab tasks.",
+          "title": "Create Folder Workspace",
+          "create": "Create workspace",
+          "sourceProject": "Task Source",
+          "chooseSourceProject": "Choose task source"
         }
       },
       "shared": {
@@ -7460,6 +7480,9 @@
             "71026ca2cb": "Refrescante…",
             "889cdfba04": "Crear {{value0}}",
             "98f4c37b33": "Empujar y crear {{value0}}",
+            "b6ce28da5b": "{{value0}} #{{value1}} ya está abierto",
+            "cf9e69f3be": "{{value0}} ya está abierto",
+            "192e686e57": "Abrir en {{value0}}",
             "6633c7a1fb": "Rama de publicación",
             "fdb27637f2": "Publicación…",
             "e56c42122e": "destructivo",
@@ -7494,6 +7517,9 @@
             "21c7a1daa0": "{{value0}} ya está abierto",
             "db9cee18f7": "Crear {{value0}}"
           },
+          "CreateHostedReviewComposer": {
+            "741ff8a0d2": "Empujar y crear {{value0}}"
+          },
           "CreatePullRequestGenerateButton": {
             "4012459f8a": "Generar con IA",
             "a0501572c1": "Genera detalles {{value0}} con IA",
@@ -7505,7 +7531,9 @@
             "e041998cad": "dejar de generar"
           },
           "FileExplorer": {
-            "79b1537dd3": "Seleccione un espacio de trabajo para buscar archivos"
+            "79b1537dd3": "Seleccione un espacio de trabajo para buscar archivos",
+            "4da4d89845": "Volver al explorador",
+            "6ed5ce817b": "Buscar"
           },
           "FileExplorerBackgroundMenu": {
             "3b5e2dcb8d": "Nueva carpeta",
@@ -7541,7 +7569,8 @@
             "78f133232c": "Mostrar archivos de puntos",
             "31b4c3195d": "Más acciones del explorador",
             "d95e30fe28": "Actualizar explorador",
-            "6026b16950": "Contraer todo"
+            "6026b16950": "Contraer todo",
+            "693cbeadd0": "Buscar"
           },
           "FileExplorerTreeStatus": {
             "ce03835e1f": "No hay archivos en este espacio de trabajo",
@@ -7712,6 +7741,9 @@
             "30b8d4f181": "Soluciona el error de commit con IA",
             "4b37ae99b0": "Inicie el agente de IA predeterminado para solucionar este error de commit",
             "ae743199cd": "Elija una rama base diferente antes de crear un {{value0}}.",
+            "318e2a7f88": "Espere a que termine la generación con IA.",
+            "f76307c1f7": "Elija una rama base.",
+            "4f76c0a9de": "La rama base debe ser distinta de la rama HEAD.",
             "c5e4175139": "Más {{value0}} y acciones remotas",
             "78ddfd0bb4": "Crear como borrador",
             "e64a632456": "principal",
@@ -7953,7 +7985,7 @@
                 "ae8a04ef17": "Los detalles del archivo de conflicto no están disponibles",
                 "73d0675356": "Detalles refrescantes del conflicto...",
                 "5dc3af25c0": "Seleccionar comentario",
-                "d7a2f9c401": "Enviar comentarios sin resolver de {{value0}}",
+                "d7a2f9c401": "Enviar todos sin resolver",
                 "d91f2a6c39": "Enviar {{value0}} comentarios en cola",
                 "a6de3e5a20": "Borrar comentarios en cola",
                 "49ea0937e4": "Agregar comentario a la lista de resolución",

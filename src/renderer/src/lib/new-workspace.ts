@@ -6,7 +6,8 @@ import {
 } from '@/runtime/runtime-terminal-inspection'
 import type { AgentStartupPlan } from '@/lib/tui-agent-startup'
 import { isShellProcess } from '@/lib/tui-agent-startup'
-import type { OrcaHooks, TaskViewPresetId } from '../../../shared/types'
+import type { LinkedWorkItemContext } from '@/lib/linked-work-item-context'
+import type { FolderWorkspaceLinkedTask, OrcaHooks, TaskViewPresetId } from '../../../shared/types'
 import { resolveHookCommandSourcePolicy } from '../../../shared/hook-command-source-policy'
 import { isExpectedAgentProcess } from '../../../shared/agent-process-recognition'
 import { slugifyForWorkspaceName } from '../../../shared/workspace-name'
@@ -48,16 +49,11 @@ export const CLIENT_PLATFORM: NodeJS.Platform = navigator.userAgent.includes('Wi
 
 export { getLinkedWorkItemProvider, isGitLabIssueUrl } from './linked-work-item-provider'
 
-export type LinkedWorkItemSummary = {
-  type: 'issue' | 'pr' | 'mr'
-  provider?: 'github' | 'gitlab' | 'linear' | 'jira'
-  number: number
-  title: string
-  url: string
-  linearIdentifier?: string
+export type LinkedWorkItemSummary = Omit<FolderWorkspaceLinkedTask, 'provider'> & {
+  provider?: FolderWorkspaceLinkedTask['provider']
   linearWorkspaceId?: string
   linearOrganizationUrlKey?: string
-  jiraIdentifier?: string
+  linkedContext?: LinkedWorkItemContext
 }
 
 // Why: when a repo has no `orca.yaml` issueCommand and no per-user override,

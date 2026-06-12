@@ -53,6 +53,7 @@ function runtimeScopedStateReset(): Partial<AppState> {
   return {
     repos: [],
     projectGroups: [],
+    folderWorkspaces: [],
     activeRepoId: null,
     sparsePresetsByRepo: {},
     sparsePresetsLoadingByRepo: {},
@@ -62,6 +63,7 @@ function runtimeScopedStateReset(): Partial<AppState> {
     detectedWorktreesByRepo: {},
     worktreeLineageById: {},
     activeWorktreeId: null,
+    activeWorkspaceKey: null,
     deleteStateByWorktreeId: {},
     baseStatusByWorktreeId: {},
     remoteBranchConflictByWorktreeId: {},

@@ -27,6 +27,7 @@ import { ClaudeUsageDetails } from './ClaudeUsageDetails'
 import { ClaudeUsageLoadingState } from './ClaudeUsageLoadingState'
 import { ShareUsageButton } from './ShareUsageButton'
 import { StatCard } from './StatCard'
+import { formatCost, formatTokens, formatUpdatedAt } from './usage-formatters'
 import { translate } from '@/i18n/i18n'
 
 const RANGE_OPTIONS: ClaudeUsageRange[] = ['7d', '30d', '90d', 'all']
@@ -45,34 +46,18 @@ const SCOPE_OPTIONS: { value: ClaudeUsageScope; label: string }[] = [
   }
 ]
 const RANGE_LABELS: Record<ClaudeUsageRange, string> = {
-  '7d': 'Last 7 days',
-  '30d': 'Last 30 days',
-  '90d': 'Last 90 days',
-  all: 'All time'
-}
-
-function formatTokens(value: number): string {
-  if (value >= 1_000_000) {
-    return `${(value / 1_000_000).toFixed(1)}M`
+  get '7d'() {
+    return translate('auto.components.stats.ClaudeUsagePane.rangeLast7Days', 'Last 7 days')
+  },
+  get '30d'() {
+    return translate('auto.components.stats.ClaudeUsagePane.rangeLast30Days', 'Last 30 days')
+  },
+  get '90d'() {
+    return translate('auto.components.stats.ClaudeUsagePane.rangeLast90Days', 'Last 90 days')
+  },
+  get all() {
+    return translate('auto.components.stats.ClaudeUsagePane.rangeAllTime', 'All time')
   }
-  if (value >= 1_000) {
-    return `${(value / 1_000).toFixed(1)}k`
-  }
-  return value.toLocaleString()
-}
-
-function formatCost(value: number | null): string {
-  if (value === null) {
-    return 'n/a'
-  }
-  return value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(2)}`
-}
-
-function formatUpdatedAt(timestamp: number | null): string {
-  if (!timestamp) {
-    return 'Not scanned yet'
-  }
-  return `Updated ${new Date(timestamp).toLocaleString()}`
 }
 
 export function ClaudeUsagePane(): React.JSX.Element {
