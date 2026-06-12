@@ -463,6 +463,35 @@
             "7d732521ec": "评论"
           }
         }
+      },
+      "folderWorkspacePathStatus": {
+        "title": {
+          "missing": "Folder not found",
+          "notDirectory": "Path is not a folder",
+          "ambiguousConnection": "Cannot determine connection",
+          "unavailable": "Cannot check folder"
+        },
+        "description": {
+          "missing": "Orca cannot find {{path}}. Remove and re-import this folder workspace.",
+          "notDirectory": "{{path}} exists, but it is not a folder.",
+          "ambiguousConnection": "Orca cannot tell which SSH connection owns this folder scope.",
+          "unavailable": "Orca cannot verify this folder right now. Check the runtime or SSH connection and try again."
+        },
+        "createError": {
+          "title": {
+            "missing": "Folder not found",
+            "notDirectory": "Path is not a folder",
+            "ambiguousConnection": "Cannot determine connection",
+            "unavailable": "Cannot check folder",
+            "generic": "Failed to create folder workspace"
+          },
+          "description": {
+            "missing": "Orca cannot find {{path}}. Remove and re-import the folder.",
+            "notDirectory": "{{path}} exists, but it is not a folder.",
+            "ambiguousConnection": "Orca cannot tell which SSH connection owns this folder scope.",
+            "unavailable": "Orca cannot verify this folder right now. Check the runtime or SSH connection and try again."
+          }
+        }
       }
     },
     "hooks": {
@@ -1775,7 +1804,11 @@
           "015b4e607d": "取消",
           "e3bd59143c": "插入",
           "f24783f470": "https://...",
-          "ec6310b731": "使用 http:// 或 https:// 图片 URL。"
+          "ec6310b731": "使用 http:// 或 https:// 图片 URL。",
+          "b7e4a1c902": "Paste, drop, or click to add files",
+          "8f1c2d4e6a": "Nothing to preview",
+          "c91f0a2b14": "Write",
+          "d82b1e3f05": "Preview"
         },
         "IssueSourceSelector": {
           "d6aeb2012b": "显示议题来自",
@@ -1848,6 +1881,47 @@
                 "bb227706a6": "休息"
               }
             }
+          }
+        },
+        "CloseReasonDropdown": {
+          "e1f2a3b4c5": "Choose close reason"
+        },
+        "GitHubIssueCommentComposer": {
+          "082515176a": "Failed to add comment",
+          "9f88657c4e": "Issue closed",
+          "e9b7cb7d17": "Failed to close issue",
+          "bd3b4492a0": "Issue reopened",
+          "f2a8c1d903": "Failed to reopen issue",
+          "a1b2c3d4e5": "Add a comment",
+          "c5c117270e": "Add your comment here, be kind",
+          "f6a7b8c9d0": "Close issue",
+          "b1c2d3e4f5": "Reopen issue",
+          "0a73f59e85": "Send comment",
+          "bf43425540": "Comment"
+        },
+        "GitHubWorkItemAssigneePopoverContent": {
+          "cddd9b04a7": "Loading assignees",
+          "a00830d3f7": "No users",
+          "4f8b6f2c1d": "Filter assignees..."
+        },
+        "GitHubWorkItemLabelPopoverContent": {
+          "2aa9acdf34": "Edit labels on GitHub",
+          "cddd9b04a7": "Loading labels",
+          "de26e2eb06": "No labels",
+          "8b0d52ee3a": "Filter labels..."
+        },
+        "githubIssueCloseReasons": {
+          "completed": {
+            "label": "Close as completed",
+            "description": "Done, closed, fixed, resolved"
+          },
+          "notPlanned": {
+            "label": "Close as not planned",
+            "description": "Won't fix, can't repro, stale"
+          },
+          "duplicate": {
+            "label": "Close as duplicate",
+            "description": "Duplicate of another issue"
           }
         }
       },
@@ -2124,7 +2198,8 @@
             "c44659e09f": "手机驾驶",
             "7cffad954c": "折叠",
             "3eed73394f": "您的键盘已暂停",
-            "faa367dc74": "该 terminal 的尺寸适合您的手机应用程序"
+            "faa367dc74": "该 terminal 的尺寸适合您的手机应用程序",
+            "54f7d6f69d": "调整所有 terminal 尺寸"
           },
           "TerminalAgentSessionForkDialog": {
             "17fc841e59": "复制上下文",
@@ -3042,7 +3117,15 @@
           "fe1e616c5b": "未安装 Git，因此默认创建普通文件夹。",
           "c234df77f7": "创建前请选择或输入服务器父文件夹。",
           "3a13f6e88b": "未选择位置",
-          "6ed14c0281": "未选择服务器文件夹"
+          "6ed14c0281": "未选择服务器文件夹",
+          "createProjectTitle": "创建项目",
+          "createProjectDescription": "创建本地 Git 存储库和第一个工作区。",
+          "projectNameLabel": "项目名称",
+          "createsGitRepoHelp": "Git 存储库：",
+          "parentFolderLabel": "父文件夹",
+          "browseParentFolder": "浏览",
+          "gitRequiredError": "创建项目需要 Git。",
+          "createAction": "创建"
         },
         "AddRepoNestedImportStep": {
           "496f68cf8c": "扫描存储库。单击停止。",
@@ -3643,7 +3726,9 @@
                   "a6c20dca96": "从 SSH 目标打开项目",
                   "3d162cc76f": "远程项目",
                   "fb4fc5380e": "本地项目、Git repo 或包含多个 repos 的文件夹",
-                  "2281fdc8c7": "浏览文件夹"
+                  "2281fdc8c7": "浏览文件夹",
+                  "createProjectTitle": "创建项目",
+                  "createGitProjectDescription": "创建本地 Git 存储库"
                 }
               }
             }

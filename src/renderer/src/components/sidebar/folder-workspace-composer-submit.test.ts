@@ -88,4 +88,118 @@ describe('submitFolderWorkspaceCreate', () => {
       expect.any(Error)
     )
   })
+
+  it('marks a blank folder workspace for first-input rename when launching an agent with a note', async () => {
+    const createFolderWorkspace = vi.fn(async () => makeFolderWorkspace())
+    const onOpenChange = vi.fn()
+
+    await submitFolderWorkspaceCreate({
+      projectGroup: makeProjectGroup(),
+      name: '',
+      lastAutoName: '',
+      linkedWorkItem: null,
+      note: 'Fix the flaky checkout flow',
+      quickAgent: 'codex',
+      autoRenameBranchFromWork: true,
+      agentCmdOverrides: {},
+      createFolderWorkspace,
+      onOpenChange
+    })
+
+    expect(createFolderWorkspace).toHaveBeenCalledWith({
+      projectGroupId: 'group-1',
+      name: 'Platform workspace',
+      linkedTask: null,
+      createdWithAgent: 'codex',
+      pendingFirstAgentMessageRename: true
+    })
+    expect(mocks.activateAndRevealFolderWorkspace).toHaveBeenCalledWith(
+      'folder-workspace-1',
+      expect.objectContaining({
+        startup: expect.objectContaining({
+          command: expect.stringContaining('codex')
+        })
+      })
+    )
+  })
+
+  it('does not mark first-input rename when the folder workspace has an explicit name', async () => {
+    const createFolderWorkspace = vi.fn(async () => makeFolderWorkspace())
+
+    await submitFolderWorkspaceCreate({
+      projectGroup: makeProjectGroup(),
+      name: 'Checkout polish',
+      lastAutoName: '',
+      linkedWorkItem: null,
+      note: 'Fix the flaky checkout flow',
+      quickAgent: 'codex',
+      autoRenameBranchFromWork: true,
+      agentCmdOverrides: {},
+      createFolderWorkspace,
+      onOpenChange: vi.fn()
+    })
+
+    expect(createFolderWorkspace).toHaveBeenCalledWith({
+      projectGroupId: 'group-1',
+      name: 'Checkout polish',
+      linkedTask: null,
+      createdWithAgent: 'codex'
+    })
+  })
+
+  it('does not mark first-input rename when a linked work item owns the folder workspace name', async () => {
+    const createFolderWorkspace = vi.fn(async () => makeFolderWorkspace())
+    const linkedWorkItem = {
+      provider: 'github' as const,
+      type: 'issue' as const,
+      number: 42,
+      title: 'Restore checkout polish',
+      url: 'https://github.com/stablyai/orca/issues/42',
+      repoId: 'repo-1'
+    }
+
+    await submitFolderWorkspaceCreate({
+      projectGroup: makeProjectGroup(),
+      name: '',
+      lastAutoName: '',
+      linkedWorkItem,
+      note: 'Use the issue context',
+      quickAgent: 'codex',
+      autoRenameBranchFromWork: true,
+      agentCmdOverrides: {},
+      createFolderWorkspace,
+      onOpenChange: vi.fn()
+    })
+
+    expect(createFolderWorkspace).toHaveBeenCalledWith({
+      projectGroupId: 'group-1',
+      name: 'Restore checkout polish',
+      linkedTask: linkedWorkItem,
+      createdWithAgent: 'codex'
+    })
+  })
+
+  it('does not mark first-input rename without submitted first input', async () => {
+    const createFolderWorkspace = vi.fn(async () => makeFolderWorkspace())
+
+    await submitFolderWorkspaceCreate({
+      projectGroup: makeProjectGroup(),
+      name: '',
+      lastAutoName: '',
+      linkedWorkItem: null,
+      note: '   ',
+      quickAgent: 'codex',
+      autoRenameBranchFromWork: true,
+      agentCmdOverrides: {},
+      createFolderWorkspace,
+      onOpenChange: vi.fn()
+    })
+
+    expect(createFolderWorkspace).toHaveBeenCalledWith({
+      projectGroupId: 'group-1',
+      name: 'Platform workspace',
+      linkedTask: null,
+      createdWithAgent: 'codex'
+    })
+  })
 })

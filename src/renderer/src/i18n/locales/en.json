@@ -463,6 +463,35 @@
             "7d732521ec": "Comment"
           }
         }
+      },
+      "folderWorkspacePathStatus": {
+        "title": {
+          "missing": "Folder not found",
+          "notDirectory": "Path is not a folder",
+          "ambiguousConnection": "Cannot determine connection",
+          "unavailable": "Cannot check folder"
+        },
+        "description": {
+          "missing": "Orca cannot find {{path}}. Remove and re-import this folder workspace.",
+          "notDirectory": "{{path}} exists, but it is not a folder.",
+          "ambiguousConnection": "Orca cannot tell which SSH connection owns this folder scope.",
+          "unavailable": "Orca cannot verify this folder right now. Check the runtime or SSH connection and try again."
+        },
+        "createError": {
+          "title": {
+            "missing": "Folder not found",
+            "notDirectory": "Path is not a folder",
+            "ambiguousConnection": "Cannot determine connection",
+            "unavailable": "Cannot check folder",
+            "generic": "Failed to create folder workspace"
+          },
+          "description": {
+            "missing": "Orca cannot find {{path}}. Remove and re-import the folder.",
+            "notDirectory": "{{path}} exists, but it is not a folder.",
+            "ambiguousConnection": "Orca cannot tell which SSH connection owns this folder scope.",
+            "unavailable": "Orca cannot verify this folder right now. Check the runtime or SSH connection and try again."
+          }
+        }
       }
     },
     "hooks": {
@@ -1775,7 +1804,11 @@
           "015b4e607d": "Cancel",
           "e3bd59143c": "Insert",
           "f24783f470": "https://...",
-          "ec6310b731": "Use an http:// or https:// image URL."
+          "ec6310b731": "Use an http:// or https:// image URL.",
+          "b7e4a1c902": "Paste, drop, or click to add files",
+          "8f1c2d4e6a": "Nothing to preview",
+          "c91f0a2b14": "Write",
+          "d82b1e3f05": "Preview"
         },
         "IssueSourceSelector": {
           "d6aeb2012b": "Showing issues from",
@@ -1848,6 +1881,47 @@
                 "bb227706a6": "REST"
               }
             }
+          }
+        },
+        "CloseReasonDropdown": {
+          "e1f2a3b4c5": "Choose close reason"
+        },
+        "GitHubIssueCommentComposer": {
+          "082515176a": "Failed to add comment",
+          "9f88657c4e": "Issue closed",
+          "e9b7cb7d17": "Failed to close issue",
+          "bd3b4492a0": "Issue reopened",
+          "f2a8c1d903": "Failed to reopen issue",
+          "a1b2c3d4e5": "Add a comment",
+          "c5c117270e": "Add your comment here, be kind",
+          "f6a7b8c9d0": "Close issue",
+          "b1c2d3e4f5": "Reopen issue",
+          "0a73f59e85": "Send comment",
+          "bf43425540": "Comment"
+        },
+        "GitHubWorkItemAssigneePopoverContent": {
+          "cddd9b04a7": "Loading assignees",
+          "a00830d3f7": "No users",
+          "4f8b6f2c1d": "Filter assignees..."
+        },
+        "GitHubWorkItemLabelPopoverContent": {
+          "2aa9acdf34": "Edit labels on GitHub",
+          "cddd9b04a7": "Loading labels",
+          "de26e2eb06": "No labels",
+          "8b0d52ee3a": "Filter labels..."
+        },
+        "githubIssueCloseReasons": {
+          "completed": {
+            "label": "Close as completed",
+            "description": "Done, closed, fixed, resolved"
+          },
+          "notPlanned": {
+            "label": "Close as not planned",
+            "description": "Won't fix, can't repro, stale"
+          },
+          "duplicate": {
+            "label": "Close as duplicate",
+            "description": "Duplicate of another issue"
           }
         }
       },
@@ -2124,7 +2198,8 @@
             "c44659e09f": "Mobile driving",
             "7cffad954c": "Collapse",
             "3eed73394f": "Your keyboard is paused",
-            "faa367dc74": "This terminal is sized for your mobile app"
+            "faa367dc74": "This terminal is sized for your mobile app",
+            "54f7d6f69d": "Resize all terminals"
           },
           "TerminalAgentSessionForkDialog": {
             "17fc841e59": "Copy context",
@@ -3061,7 +3136,15 @@
           "2c12db1511": "Project already added",
           "875dda0995": "Enter a server parent path.",
           "45b7c26034": "Create project",
-          "85085d74d2": "Creating…"
+          "85085d74d2": "Creating…",
+          "createProjectTitle": "Create project",
+          "createProjectDescription": "Create a local Git repo and first workspace.",
+          "projectNameLabel": "Project name",
+          "createsGitRepoHelp": "Git repo:",
+          "parentFolderLabel": "Parent folder",
+          "browseParentFolder": "Browse",
+          "gitRequiredError": "Git is required to create a project.",
+          "createAction": "Create"
         },
         "AddRepoNestedImportStep": {
           "496f68cf8c": "Scanning repositories. Click to stop.",
@@ -3662,7 +3745,9 @@
                   "a6c20dca96": "Open a project from an SSH target",
                   "3d162cc76f": "Remote project",
                   "fb4fc5380e": "Local project, Git repo, or folder with many repos",
-                  "2281fdc8c7": "Browse folder"
+                  "2281fdc8c7": "Browse folder",
+                  "createProjectTitle": "Create project",
+                  "createGitProjectDescription": "Create a local Git repository"
                 }
               }
             }
@@ -4070,7 +4155,7 @@
           "e784ea62dc": "Advanced",
           "d9b65054ef": ") to a short name summarizing the task. Only branches Orca named itself are renamed, and never after they have been pushed.",
           "12ea4a408d": "When an agent starts working in a new workspace, Orca renames its auto-generated branch (e.g.",
-          "ef787db0e3": "Auto-Rename Branch",
+          "ef787db0e3": "Auto-rename branch & worktree",
           "6a051586d2": "Rename the auto-generated branch based on the work once an agent starts.",
           "ec3e0c388e": "Save",
           "cfd82406dd": "Saving...",
@@ -6114,7 +6199,7 @@
                 "55a1860e47": "rename",
                 "9319bd9827": "branch",
                 "ea94b9da8a": "Rename the auto-generated branch based on the work once an agent starts.",
-                "427f2cd1eb": "Auto-Rename Branch"
+                "427f2cd1eb": "Auto-rename branch & worktree"
               }
             }
           }

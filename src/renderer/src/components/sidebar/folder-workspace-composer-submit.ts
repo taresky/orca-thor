@@ -54,20 +54,6 @@ export async function submitFolderWorkspaceCreate({
     nameIsAutoManaged && linkedName
       ? linkedName
       : name.trim() || linkedName || `${projectGroup.name} workspace`
-  const pendingFirstAgentMessageRename =
-    autoRenameBranchFromWork === true && !name.trim() && !linkedWorkItem && Boolean(quickAgent)
-
-  const workspace = await createFolderWorkspace({
-    projectGroupId: projectGroup.id,
-    name: workspaceName,
-    linkedTask: toFolderWorkspaceLinkedTask(linkedWorkItem),
-    ...(quickAgent ? { createdWithAgent: quickAgent } : {}),
-    ...(pendingFirstAgentMessageRename ? { pendingFirstAgentMessageRename: true } : {})
-  })
-  if (!workspace) {
-    return
-  }
-
   const linearCliAvailable = linkedWorkItem?.linearIdentifier
     ? await isOrcaCliAvailableForLaunch({ remote: projectGroup.connectionId != null })
     : false
@@ -80,6 +66,25 @@ export async function submitFolderWorkspaceCreate({
     linkedPromptContext.linkedUrls,
     linkedPromptContext.linkedContextBlocks
   )
+  // Why: the pending badge should only appear when the submitted prompt can
+  // actually produce the first agent message that names the workspace.
+  const pendingFirstAgentMessageRename =
+    autoRenameBranchFromWork === true &&
+    !name.trim() &&
+    !linkedWorkItem &&
+    Boolean(quickAgent) &&
+    startupPrompt.trim().length > 0
+
+  const workspace = await createFolderWorkspace({
+    projectGroupId: projectGroup.id,
+    name: workspaceName,
+    linkedTask: toFolderWorkspaceLinkedTask(linkedWorkItem),
+    ...(quickAgent ? { createdWithAgent: quickAgent } : {}),
+    ...(pendingFirstAgentMessageRename ? { pendingFirstAgentMessageRename: true } : {})
+  })
+  if (!workspace) {
+    return
+  }
   const startupPlan = quickAgent
     ? buildAgentStartupPlan({
         agent: quickAgent,
