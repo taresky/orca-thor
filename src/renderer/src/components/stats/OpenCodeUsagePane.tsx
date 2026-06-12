@@ -1,16 +1,34 @@
 import { useEffect } from 'react'
-import { Activity, Brain, Coins, DatabaseZap, FolderKanban, Sparkles } from 'lucide-react'
+import {
+  Activity,
+  Brain,
+  Coins,
+  DatabaseZap,
+  FolderKanban,
+  RefreshCw,
+  SlidersHorizontal,
+  Sparkles
+} from 'lucide-react'
 import type {
   OpenCodeUsageRange,
   OpenCodeUsageScope
 } from '../../../../shared/opencode-usage-types'
 import { useAppStore } from '../../store'
+import { Button } from '../ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from '../ui/dropdown-menu'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
 import { ClaudeUsageLoadingState } from './ClaudeUsageLoadingState'
 import { OpenCodeUsageDetails } from './OpenCodeUsageDetails'
 import { StatCard } from './StatCard'
-import { UsagePaneFilterControls } from './UsagePaneFilterControls'
-import { UsageTrackingDisabledCard } from './UsageTrackingDisabledCard'
-import { formatCost, formatTokens, formatUpdatedAt } from './usage-display-formatting'
+import { formatCost, formatTokens, formatUpdatedAt } from './usage-formatters'
 import { translate } from '@/i18n/i18n'
 
 const RANGE_OPTIONS: OpenCodeUsageRange[] = ['7d', '30d', '90d', 'all']
@@ -73,21 +91,37 @@ export function OpenCodeUsagePane(): React.JSX.Element {
 
   if (!scanState?.enabled) {
     return (
-      <UsageTrackingDisabledCard
-        title={translate(
-          'auto.components.stats.OpenCodeUsagePane.bea80ceae0',
-          'OpenCode Usage Tracking'
-        )}
-        description={translate(
-          'auto.components.stats.OpenCodeUsagePane.b8b3522436',
-          'Reads local OpenCode usage logs to show token, model, and session stats.'
-        )}
-        enableLabel={translate(
-          'auto.components.stats.OpenCodeUsagePane.f04131b3be',
-          'Enable OpenCode usage analytics'
-        )}
-        onEnable={() => handleSetEnabled(true)}
-      />
+      <div className="rounded-lg border border-border/60 bg-card/40 p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold text-foreground">
+              {translate(
+                'auto.components.stats.OpenCodeUsagePane.bea80ceae0',
+                'OpenCode Usage Tracking'
+              )}
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              {translate(
+                'auto.components.stats.OpenCodeUsagePane.b8b3522436',
+                'Reads local OpenCode usage logs to show token, model, and session stats.'
+              )}
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={false}
+            aria-label={translate(
+              'auto.components.stats.OpenCodeUsagePane.f04131b3be',
+              'Enable OpenCode usage analytics'
+            )}
+            onClick={() => handleSetEnabled(true)}
+            className="relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-transparent bg-muted-foreground/30 transition-colors"
+          >
+            <span className="pointer-events-none block size-3.5 translate-x-0.5 rounded-full bg-background shadow-sm transition-transform" />
+          </button>
+        </div>
+      </div>
     )
   }
 
@@ -127,30 +161,94 @@ export function OpenCodeUsagePane(): React.JSX.Element {
               : ''}
           </p>
         </div>
-        <UsagePaneFilterControls
-          scope={scope}
-          range={range}
-          scopeOptions={SCOPE_OPTIONS}
-          rangeOptions={RANGE_OPTIONS}
-          rangeLabels={RANGE_LABELS}
-          isScanning={scanState.isScanning}
-          optionsLabel={translate(
-            'auto.components.stats.OpenCodeUsagePane.230d6de108',
-            'OpenCode usage options'
-          )}
-          filtersLabel={translate('auto.components.stats.OpenCodeUsagePane.01583b30aa', 'Filters')}
-          scopeLabel={translate('auto.components.stats.OpenCodeUsagePane.40d283c837', 'Scope')}
-          rangeLabel={translate('auto.components.stats.OpenCodeUsagePane.b5ed5c9fd0', 'Range')}
-          refreshLabel={translate('auto.components.stats.OpenCodeUsagePane.603cd138dc', 'Refresh')}
-          enableLabel={translate(
-            'auto.components.stats.OpenCodeUsagePane.f04131b3be',
-            'Enable OpenCode usage analytics'
-          )}
-          onScopeChange={(value) => void setOpenCodeUsageScope(value)}
-          onRangeChange={(value) => void setOpenCodeUsageRange(value)}
-          onRefresh={() => void refreshOpenCodeUsage()}
-          onDisable={() => handleSetEnabled(false)}
-        />
+        <div className="flex shrink-0 items-center gap-2 self-start">
+          <DropdownMenu>
+            <TooltipProvider delayDuration={250}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={translate(
+                        'auto.components.stats.OpenCodeUsagePane.230d6de108',
+                        'OpenCode usage options'
+                      )}
+                    >
+                      <SlidersHorizontal className="size-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={6}>
+                  {translate('auto.components.stats.OpenCodeUsagePane.01583b30aa', 'Filters')}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <DropdownMenuContent align="end" className="w-60">
+              <DropdownMenuLabel>
+                {translate('auto.components.stats.OpenCodeUsagePane.40d283c837', 'Scope')}
+              </DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={scope}
+                onValueChange={(value) => void setOpenCodeUsageScope(value as OpenCodeUsageScope)}
+              >
+                {SCOPE_OPTIONS.map((option) => (
+                  <DropdownMenuRadioItem key={option.value} value={option.value}>
+                    {option.label}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>
+                {translate('auto.components.stats.OpenCodeUsagePane.b5ed5c9fd0', 'Range')}
+              </DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={range}
+                onValueChange={(value) => void setOpenCodeUsageRange(value as OpenCodeUsageRange)}
+              >
+                {RANGE_OPTIONS.map((option) => (
+                  <DropdownMenuRadioItem key={option} value={option}>
+                    {RANGE_LABELS[option]}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <TooltipProvider delayDuration={250}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={() => void refreshOpenCodeUsage()}
+                  disabled={scanState.isScanning}
+                  aria-label={translate(
+                    'auto.components.stats.OpenCodeUsagePane.bed558df0b',
+                    'Refresh OpenCode usage'
+                  )}
+                >
+                  <RefreshCw className={`size-3.5 ${scanState.isScanning ? 'animate-spin' : ''}`} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}>
+                {translate('auto.components.stats.OpenCodeUsagePane.603cd138dc', 'Refresh')}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={true}
+            aria-label={translate(
+              'auto.components.stats.OpenCodeUsagePane.f04131b3be',
+              'Enable OpenCode usage analytics'
+            )}
+            onClick={() => handleSetEnabled(false)}
+            className="relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-transparent bg-foreground transition-colors"
+          >
+            <span className="pointer-events-none block size-3.5 translate-x-4 rounded-full bg-background shadow-sm transition-transform" />
+          </button>
+        </div>
       </div>
 
       <div className="flex items-center justify-between gap-3">

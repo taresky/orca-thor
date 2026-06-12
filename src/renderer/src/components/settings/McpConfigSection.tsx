@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, FileCode2, LoaderCircle, Plus, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { useMountedRef } from '@/hooks/useMountedRef'
-import type { Repo } from '../../../../shared/types'
+import type { Repo, Worktree } from '../../../../shared/types'
+import { getRepoIdFromWorktreeId } from '../../../../shared/worktree-id'
 import {
   canInspectLocalMcpConfigRoot,
   inspectMcpConfigContent,
@@ -15,11 +16,6 @@ import { extractIpcErrorMessage } from '../../lib/ipc-error'
 import { Button } from '../ui/button'
 import { isWindowsUserAgent } from '../terminal-pane/pane-helpers'
 import { McpConfigFileRow, type LoadedMcpConfigInspection } from './McpConfigFileRow'
-import {
-  EMPTY_MCP_WORKTREES,
-  countMcpConfigServers,
-  selectMcpTargetWorktree
-} from './mcp-config-inspection-state'
 import { McpMissingConfigList } from './McpMissingConfigList'
 import { loadMcpConfigInspections } from './mcp-config-inspection'
 import { translate } from '@/i18n/i18n'
@@ -28,15 +24,19 @@ type McpConfigSectionProps = {
   repo: Repo
 }
 
+const EMPTY_WORKTREES: Worktree[] = []
+
+function countServers(configs: LoadedMcpConfigInspection[]): number {
+  return configs.reduce((sum, config) => sum + config.servers.length, 0)
+}
+
 export function McpConfigSection({ repo }: McpConfigSectionProps): React.JSX.Element {
   const openFile = useAppStore((state) => state.openFile)
   const setActiveView = useAppStore((state) => state.setActiveView)
   const setActiveWorktree = useAppStore((state) => state.setActiveWorktree)
   const ensureWorktreeRootGroup = useAppStore((state) => state.ensureWorktreeRootGroup)
   const activeWorktreeId = useAppStore((state) => state.activeWorktreeId)
-  const worktreesForRepo = useAppStore(
-    (state) => state.worktreesByRepo[repo.id] ?? EMPTY_MCP_WORKTREES
-  )
+  const worktreesForRepo = useAppStore((state) => state.worktreesByRepo[repo.id] ?? EMPTY_WORKTREES)
   const sshConnectionStatus = useAppStore((state) =>
     repo.connectionId ? state.sshConnectionStates.get(repo.connectionId)?.status : null
   )
@@ -51,10 +51,21 @@ export function McpConfigSection({ repo }: McpConfigSectionProps): React.JSX.Ele
 
   const connectionId = repo.connectionId ?? undefined
   const isWindows = isWindowsUserAgent()
-  const targetWorktree = useMemo(
-    () => selectMcpTargetWorktree(repo, worktreesForRepo, activeWorktreeId),
-    [activeWorktreeId, repo, worktreesForRepo]
-  )
+  const targetWorktree = useMemo(() => {
+    if (activeWorktreeId && getRepoIdFromWorktreeId(activeWorktreeId) === repo.id) {
+      return (
+        worktreesForRepo.find((worktree) => worktree.id === activeWorktreeId) ?? {
+          id: activeWorktreeId,
+          path: repo.path
+        }
+      )
+    }
+    return (
+      worktreesForRepo.find((worktree) => worktree.isMainWorktree) ??
+      worktreesForRepo.find((worktree) => worktree.path === repo.path) ??
+      worktreesForRepo[0] ?? { id: `${repo.id}::${repo.path}`, path: repo.path }
+    )
+  }, [activeWorktreeId, repo.id, repo.path, worktreesForRepo])
   const targetWorktreeId = targetWorktree.id
   const targetRootPath = targetWorktree.path
   const detectedCount = useMemo(() => configs.filter((config) => config.exists).length, [configs])
@@ -85,7 +96,7 @@ export function McpConfigSection({ repo }: McpConfigSectionProps): React.JSX.Ele
       ),
     [targetRootPath]
   )
-  const serverCount = useMemo(() => countMcpConfigServers(configs), [configs])
+  const serverCount = useMemo(() => countServers(configs), [configs])
   const canCreateStarter = detectedCount === 0 && !inspectionUnavailable
 
   const loadConfigs = useCallback(async (): Promise<void> => {

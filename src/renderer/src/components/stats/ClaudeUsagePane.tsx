@@ -5,18 +5,29 @@ import {
   DatabaseZap,
   FolderKanban,
   Gauge,
+  RefreshCw,
+  SlidersHorizontal,
   Sparkles,
   Waypoints
 } from 'lucide-react'
 import type { ClaudeUsageRange, ClaudeUsageScope } from '../../../../shared/claude-usage-types'
 import { useAppStore } from '../../store'
+import { Button } from '../ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from '../ui/dropdown-menu'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip'
 import { ClaudeUsageDetails } from './ClaudeUsageDetails'
 import { ClaudeUsageLoadingState } from './ClaudeUsageLoadingState'
 import { ShareUsageButton } from './ShareUsageButton'
 import { StatCard } from './StatCard'
-import { UsagePaneFilterControls } from './UsagePaneFilterControls'
-import { UsageTrackingDisabledCard } from './UsageTrackingDisabledCard'
-import { formatCost, formatTokens, formatUpdatedAt } from './usage-display-formatting'
+import { formatCost, formatTokens, formatUpdatedAt } from './usage-formatters'
 import { translate } from '@/i18n/i18n'
 
 const RANGE_OPTIONS: ClaudeUsageRange[] = ['7d', '30d', '90d', 'all']
@@ -76,21 +87,37 @@ export function ClaudeUsagePane(): React.JSX.Element {
 
   if (!scanState?.enabled) {
     return (
-      <UsageTrackingDisabledCard
-        title={translate(
-          'auto.components.stats.ClaudeUsagePane.6afacbee37',
-          'Claude Usage Tracking'
-        )}
-        description={translate(
-          'auto.components.stats.ClaudeUsagePane.0cb1a36d7d',
-          'Reads local Claude usage logs to show token, model, and session stats.'
-        )}
-        enableLabel={translate(
-          'auto.components.stats.ClaudeUsagePane.424cd50412',
-          'Enable Claude usage analytics'
-        )}
-        onEnable={() => handleSetEnabled(true)}
-      />
+      <div className="rounded-lg border border-border/60 bg-card/40 p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold text-foreground">
+              {translate(
+                'auto.components.stats.ClaudeUsagePane.6afacbee37',
+                'Claude Usage Tracking'
+              )}
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              {translate(
+                'auto.components.stats.ClaudeUsagePane.0cb1a36d7d',
+                'Reads local Claude usage logs to show token, model, and session stats.'
+              )}
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={false}
+            aria-label={translate(
+              'auto.components.stats.ClaudeUsagePane.424cd50412',
+              'Enable Claude usage analytics'
+            )}
+            onClick={() => handleSetEnabled(true)}
+            className="relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-transparent bg-muted-foreground/30 transition-colors"
+          >
+            <span className="pointer-events-none block size-3.5 translate-x-0.5 rounded-full bg-background shadow-sm transition-transform" />
+          </button>
+        </div>
+      </div>
     )
   }
 
@@ -122,30 +149,92 @@ export function ClaudeUsagePane(): React.JSX.Element {
           {summary && daily.length > 0 && (
             <ShareUsageButton provider="claude" summary={summary} daily={daily} range={range} />
           )}
-          <UsagePaneFilterControls
-            scope={scope}
-            range={range}
-            scopeOptions={SCOPE_OPTIONS}
-            rangeOptions={RANGE_OPTIONS}
-            rangeLabels={RANGE_LABELS}
-            isScanning={scanState.isScanning}
-            optionsLabel={translate(
-              'auto.components.stats.ClaudeUsagePane.e9bf9fce0e',
-              'Claude usage options'
-            )}
-            filtersLabel={translate('auto.components.stats.ClaudeUsagePane.dd29209b21', 'Filters')}
-            scopeLabel={translate('auto.components.stats.ClaudeUsagePane.f61cffb9c8', 'Scope')}
-            rangeLabel={translate('auto.components.stats.ClaudeUsagePane.505be9aac4', 'Range')}
-            refreshLabel={translate('auto.components.stats.ClaudeUsagePane.8d18bbb771', 'Refresh')}
-            enableLabel={translate(
+          <DropdownMenu>
+            <TooltipProvider delayDuration={250}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={translate(
+                        'auto.components.stats.ClaudeUsagePane.e9bf9fce0e',
+                        'Claude usage options'
+                      )}
+                    >
+                      <SlidersHorizontal className="size-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={6}>
+                  {translate('auto.components.stats.ClaudeUsagePane.dd29209b21', 'Filters')}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <DropdownMenuContent align="end" className="w-60">
+              <DropdownMenuLabel>
+                {translate('auto.components.stats.ClaudeUsagePane.f61cffb9c8', 'Scope')}
+              </DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={scope}
+                onValueChange={(value) => void setClaudeUsageScope(value as ClaudeUsageScope)}
+              >
+                {SCOPE_OPTIONS.map((option) => (
+                  <DropdownMenuRadioItem key={option.value} value={option.value}>
+                    {option.label}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>
+                {translate('auto.components.stats.ClaudeUsagePane.505be9aac4', 'Range')}
+              </DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={range}
+                onValueChange={(value) => void setClaudeUsageRange(value as ClaudeUsageRange)}
+              >
+                {RANGE_OPTIONS.map((option) => (
+                  <DropdownMenuRadioItem key={option} value={option}>
+                    {RANGE_LABELS[option]}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <TooltipProvider delayDuration={250}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={() => void refreshClaudeUsage()}
+                  disabled={scanState.isScanning}
+                  aria-label={translate(
+                    'auto.components.stats.ClaudeUsagePane.c5b9b344d0',
+                    'Refresh Claude usage'
+                  )}
+                >
+                  <RefreshCw className={`size-3.5 ${scanState.isScanning ? 'animate-spin' : ''}`} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}>
+                {translate('auto.components.stats.ClaudeUsagePane.8d18bbb771', 'Refresh')}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={true}
+            aria-label={translate(
               'auto.components.stats.ClaudeUsagePane.424cd50412',
               'Enable Claude usage analytics'
             )}
-            onScopeChange={(value) => void setClaudeUsageScope(value)}
-            onRangeChange={(value) => void setClaudeUsageRange(value)}
-            onRefresh={() => void refreshClaudeUsage()}
-            onDisable={() => handleSetEnabled(false)}
-          />
+            onClick={() => handleSetEnabled(false)}
+            className="relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-transparent bg-foreground transition-colors"
+          >
+            <span className="pointer-events-none block size-3.5 translate-x-4 rounded-full bg-background shadow-sm transition-transform" />
+          </button>
         </div>
       </div>
 
