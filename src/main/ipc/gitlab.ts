@@ -493,8 +493,7 @@ export function registerGitLabHandlers(store: Store): void {
     'gitlab:workItemByPath',
     async (
       _event,
-      args: {
-        repoPath: string
+      args: GitLabRepoSelectorArgs & {
         host: string
         path: string
         iid: number

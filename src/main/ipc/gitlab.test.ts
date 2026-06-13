@@ -3,9 +3,10 @@ import type { Store } from '../persistence'
 import type { Repo } from '../../shared/types'
 import { toSshExecutionHostId } from '../../shared/execution-host'
 
-const { ipcHandlers, listWorkItemsMock } = vi.hoisted(() => ({
+const { ipcHandlers, listWorkItemsMock, getWorkItemByProjectRefMock } = vi.hoisted(() => ({
   ipcHandlers: new Map<string, (...args: unknown[]) => unknown>(),
-  listWorkItemsMock: vi.fn()
+  listWorkItemsMock: vi.fn(),
+  getWorkItemByProjectRefMock: vi.fn()
 }))
 
 vi.mock('electron', () => ({
@@ -30,7 +31,7 @@ vi.mock('../gitlab/client', () => ({
   getMergeRequestForBranch: vi.fn(),
   getProjectSlug: vi.fn(),
   getRateLimit: vi.fn(),
-  getWorkItemByProjectRef: vi.fn(),
+  getWorkItemByProjectRef: getWorkItemByProjectRefMock,
   listAssignableUsers: vi.fn(),
   listIssues: vi.fn(),
   listLabels: vi.fn(),
@@ -130,5 +131,47 @@ describe('GitLab IPC handlers', () => {
         }
       })
     ).rejects.toThrow('source host does not match')
+  })
+
+  it('resolves pasted URL lookups by repoId and source host context', async () => {
+    const remoteRepo = repo({
+      id: 'repo-ssh',
+      path: '/ssh/orca',
+      connectionId: 'builder',
+      executionHostId: toSshExecutionHostId('builder')
+    })
+    getWorkItemByProjectRefMock.mockResolvedValueOnce({
+      type: 'issue',
+      number: 42,
+      title: 'Remote issue'
+    })
+    registerGitLabHandlers(storeWithRepos([repo(), remoteRepo]) as Store)
+
+    const handler = ipcHandlers.get('gitlab:workItemByPath')
+    await expect(
+      handler?.(null, {
+        repoPath: '/local/orca',
+        repoId: 'repo-ssh',
+        sourceContext: {
+          kind: 'task-source',
+          provider: 'gitlab',
+          projectId: 'gitlab:stablyai/orca',
+          hostId: toSshExecutionHostId('builder'),
+          repoId: 'repo-ssh'
+        },
+        host: 'gitlab.com',
+        path: 'stablyai/orca',
+        iid: 42,
+        type: 'issue'
+      })
+    ).resolves.toMatchObject({ number: 42 })
+
+    expect(getWorkItemByProjectRefMock).toHaveBeenCalledWith(
+      '/ssh/orca',
+      { host: 'gitlab.com', path: 'stablyai/orca' },
+      42,
+      'issue',
+      'builder'
+    )
   })
 })

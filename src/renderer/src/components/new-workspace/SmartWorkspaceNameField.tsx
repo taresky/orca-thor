@@ -599,6 +599,7 @@ export default function SmartWorkspaceNameField({
     void window.api.gl
       .workItemByPath({
         repoPath: selectedRepo.path,
+        repoId: selectedRepo.id,
         // Why: parseGitLabIssueOrMRLink doesn't carry the host (the URL
         // pattern is host-agnostic on purpose so self-hosted instances
         // work). Use 'gitlab.com' as the IPC arg — the main process maps

@@ -289,6 +289,7 @@ async function fetchGitLabMRDetailsForChecks(args: {
   }
   return (await window.api.gl.workItemDetails({
     repoPath: args.repoPath,
+    repoId: args.repoId,
     iid: args.iid,
     type: 'mr'
   })) as GitLabWorkItemDetails | null
@@ -318,6 +319,7 @@ async function resolveGitLabMRDiscussionForChecks(args: {
   }
   return window.api.gl.resolveMRDiscussion({
     repoPath: args.repoPath,
+    repoId: args.repoId,
     iid: args.iid,
     discussionId: args.discussionId,
     resolved: args.resolved
@@ -1790,6 +1792,7 @@ export default function ChecksPanel(): React.JSX.Element {
       if (activeReview.provider === 'gitlab') {
         const result = await window.api.gl.updateMR({
           repoPath: repo.path,
+          repoId: repo.id,
           iid: activeReview.number,
           updates: { title: nextTitle }
         })
