@@ -113,9 +113,9 @@ export default function TaskProjectSourceCombobox({
   const sourceMenuCloseTimerRef = useRef<number | null>(null)
   const sourceMenuHoverRef = useRef<{
     projectKey: string | null
-    trigger: boolean
+    row: boolean
     content: boolean
-  }>({ projectKey: null, trigger: false, content: false })
+  }>({ projectKey: null, row: false, content: false })
 
   const filteredGroups = useMemo(() => {
     const trimmed = query.trim()
@@ -131,7 +131,7 @@ export default function TaskProjectSourceCombobox({
     if (!nextOpen) {
       setQuery('')
       setSourceMenuProjectKey(null)
-      sourceMenuHoverRef.current = { projectKey: null, trigger: false, content: false }
+      sourceMenuHoverRef.current = { projectKey: null, row: false, content: false }
     }
   }, [])
 
@@ -143,10 +143,10 @@ export default function TaskProjectSourceCombobox({
   }, [])
 
   const setSourceMenuHover = useCallback(
-    (projectKey: string, region: 'trigger' | 'content', hovered: boolean) => {
+    (projectKey: string, region: 'row' | 'content', hovered: boolean) => {
       clearSourceMenuCloseTimer()
       if (sourceMenuHoverRef.current.projectKey !== projectKey) {
-        sourceMenuHoverRef.current = { projectKey, trigger: false, content: false }
+        sourceMenuHoverRef.current = { projectKey, row: false, content: false }
       }
       sourceMenuHoverRef.current[region] = hovered
       if (hovered) {
@@ -155,9 +155,9 @@ export default function TaskProjectSourceCombobox({
       }
       sourceMenuCloseTimerRef.current = window.setTimeout(() => {
         const hover = sourceMenuHoverRef.current
-        if (hover.projectKey === projectKey && !hover.trigger && !hover.content) {
+        if (hover.projectKey === projectKey && !hover.row && !hover.content) {
           setSourceMenuProjectKey((current) => (current === projectKey ? null : current))
-          sourceMenuHoverRef.current = { projectKey: null, trigger: false, content: false }
+          sourceMenuHoverRef.current = { projectKey: null, row: false, content: false }
         }
         sourceMenuCloseTimerRef.current = null
       }, 100)
@@ -199,7 +199,7 @@ export default function TaskProjectSourceCombobox({
       next.add(source.id)
       onChange(next)
       setSourceMenuProjectKey(null)
-      sourceMenuHoverRef.current = { projectKey: null, trigger: false, content: false }
+      sourceMenuHoverRef.current = { projectKey: null, row: false, content: false }
     },
     [getRepoSourceStatus, onChange, selected]
   )
@@ -283,10 +283,21 @@ export default function TaskProjectSourceCombobox({
               const selectedProject = isGroupSelected(group, selected)
               const selectedSource = getSelectedSource(group, selected)
               const detail = getProjectDetail(group, selected, getRepoHostLabel)
+              const hasSourceMenu = group.sources.length > 1
               return (
                 <div
                   key={group.projectKey}
-                  onMouseEnter={() => setCommandValue(group.repo.id)}
+                  onMouseEnter={() => {
+                    setCommandValue(group.repo.id)
+                    if (hasSourceMenu) {
+                      setSourceMenuHover(group.projectKey, 'row', true)
+                    }
+                  }}
+                  onMouseLeave={() => {
+                    if (hasSourceMenu) {
+                      setSourceMenuHover(group.projectKey, 'row', false)
+                    }
+                  }}
                   className={cn(
                     'group/source-row flex items-stretch transition-colors hover:bg-accent hover:text-accent-foreground',
                     commandValue === group.repo.id && 'bg-accent text-accent-foreground'
@@ -315,7 +326,7 @@ export default function TaskProjectSourceCombobox({
                       <p className="mt-0.5 truncate text-[10px] text-muted-foreground">{detail}</p>
                     </div>
                   </button>
-                  {group.sources.length > 1 ? (
+                  {hasSourceMenu ? (
                     <Popover
                       open={sourceMenuProjectKey === group.projectKey}
                       onOpenChange={(nextOpen) =>
@@ -329,10 +340,6 @@ export default function TaskProjectSourceCombobox({
                             'auto.components.task.project.source.combobox.chooseSource',
                             'Choose task source'
                           )}
-                          onMouseEnter={() => setSourceMenuHover(group.projectKey, 'trigger', true)}
-                          onMouseLeave={() =>
-                            setSourceMenuHover(group.projectKey, 'trigger', false)
-                          }
                           onClick={(event) => {
                             event.preventDefault()
                             event.stopPropagation()
@@ -347,21 +354,10 @@ export default function TaskProjectSourceCombobox({
                         side="right"
                         align="start"
                         sideOffset={6}
-                        className="w-[min(300px,calc(100vw-1rem))] p-1"
+                        className="w-[min(280px,calc(100vw-1rem))] p-1"
                         onMouseEnter={() => setSourceMenuHover(group.projectKey, 'content', true)}
                         onMouseLeave={() => setSourceMenuHover(group.projectKey, 'content', false)}
                       >
-                        <div className="border-b border-border px-2 py-1.5">
-                          <div className="truncate text-xs font-medium text-foreground">
-                            {group.repo.displayName}
-                          </div>
-                          <div className="text-[10px] text-muted-foreground">
-                            {translate(
-                              'auto.components.task.project.source.combobox.taskSource',
-                              'Task source'
-                            )}
-                          </div>
-                        </div>
                         <div className="py-1">
                           {group.sources.map((source) => {
                             const status = getRepoSourceStatus?.(source)
