@@ -212,7 +212,7 @@ export default function AutomationProjectCombobox({
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0"
+        className="w-[var(--radix-popover-trigger-width)] min-w-[16rem] p-0"
         onOpenAutoFocus={(event) => {
           event.preventDefault()
           focusSearchInput()
@@ -268,11 +268,11 @@ export default function AutomationProjectCombobox({
                     type="button"
                     onClick={() => handleSelect(selectedSource.id)}
                     onMouseDown={(event) => event.preventDefault()}
-                    className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left"
+                    className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-xs"
                   >
                     <Check
                       className={cn(
-                        'size-4 text-foreground',
+                        'size-3 text-foreground',
                         selectedProject ? 'opacity-100' : 'opacity-0'
                       )}
                     />
@@ -282,7 +282,7 @@ export default function AutomationProjectCombobox({
                         color={group.repo.badgeColor}
                         className="max-w-full"
                       />
-                      <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{detail}</p>
+                      <p className="mt-0.5 truncate text-[10px] text-muted-foreground">{detail}</p>
                     </div>
                   </button>
                   {hasHostMenu ? (
@@ -304,7 +304,7 @@ export default function AutomationProjectCombobox({
                             event.stopPropagation()
                           }}
                           onMouseDown={(event) => event.preventDefault()}
-                          className="flex w-8 shrink-0 items-center justify-center text-muted-foreground"
+                          className="flex w-7 shrink-0 items-center justify-center text-muted-foreground"
                         >
                           <ChevronRight className="size-3.5" />
                         </button>
@@ -313,7 +313,7 @@ export default function AutomationProjectCombobox({
                         side="right"
                         align="start"
                         sideOffset={6}
-                        className="w-[min(280px,calc(100vw-1rem))] p-1"
+                        className="w-[min(260px,calc(100vw-1rem))] p-1"
                         onMouseEnter={() => setHostMenuHover(group.projectKey, 'content', true)}
                         onMouseLeave={() => setHostMenuHover(group.projectKey, 'content', false)}
                       >
@@ -362,7 +362,7 @@ export default function AutomationProjectCombobox({
               onClick={() => void handleAddFolder()}
               onMouseDown={(event) => event.preventDefault()}
               onMouseEnter={() => setCommandValue('')}
-              className="h-9 w-full justify-start rounded-none px-3 text-xs font-normal"
+              className="h-8 w-full justify-start rounded-none px-3 text-xs font-normal"
             >
               <FolderPlus className="size-3.5 text-muted-foreground" />
               <span>
