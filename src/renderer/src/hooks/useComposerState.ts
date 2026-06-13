@@ -1578,7 +1578,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         toast.error(
           translate(
             'auto.hooks.useComposerState.3db83fc58a',
-            'No remote project path is available for attachments.'
+            'No project path is available on this host for attachments.'
           )
         )
         return { filePaths: [], folderPaths: [] }

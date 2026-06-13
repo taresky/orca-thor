@@ -218,7 +218,7 @@
         },
         "repos": {
           "b7e14472ae": "Failed to add folder",
-          "e649269645": "Use a server path to add projects from a remote runtime.",
+          "e649269645": "Use Add Project to enter a path on the selected host.",
           "c6e022ddfc": "Failed to add project",
           "90d129b48b": "Folder added",
           "8bb3ad7935": "Project added",
@@ -475,7 +475,7 @@
         "7eb3f44ff7": "Selected agent is disabled. Choose an enabled agent before creating.",
         "b2ead86962": "Failed to resolve PR base.",
         "a9ff236145": "Some attachments could not be uploaded.",
-        "3db83fc58a": "No remote project path is available for attachments.",
+        "3db83fc58a": "No project path is available on this host for attachments.",
         "ba6cb77082": "Failed to connect to project."
       },
       "useGlobalFileDrop": {
@@ -3233,7 +3233,7 @@
           "e52454b7f6": "Open as Folder",
           "05b33a17a9": "Cancel",
           "8fba4b8cbb": "This folder isn't a Git repository. You'll have the editor, terminal, and search, but Git-based features won't be available.",
-          "c49fb13492": "Failed to add remote folder"
+          "c49fb13492": "Failed to add folder on this host"
         },
         "OrcaYamlTrustDialog": {
           "f3e2b868fb": "Run hooks",
@@ -3279,7 +3279,7 @@
           "9e060f5815": "Select folder",
           "f8b1deb1a4": "Cancel",
           "51001182e3": "Empty directory",
-          "971d85cc84": "Opens as a remote project · {{value0}}",
+          "971d85cc84": "Opens as a project on this host · {{value0}}",
           "00c4235c10": "No matches for '{{value0}}'"
         },
         "RemoveFolderDialog": {
@@ -8576,9 +8576,9 @@
         "RepoStep": {
           "e8fdb36338": "Scanning repositories. Click to stop.",
           "b7c4da0504": "SSH? Set hosts up in Settings",
-          "c33b190ca3": "Server paths only",
+          "c33b190ca3": "Host paths only",
           "7b679207e4": "Workspace",
-          "24c7c8696c": "Clone into server path",
+          "24c7c8696c": "Clone into host path",
           "7932e95f68": "Clone",
           "955134915e": "git@github.com:org/repo.git",
           "288d8444b7": "Paste an HTTPS or SSH URL.",
@@ -8589,14 +8589,14 @@
           "e8214aa632": "Open as Folder",
           "3863747c56": "Add Git Project",
           "2ebbc26343": "/home/user/project",
-          "466108ab89": "Enter a path that exists on the runtime server.",
-          "8cab104e3c": "Open a server project",
+          "466108ab89": "Enter a path that exists on the selected host.",
+          "8cab104e3c": "Open a project on this host",
           "2d20200346": "Import repositories",
           "27ca610db1": "Back",
           "cecd6593fa": "Scanned folder:",
           "c7af322fc3": "Stop scanning",
           "c3d9d44ca2": "Stop scan",
-          "cf23006ba7": "Runtime server",
+          "cf23006ba7": "Selected host",
           "7ec3f48820": "/home/user",
           "2e6438dd34": "{{value0}}Found {{value1}} {{value2}} in this folder."
         },

@@ -1388,7 +1388,7 @@ function Settings(): React.JSX.Element {
                       title={translate('auto.components.settings.Settings.9b02492d1f', 'SSH Hosts')}
                       description={translate(
                         'auto.components.settings.Settings.c2ee313198',
-                        'Remote SSH hosts for files, terminals, and git.'
+                        'SSH host access for files, terminals, and git.'
                       )}
                       searchEntries={getSectionSearchEntries('ssh')}
                     >
