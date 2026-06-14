@@ -1671,7 +1671,9 @@
               "62703b1dc4": "La fusión automática de GitHub está habilitada para esta solicitud de extracción",
               "48d75ae118": "Deshabilitar la fusión automática",
               "a5b66afb58": "Comprobaciones aprobadas",
-              "fbd4f57f0a": "Comprobaciones aprobadas. La elegibilidad de fusión se volverá a comprobar antes de fusionar."
+              "fbd4f57f0a": "Comprobaciones aprobadas. La elegibilidad de fusión se volverá a comprobar antes de fusionar.",
+              "4ab19a62ef": "Habilitar la fusión automática",
+              "8f6cb3772f": "Fusionar esta solicitud de extracción automáticamente cuando se cumplan los requisitos"
             }
           }
         },
@@ -3963,8 +3965,22 @@
           "terminalTitle": "Instalar habilidad de Agent de Linear",
           "terminalAria": "Terminal de instalación de la habilidad de Agent de Linear",
           "install": "Instalar CLI y habilidad",
+          "successTitle": "El acceso a tickets de Linear está listo",
+          "successDescription": "Los Agents ya pueden leer y actualizar tickets de Linear enlazados desde este espacio de trabajo.",
+          "successDescriptionWsl": "Los Agents de WSL ya pueden usar tickets de Linear enlazados desde este espacio de trabajo.",
+          "successDescriptionRemote": "Los Agents del host ya pueden usar tickets de Linear enlazados. Los entornos de Agent remotos aún pueden necesitar su propia configuración.",
+          "successStatus": "Acceso a tickets de Linear listo",
+          "done": "Listo",
           "wslCopy": "Instálala para traspasos de Agent en WSL desde trabajo Linear enlazado.",
-          "wslLabel": "WSL predeterminado"
+          "wslLabel": "WSL predeterminado",
+          "toastMissingCliAndSkill": "Faltan la CLI de Orca y la habilidad de Linear",
+          "toastMissingCli": "Falta la CLI de Orca",
+          "toastMissingSkill": "Falta la habilidad de Linear",
+          "toastInstallCliAndSkillDescription": "Instala la CLI de Orca y la habilidad de Linear para permitir que tus Agents lean y editen tareas de Linear.",
+          "toastInstallCliDescription": "Instala la CLI de Orca para permitir que tus Agents lean y editen tareas de Linear.",
+          "toastInstallSkillDescription": "Instala la habilidad de Linear para permitir que tus Agents lean y editen tareas de Linear a través de la CLI de Orca.",
+          "toastRemoteDescription": "{{value0}} Los entornos de Agent remotos pueden necesitar su propia configuración.",
+          "toastWslDescription": "{{value0}} Esta configuración se ejecuta en el runtime de Agent WSL seleccionado."
         },
         "FolderWorkspaceComposerDialog": {
           "connectFailed": "No se pudo conectar al proyecto.",
@@ -7517,6 +7533,7 @@
           "colors_only": "Colors only",
           "no_themes_found": "No custom Warp themes found.",
           "builtin_themes_hint": "Warp's preloaded themes are part of the Warp app and can't be read from disk. Orca already includes most of them, like Dracula, Gruvbox, Solarized, and Tokyo Night.",
+          "custom_theme_yaml_hint": "Los temas personalizados y de la comunidad deben existir como archivos YAML en una carpeta de temas de Warp para que la importación automática los encuentre. Si clonaste el repositorio público de temas de Warp, usa Choose Folder para importar esa copia.",
           "choose_manually": "Choose a theme YAML file or folder to import manually.",
           "skipped_files": "Skipped files",
           "more_skipped_files": "{{value0}} more skipped files.",

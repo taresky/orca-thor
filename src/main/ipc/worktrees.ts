@@ -37,6 +37,7 @@ import {
 import { gitExecFileAsync } from '../git/runner'
 import { withWorktreeSpan } from '../observability/instrumentation'
 import { resolveGitHubPrStartPoint } from '../github/pr-start-point'
+import { fetchPrHeadTrackingRef } from '../github/pr-head-tracking-ref'
 import { getDefaultRemote } from '../git/repo'
 import { listRepoWorktrees } from '../repo-worktrees'
 import { getSshGitProvider, requireSshGitProvider } from '../providers/ssh-git-dispatch'
@@ -569,7 +570,8 @@ function mergeFolderWorkspace(repo: Repo, worktreeId: string, meta: WorktreeMeta
     ...(meta.createdAt !== undefined ? { createdAt: meta.createdAt } : {}),
     ...(meta.createdWithAgent !== undefined ? { createdWithAgent: meta.createdWithAgent } : {}),
     workspaceStatus: meta.workspaceStatus ?? DEFAULT_WORKSPACE_STATUS_ID,
-    diffComments: meta.diffComments
+    diffComments: meta.diffComments,
+    mobileDiffReview: meta.mobileDiffReview
   }
 }
 
@@ -1028,6 +1030,15 @@ export function registerWorktreeHandlers(
         }
         return provider.exec(args, repo.path)
       }
+      // Why: SSH repos can't fetch over the relay's read-only git.exec channel, so
+      // route the PR head fetch through the write-capable helper instead of gitExec.
+      const fetchRemoteTrackingRef = (remote: string, branch: string): Promise<void> =>
+        fetchPrHeadTrackingRef(
+          repo,
+          repo.connectionId ? getSshGitProvider(repo.connectionId) : undefined,
+          remote,
+          branch
+        )
 
       return resolveGitHubPrStartPoint({
         repoPath: repo.path,
@@ -1036,6 +1047,7 @@ export function registerWorktreeHandlers(
         isCrossRepository: args.isCrossRepository,
         connectionId: repo.connectionId ?? null,
         gitExec,
+        fetchRemoteTrackingRef,
         resolveRemote: async () => {
           if (repo.connectionId) {
             const { stdout } = await gitExec(['remote'])

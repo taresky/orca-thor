@@ -1,16 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Info, RefreshCw, TicketCheck, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { RefreshCw, TicketCheck, X } from 'lucide-react'
 import type { CliInstallStatus } from '../../../../shared/cli-install-types'
 import type { SkillDiscoveryTarget } from '../../../../shared/skills'
 import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle
-} from '@/components/ui/dialog'
 import {
   GLOBAL_AGENT_SKILL_SOURCE_KINDS,
   useInstalledAgentSkill
@@ -20,17 +12,28 @@ import {
   buildAgentFeatureSkillInstallCommand
 } from '@/lib/agent-feature-install-commands'
 import {
-  AGENT_SKILL_CLI_PREREQUISITE_NOTICE,
   ensureOrcaCliAvailableForAgentSkillTerminal,
   isOrcaCliAvailableOnPath
 } from '@/lib/agent-skill-cli-prerequisite'
 import { cn } from '@/lib/utils'
-import { AgentSkillSetupPanel } from '../settings/AgentSkillSetupPanel'
 import {
   buildSkillInstallCommandForRuntime,
   ensureWslCliAvailableForAgentSkillTerminal,
   getWslCliDistroRequest
 } from '../settings/CliSkillRuntimeSetup'
+import {
+  getLinearAgentSkillSetupInlineRuntimeCopy,
+  getLinearAgentSkillSetupMissingLabel,
+  getLinearAgentSkillSetupToastDescription,
+  getLinearAgentSkillSetupToastTitle
+} from './linear-agent-skill-setup-copy'
+import {
+  dismissLinearAgentSkillSetupReminderToast,
+  resetLinearAgentSkillSetupReminderToastForRuntime,
+  resetLinearAgentSkillSetupReminderToastState,
+  snoozeLinearAgentSkillSetupReminderToast,
+  useLinearAgentSkillSetupReminderToast
+} from './linear-agent-skill-setup-reminder-toast'
 import {
   getCurrentPlatform,
   getLinearPromptAgentRuntime,
@@ -39,15 +42,12 @@ import {
   readLocalDismissed,
   type LinearAgentSkillPromptSettings
 } from './linear-agent-skill-runtime'
+import { LinearAgentSkillSetupDialog } from './LinearAgentSkillSetupDialog'
 import { translate } from '@/i18n/i18n'
 
-// Why: closing the workspace modal means "not now"; keep it quiet for this
-// app session without turning a casual close into a permanent dismissal.
-const sessionSnoozedRuntimeKeys = new Set<string>()
-
 export const _linearAgentSkillSetupPromptInternalsForTests = {
-  resetSessionSnoozes(): void {
-    sessionSnoozedRuntimeKeys.clear()
+  resetSessionReminders(): void {
+    resetLinearAgentSkillSetupReminderToastState()
   }
 }
 
@@ -60,6 +60,8 @@ type LinearAgentSkillSetupPromptProps = {
   className?: string
 }
 
+type SetupCheckResult = 'idle' | 'checking' | 'ready'
+
 export function LinearAgentSkillSetupPrompt({
   linked,
   remote,
@@ -71,10 +73,25 @@ export function LinearAgentSkillSetupPrompt({
   const [cliStatus, setCliStatus] = useState<CliInstallStatus | null>(null)
   const [cliLoading, setCliLoading] = useState(linked)
   const [setupDialogOpen, setSetupDialogOpen] = useState(false)
+  const [setupCheckResult, setSetupCheckResult] = useState<SetupCheckResult>('idle')
+  const [activeSetupCheckIdentity, setActiveSetupCheckIdentity] = useState<string | null>(null)
   const agentRuntime = useMemo(
     () => getLinearPromptAgentRuntime(settings, currentPlatform, remote),
     [currentPlatform, remote, settings]
   )
+  const setupCheckIdentity = useMemo(
+    () =>
+      JSON.stringify({
+        remote,
+        runtime: agentRuntime.runtime,
+        wslDistro: agentRuntime.wslDistro ?? null,
+        activeRuntimeEnvironmentId: settings?.activeRuntimeEnvironmentId ?? null
+      }),
+    [agentRuntime.runtime, agentRuntime.wslDistro, remote, settings?.activeRuntimeEnvironmentId]
+  )
+  const currentSetupCheckIdentityRef = useRef(setupCheckIdentity)
+  const cliRefreshGenerationRef = useRef(0)
+  currentSetupCheckIdentityRef.current = setupCheckIdentity
   const skillDiscoveryTarget = useMemo<SkillDiscoveryTarget | undefined>(
     () =>
       agentRuntime.runtime === 'wsl'
@@ -85,9 +102,6 @@ export function LinearAgentSkillSetupPrompt({
   const localDismissStorageKey = getLocalDismissStorageKey(agentRuntime)
   const [localDismissed, setLocalDismissed] = useState(() =>
     readLocalDismissed(localDismissStorageKey)
-  )
-  const [sessionSnoozed, setSessionSnoozed] = useState(() =>
-    sessionSnoozedRuntimeKeys.has(localDismissStorageKey)
   )
   const skill = useInstalledAgentSkill(LINEAR_TICKETS_SKILL_NAME, {
     enabled: linked,
@@ -107,85 +121,204 @@ export function LinearAgentSkillSetupPrompt({
     settings,
     agentRuntime
   )
-  const dismissed = localDismissed || sessionSnoozed
-
   useEffect(() => {
     setLocalDismissed(readLocalDismissed(localDismissStorageKey))
-    setSessionSnoozed(sessionSnoozedRuntimeKeys.has(localDismissStorageKey))
   }, [localDismissStorageKey])
 
+  const writeCliStatusIfCurrent = useCallback(
+    (requestIdentity: string, requestGeneration: number, write: () => void): void => {
+      if (
+        requestGeneration === cliRefreshGenerationRef.current &&
+        currentSetupCheckIdentityRef.current === requestIdentity
+      ) {
+        write()
+      }
+    },
+    []
+  )
+
+  const writeCliStatusForIdentity = useCallback((requestIdentity: string, write: () => void) => {
+    if (currentSetupCheckIdentityRef.current === requestIdentity) {
+      write()
+    }
+  }, [])
+
   const refreshCliStatus = useCallback(async (): Promise<void> => {
+    const requestIdentity = setupCheckIdentity
+    const requestGeneration = ++cliRefreshGenerationRef.current
+    const writeIfCurrent = (write: () => void): void => {
+      writeCliStatusIfCurrent(requestIdentity, requestGeneration, write)
+    }
     if (!linked) {
-      setCliStatus(null)
-      setCliLoading(false)
+      writeIfCurrent(() => {
+        setCliStatus(null)
+        setCliLoading(false)
+      })
       return
     }
     setCliLoading(true)
     try {
-      setCliStatus(
-        await (agentRuntime.runtime === 'wsl'
-          ? window.api.cli.getWslInstallStatus(getWslCliDistroRequest(agentRuntime))
-          : window.api.cli.getInstallStatus())
-      )
+      const nextStatus = await (agentRuntime.runtime === 'wsl'
+        ? window.api.cli.getWslInstallStatus(getWslCliDistroRequest(agentRuntime))
+        : window.api.cli.getInstallStatus())
+      writeIfCurrent(() => setCliStatus(nextStatus))
     } catch {
-      setCliStatus(null)
+      writeIfCurrent(() => setCliStatus(null))
     } finally {
-      setCliLoading(false)
+      writeIfCurrent(() => setCliLoading(false))
     }
-  }, [agentRuntime, linked])
+  }, [agentRuntime, linked, setupCheckIdentity, writeCliStatusIfCurrent])
 
   useEffect(() => {
     void refreshCliStatus()
   }, [refreshCliStatus])
 
   const cliAvailable = isOrcaCliAvailableOnPath(cliStatus)
-  const missingSetup =
-    linked && !dismissed && !cliLoading && !skill.loading && !(cliAvailable && skill.installed)
+  const setupReady = linked && !cliLoading && !skill.loading && cliAvailable && skill.installed
+  const missingSetup = linked && !localDismissed && !cliLoading && !skill.loading && !setupReady
+  const explicitCheckMatchesContext = activeSetupCheckIdentity === setupCheckIdentity
+  const showCheckingModal =
+    surface === 'modal' &&
+    setupDialogOpen &&
+    setupCheckResult === 'checking' &&
+    explicitCheckMatchesContext
+  const showSuccessModal =
+    surface === 'modal' &&
+    setupDialogOpen &&
+    setupCheckResult === 'ready' &&
+    explicitCheckMatchesContext
+  const showSetupModal = setupDialogOpen && (missingSetup || showCheckingModal || showSuccessModal)
 
   useEffect(() => {
-    if (surface === 'modal' && missingSetup) {
-      setSetupDialogOpen(true)
+    if (setupCheckResult === 'idle') {
+      return
     }
-  }, [missingSetup, surface])
-
+    if (!explicitCheckMatchesContext) {
+      setSetupCheckResult('idle')
+      setActiveSetupCheckIdentity(null)
+      return
+    }
+    // Why: refreshes update CLI and skill state independently, so success is
+    // promoted only after the current render observes both ready for this target.
+    if (setupCheckResult === 'checking' && setupReady) {
+      setSetupCheckResult('ready')
+      return
+    }
+    if (missingSetup) {
+      setSetupCheckResult('idle')
+    }
+  }, [explicitCheckMatchesContext, missingSetup, setupCheckResult, setupReady])
   const dismissPermanently = (): void => {
     localStorage.setItem(localDismissStorageKey, '1')
     setLocalDismissed(true)
     setSetupDialogOpen(false)
+    dismissLinearAgentSkillSetupReminderToast(localDismissStorageKey)
   }
 
+  const closeSuccessModal = (): void => {
+    setSetupDialogOpen(false)
+    resetLinearAgentSkillSetupReminderToastForRuntime(localDismissStorageKey)
+  }
+
+  const successDescription = remote
+    ? translate(
+        'auto.components.sidebar.LinearAgentSkillSetupPrompt.successDescriptionRemote',
+        'Host agents can now use linked Linear tickets. Remote agent environments may still need their own setup.'
+      )
+    : agentRuntime.runtime === 'wsl'
+      ? translate(
+          'auto.components.sidebar.LinearAgentSkillSetupPrompt.successDescriptionWsl',
+          'WSL agents can now use linked Linear tickets from this workspace.'
+        )
+      : translate(
+          'auto.components.sidebar.LinearAgentSkillSetupPrompt.successDescription',
+          'Agents can now read and update linked Linear tickets from this workspace.'
+        )
   const snoozeForSession = (): void => {
-    sessionSnoozedRuntimeKeys.add(localDismissStorageKey)
-    setSessionSnoozed(true)
+    snoozeLinearAgentSkillSetupReminderToast(localDismissStorageKey)
     setSetupDialogOpen(false)
   }
 
-  const missingLabel =
-    !cliAvailable && !skill.installed
-      ? translate(
-          'auto.components.sidebar.LinearAgentSkillSetupPrompt.missingCliAndSkill',
-          'Orca CLI and Linear agent skill are missing.'
-        )
-      : !cliAvailable
-        ? translate(
-            'auto.components.sidebar.LinearAgentSkillSetupPrompt.missingCli',
-            'Orca CLI is missing.'
-          )
-        : translate(
-            'auto.components.sidebar.LinearAgentSkillSetupPrompt.missingSkill',
-            'Linear agent skill is missing.'
-          )
+  const missingLabel = getLinearAgentSkillSetupMissingLabel(cliAvailable, skill.installed)
 
-  if (!missingSetup) {
+  const toastTitle = getLinearAgentSkillSetupToastTitle(cliAvailable, skill.installed)
+
+  const toastDescription = getLinearAgentSkillSetupToastDescription(
+    cliAvailable,
+    skill.installed,
+    remote,
+    agentRuntime
+  )
+  const openSetupDialog = useCallback(() => setSetupDialogOpen(true), [])
+
+  useLinearAgentSkillSetupReminderToast({
+    localDismissStorageKey,
+    missingSetup,
+    setupDialogOpen,
+    surface,
+    toastDescription,
+    toastTitle,
+    openSetupDialog
+  })
+
+  if (surface !== 'modal' && !missingSetup) {
+    return null
+  }
+
+  if (surface === 'modal' && !showSetupModal) {
     return null
   }
 
   const setupDialog = (
-    <Dialog
+    <LinearAgentSkillSetupDialog
       open={setupDialogOpen}
+      showSuccess={showSuccessModal}
+      successDescription={successDescription}
+      missingLabel={missingLabel}
+      command={command}
+      terminalShellOverride={terminalShellOverride}
+      installed={skill.installed}
+      loading={showCheckingModal || cliLoading || skill.loading}
+      error={skill.error}
+      getPrerequisiteStatus={
+        agentRuntime.runtime === 'wsl'
+          ? () => window.api.cli.getWslInstallStatus(getWslCliDistroRequest(agentRuntime))
+          : undefined
+      }
+      onBeforeOpenTerminal={async () => {
+        const requestIdentity = setupCheckIdentity
+        const writeIfCurrent = (write: () => void): void => {
+          writeCliStatusForIdentity(requestIdentity, write)
+        }
+        const nextStatus =
+          agentRuntime.runtime === 'wsl'
+            ? await ensureWslCliAvailableForAgentSkillTerminal(agentRuntime)
+            : await ensureOrcaCliAvailableForAgentSkillTerminal({
+                onStatusChange: (nextCliStatus) => {
+                  writeIfCurrent(() => setCliStatus(nextCliStatus))
+                }
+              })
+        if (agentRuntime.runtime === 'wsl') {
+          writeIfCurrent(() => setCliStatus(nextStatus))
+        }
+      }}
+      onRecheck={async () => {
+        if (surface === 'modal') {
+          setActiveSetupCheckIdentity(setupCheckIdentity)
+          setSetupCheckResult('checking')
+          await Promise.all([refreshCliStatus(), skill.refresh()])
+          return
+        }
+        await refreshCliStatus()
+        await skill.refresh()
+      }}
       onOpenChange={(open) => {
         if (open) {
           setSetupDialogOpen(true)
+          return
+        }
+        if (showSuccessModal) {
+          closeSuccessModal()
           return
         }
         if (surface === 'modal') {
@@ -194,97 +327,10 @@ export function LinearAgentSkillSetupPrompt({
         }
         setSetupDialogOpen(false)
       }}
-    >
-      <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-[640px]">
-        <div className="px-6 pt-6 pr-14">
-          <DialogHeader>
-            <DialogTitle className="sr-only">
-              {translate(
-                'auto.components.sidebar.LinearAgentSkillSetupPrompt.modalTitle',
-                'Enable Linear ticket access'
-              )}
-            </DialogTitle>
-            <DialogDescription className="sr-only">
-              {translate(
-                'auto.components.sidebar.LinearAgentSkillSetupPrompt.modalDescription',
-                'Install the Linear skill from a terminal.'
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex items-start gap-2 text-base font-semibold leading-snug text-foreground">
-            <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-            <p>
-              {translate(
-                'auto.components.sidebar.LinearAgentSkillSetupPrompt.modalPrompt',
-                'Enable agents to read and edit the attached Linear ticket.'
-              )}
-            </p>
-          </div>
-        </div>
-        <AgentSkillSetupPanel
-          className="px-6 pt-4 pb-3"
-          variant="inline"
-          hideHeader
-          title={translate(
-            'auto.components.sidebar.LinearAgentSkillSetupPrompt.modalTitle',
-            'Enable Linear ticket access'
-          )}
-          description={missingLabel}
-          command={command}
-          terminalTitle={translate(
-            'auto.components.sidebar.LinearAgentSkillSetupPrompt.terminalTitle',
-            'Install Linear agent skill'
-          )}
-          terminalAriaLabel={translate(
-            'auto.components.sidebar.LinearAgentSkillSetupPrompt.terminalAria',
-            'Linear agent skill installer terminal'
-          )}
-          terminalWorktreeId="sidebar-linear-agent-skill-setup"
-          terminalHeightPx={240}
-          terminalShellOverride={terminalShellOverride}
-          installed={skill.installed}
-          loading={skill.loading}
-          error={skill.error}
-          installLabel={translate(
-            'auto.components.sidebar.LinearAgentSkillSetupPrompt.install',
-            'Install CLI & Skill'
-          )}
-          preInstallNotice={AGENT_SKILL_CLI_PREREQUISITE_NOTICE}
-          getPrerequisiteStatus={
-            agentRuntime.runtime === 'wsl'
-              ? () => window.api.cli.getWslInstallStatus(getWslCliDistroRequest(agentRuntime))
-              : undefined
-          }
-          isPrerequisiteAvailable={isOrcaCliAvailableOnPath}
-          onBeforeOpenTerminal={async () => {
-            const nextStatus =
-              agentRuntime.runtime === 'wsl'
-                ? await ensureWslCliAvailableForAgentSkillTerminal(agentRuntime)
-                : await ensureOrcaCliAvailableForAgentSkillTerminal({
-                    onStatusChange: setCliStatus
-                  })
-            if (agentRuntime.runtime === 'wsl') {
-              setCliStatus(nextStatus)
-            }
-          }}
-          onRecheck={async () => {
-            await refreshCliStatus()
-            await skill.refresh()
-          }}
-        />
-        <DialogFooter className="px-6 pb-6">
-          <Button type="button" variant="ghost" size="sm" onClick={dismissPermanently}>
-            {translate(
-              'auto.components.sidebar.LinearAgentSkillSetupPrompt.dontShowAgain',
-              "Don't show again"
-            )}
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={snoozeForSession}>
-            {translate('auto.components.sidebar.LinearAgentSkillSetupPrompt.notNow', 'Not now')}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      onDismissPermanently={dismissPermanently}
+      onSnoozeForSession={snoozeForSession}
+      onDone={closeSuccessModal}
+    />
   )
 
   if (surface === 'modal') {
@@ -310,21 +356,7 @@ export function LinearAgentSkillSetupPrompt({
             )}
           </div>
           <p className="leading-snug">
-            {missingLabel}{' '}
-            {remote
-              ? translate(
-                  'auto.components.sidebar.LinearAgentSkillSetupPrompt.remoteCopy',
-                  'This installs host setup; remote agent environments may need separate setup.'
-                )
-              : agentRuntime.runtime === 'wsl'
-                ? translate(
-                    'auto.components.sidebar.LinearAgentSkillSetupPrompt.wslCopy',
-                    'Install it for WSL agent handoffs from linked Linear work.'
-                  )
-                : translate(
-                    'auto.components.sidebar.LinearAgentSkillSetupPrompt.hostCopy',
-                    'Install it for host agent handoffs from linked Linear work.'
-                  )}
+            {missingLabel} {getLinearAgentSkillSetupInlineRuntimeCopy(remote, agentRuntime)}
           </p>
         </div>
         <Button

@@ -1671,7 +1671,9 @@
               "62703b1dc4": "为此PR启用了 GitHub 自动合并",
               "48d75ae118": "禁用自动合并",
               "a5b66afb58": "检查已通过",
-              "fbd4f57f0a": "检查已通过。合并资格将在合并前再次验证。"
+              "fbd4f57f0a": "检查已通过。合并资格将在合并前再次验证。",
+              "4ab19a62ef": "启用自动合并",
+              "8f6cb3772f": "满足要求后自动合并此PR"
             }
           }
         },
@@ -3963,8 +3965,22 @@
           "terminalTitle": "安装 Linear agent 技能",
           "terminalAria": "Linear agent 技能安装 terminal",
           "install": "安装 CLI 和技能",
+          "successTitle": "Linear 议题访问已就绪",
+          "successDescription": "Agent 现在可以从此工作区读取和更新已链接的 Linear 议题。",
+          "successDescriptionWsl": "WSL Agent 现在可以从此工作区使用已链接的 Linear 议题。",
+          "successDescriptionRemote": "主机 Agent 现在可以使用已链接的 Linear 议题。远程 Agent 环境可能仍需要单独设置。",
+          "successStatus": "Linear 议题访问已就绪",
+          "done": "完成",
           "wslCopy": "为已链接 Linear 工作的 WSL agent 交接安装此项。",
-          "wslLabel": "WSL 默认值"
+          "wslLabel": "WSL 默认值",
+          "toastMissingCliAndSkill": "缺少 Orca CLI 和 Linear 技能",
+          "toastMissingCli": "缺少 Orca CLI",
+          "toastMissingSkill": "缺少 Linear 技能",
+          "toastInstallCliAndSkillDescription": "安装 Orca CLI 和 Linear 技能，让 Agents 可以读取并编辑 Linear 任务。",
+          "toastInstallCliDescription": "安装 Orca CLI，让 Agents 可以读取并编辑 Linear 任务。",
+          "toastInstallSkillDescription": "安装 Linear 技能，让 Agents 可以通过 Orca CLI 读取并编辑 Linear 任务。",
+          "toastRemoteDescription": "{{value0}} 远程 Agent 环境可能仍需要自己的设置。",
+          "toastWslDescription": "{{value0}} 此设置会在所选 WSL Agent 运行时中执行。"
         },
         "FolderWorkspaceComposerDialog": {
           "connectFailed": "无法连接到项目。",
@@ -7517,6 +7533,7 @@
           "colors_only": "Colors only",
           "no_themes_found": "No custom Warp themes found.",
           "builtin_themes_hint": "Warp's preloaded themes are part of the Warp app and can't be read from disk. Orca already includes most of them, like Dracula, Gruvbox, Solarized, and Tokyo Night.",
+          "custom_theme_yaml_hint": "自定义和社区主题必须以 YAML 文件形式存在于 Warp themes 文件夹中，自动导入才能发现它们。如果你克隆了 Warp 的公开主题仓库，请使用 Choose Folder 导入该仓库副本。",
           "choose_manually": "Choose a theme YAML file or folder to import manually.",
           "skipped_files": "Skipped files",
           "more_skipped_files": "{{value0}} more skipped files.",

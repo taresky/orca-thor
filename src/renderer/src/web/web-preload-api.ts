@@ -977,6 +977,13 @@ function createRuntimeEnvironmentsApi(): NonNullable<Partial<PreloadApi>['runtim
       }
       return { removed: redactStoredWebRuntimeEnvironment(environment) }
     },
+    disconnect: async ({ selector }) => {
+      const environment = resolveEnvironment(selector)
+      if (activeEnvironment?.id === environment.id) {
+        disconnectActiveRuntimeEnvironment()
+      }
+      return { disconnected: redactStoredWebRuntimeEnvironment(environment) }
+    },
     getStatus: ({ selector, timeoutMs }) =>
       callEnvironmentEnvelope<RuntimeStatus>(selector, 'status.get', undefined, timeoutMs),
     call: ({ selector, method, params, timeoutMs }) =>

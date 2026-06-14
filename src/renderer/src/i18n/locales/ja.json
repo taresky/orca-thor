@@ -1671,7 +1671,9 @@
               "62703b1dc4": "このPRでは GitHub 自動マージが有効になっています",
               "48d75ae118": "自動マージを無効にする",
               "a5b66afb58": "チェックは通過しました",
-              "fbd4f57f0a": "チェックは通過しました。マージ可否はマージ前に再確認されます。"
+              "fbd4f57f0a": "チェックは通過しました。マージ可否はマージ前に再確認されます。",
+              "4ab19a62ef": "自動マージを有効にする",
+              "8f6cb3772f": "要件が満たされると、このプルリクエストを自動的にマージします"
             }
           }
         },
@@ -3963,8 +3965,22 @@
           "terminalTitle": "Linear agent スキルをインストール",
           "terminalAria": "Linear agent スキルのインストール terminal",
           "install": "CLI とスキルをインストール",
+          "successTitle": "Linear チケットアクセスの準備ができました",
+          "successDescription": "Agents はこのワークスペースからリンクされた Linear チケットを読み取り、更新できるようになりました。",
+          "successDescriptionWsl": "WSL agents はこのワークスペースからリンクされた Linear チケットを使用できるようになりました。",
+          "successDescriptionRemote": "ホスト agents はリンクされた Linear チケットを使用できるようになりました。リモート agent 環境ではまだ独自の設定が必要な場合があります。",
+          "successStatus": "Linear チケットアクセス準備完了",
+          "done": "完了",
           "wslCopy": "リンクされた Linear 作業からの WSL agent 引き継ぎ用にインストールします。",
-          "wslLabel": "WSL 既定"
+          "wslLabel": "WSL 既定",
+          "toastMissingCliAndSkill": "Orca CLI と Linear スキルがありません",
+          "toastMissingCli": "Orca CLI がありません",
+          "toastMissingSkill": "Linear スキルがありません",
+          "toastInstallCliAndSkillDescription": "Orca CLI と Linear スキルをインストールして、agents が Linear タスクを読み書きできるようにします。",
+          "toastInstallCliDescription": "Orca CLI をインストールして、agents が Linear タスクを読み書きできるようにします。",
+          "toastInstallSkillDescription": "Linear スキルをインストールして、agents が Orca CLI を通じて Linear タスクを読み書きできるようにします。",
+          "toastRemoteDescription": "{{value0}} リモート agent 環境では独自の設定が必要な場合があります。",
+          "toastWslDescription": "{{value0}} この設定は選択した WSL agent ランタイムで実行されます。"
         },
         "FolderWorkspaceComposerDialog": {
           "connectFailed": "プロジェクトに接続できませんでした。",
@@ -4671,6 +4687,7 @@
           "colors_only": "カラーのみ",
           "no_themes_found": "カスタム Warp テーマが見つかりませんでした。",
           "builtin_themes_hint": "Warp のプリロードテーマは Warp アプリ本体に含まれており、ディスクから読み取ることはできません。Dracula、Gruvbox、Solarized、Tokyo Night など、その多くは Orca の組み込みテーマとして既に利用できます。",
+          "custom_theme_yaml_hint": "カスタムテーマやコミュニティテーマは、Warp の themes フォルダー内に YAML ファイルとして存在している必要があります。Warp の公開 themes リポジトリをクローンした場合は、「フォルダーを選択」でそのチェックアウトをインポートしてください。",
           "choose_manually": "テーマ YAML ファイルまたはフォルダーを選択して手動でインポートします。",
           "skipped_files": "スキップされたファイル",
           "more_skipped_files": "他 {{value0}} 件のファイルがスキップされました。",
