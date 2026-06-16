@@ -3895,7 +3895,9 @@
           "0dc4d1b657": "복제 대상의 서버 경로를 입력합니다."
         },
         "useAddRepoLocalFolderFlow": {
-          "7ab10e4974": "원격 런타임에서 프로젝트를 추가하려면 서버 경로를 사용하세요."
+          "7ab10e4974": "원격 런타임에서 프로젝트를 추가하려면 서버 경로를 사용하세요.",
+          "skippedBatchFolders": "일부 폴더를 건너뛰었습니다",
+          "skippedBatchFoldersDescription": "건너뛴 폴더를 검토하거나 확인하려면 개별적으로 추가하세요."
         },
         "useAddRepoNestedImportFlow": {
           "680cac2c82": "{{value0}} 실패",
@@ -8704,6 +8706,7 @@
           "AiVaultPanel": {
             "resumeCommandCopied": "Resume command copied",
             "valueCopied": "{{value0}} copied",
+            "valueCopyFailed": "{{value0}}을(를) 복사할 수 없습니다",
             "openWorkspaceBeforeResuming": "Open a workspace before resuming a session.",
             "localWorkspacesOnly": "Resume from history is only available in local workspaces.",
             "agentSessionQueued": "{{value0}} session queued",
@@ -8717,8 +8720,10 @@
             "transcriptsSkipped": "{{count}} transcript skipped",
             "noAgentSessionsFound": "No agent sessions found",
             "noSessionsMatchFilters": "No sessions match the current filters",
-            "sessionId": "Session ID",
-            "logPath": "Log path"
+            "sessionId": "세션 ID",
+            "logPath": "로그 경로",
+            "agents": "에이전트",
+            "sessionsShownCompact": "{{value0}} 표시됨"
           },
           "AiVaultPanelControls": {
             "scanningSessions": "Scanning sessions",
@@ -8781,7 +8786,8 @@
             "hoursAgo": "{{value0}}h ago",
             "daysAgo": "{{value0}}d ago",
             "monthsAgo": "{{value0}}mo ago",
-            "yearsAgo": "{{value0}}y ago"
+            "yearsAgo": "{{value0}}y ago",
+            "sessionId": "세션 ID"
           },
           "AiVaultSessionRow": {
             "resumeAgentSession": "Resume {{value0}} session",
@@ -8793,7 +8799,12 @@
             "copySessionId": "Copy Session ID",
             "copyLogPath": "Copy Log Path",
             "messageCount": "{{value0}} msgs",
-            "tokenCount": "{{value0}} tok"
+            "tokenCount": "{{value0}} tok",
+            "toggleSessionDetails": "{{value0}} 세션 세부정보",
+            "hideDetails": "세부정보 숨기기",
+            "showDetails": "세부정보 표시",
+            "moreSessionActions": "세션 추가 작업",
+            "moreActions": "추가 작업"
           },
           "FileExplorerNameFilter": {
             "26fb73c6e3": "파일 찾기",

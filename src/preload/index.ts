@@ -477,6 +477,8 @@ const api = {
 
     pickFolder: () => ipcRenderer.invoke('repos:pickFolder'),
 
+    pickFolders: () => ipcRenderer.invoke('repos:pickFolders'),
+
     pickDirectory: () => ipcRenderer.invoke('repos:pickDirectory'),
 
     clone: (args) => ipcRenderer.invoke('repos:clone', args),
@@ -1105,6 +1107,7 @@ const api = {
       sourceContext?: TaskSourceContext | null
       prNumber: number
       enabled: boolean
+      method?: 'merge' | 'squash' | 'rebase'
       prRepo?: { owner: string; repo: string } | null
     }): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke('gh:setPRAutoMerge', args),

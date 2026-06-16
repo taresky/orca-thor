@@ -786,6 +786,7 @@ export type PreloadApi = {
       > & { sourceControlAi?: Repo['sourceControlAi'] | null }
     }) => Promise<Repo>
     pickFolder: () => Promise<string | null>
+    pickFolders: () => Promise<string[]>
     pickDirectory: () => Promise<string | null>
     clone: (args: { url: string; destination: string }) => Promise<Repo>
     cloneRemote: (args: { connectionId: string; url: string; destination: string }) => Promise<Repo>
@@ -1266,6 +1267,7 @@ export type PreloadApi = {
       args: GitHubRepoSelectorArgs & {
         prNumber: number
         enabled: boolean
+        method?: 'merge' | 'squash' | 'rebase'
         prRepo?: GitHubOwnerRepo | null
       }
     ) => Promise<{ ok: true } | { ok: false; error: string }>

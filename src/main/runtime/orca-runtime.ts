@@ -8557,10 +8557,18 @@ export class OrcaRuntimeService {
     repoSelector: string,
     prNumber: number,
     enabled: boolean,
+    method?: 'merge' | 'squash' | 'rebase',
     prRepo?: GitHubOwnerRepo | null
   ): Promise<Awaited<ReturnType<typeof setPRAutoMerge>>> {
     const repo = await this.resolveRepoSelector(repoSelector)
-    return setPRAutoMerge(repo.path, prNumber, enabled, repo.connectionId ?? null, prRepo ?? null)
+    return setPRAutoMerge(
+      repo.path,
+      prNumber,
+      enabled,
+      method,
+      repo.connectionId ?? null,
+      prRepo ?? null
+    )
   }
 
   async updateRepoPRState(

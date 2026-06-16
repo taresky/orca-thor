@@ -1593,9 +1593,9 @@ describe('web GitHub preload API', () => {
       },
       {
         key: 'setPRAutoMerge',
-        args: { repoPath, prNumber: 7, enabled: true },
+        args: { repoPath, prNumber: 7, enabled: true, method: 'squash' },
         expectedMethod: 'github.setPRAutoMerge',
-        expectedParams: withRepo({ repoPath, prNumber: 7, enabled: true })
+        expectedParams: withRepo({ repoPath, prNumber: 7, enabled: true, method: 'squash' })
       },
       {
         key: 'updatePRState',
