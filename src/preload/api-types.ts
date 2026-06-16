@@ -5,7 +5,8 @@ import type {
   HostedReviewCreationEligibility,
   HostedReviewCreationEligibilityArgs,
   HostedReviewForBranchArgs,
-  HostedReviewInfo
+  HostedReviewInfo,
+  HostedReviewProvider
 } from '../shared/hosted-review'
 import type { NativeFileDropPayload } from '../shared/native-file-drop'
 import type { AppIdentity } from '../shared/app-identity'
@@ -2209,6 +2210,8 @@ export type PreloadApi = {
       title: string
       body: string
       draft: boolean
+      provider?: HostedReviewProvider
+      useTemplate?: boolean
       connectionId?: string
       sourceControlAiResolvedParams?: ResolvedSourceControlAiGenerationParams
       sourceControlAi?: SourceControlAiSettings
