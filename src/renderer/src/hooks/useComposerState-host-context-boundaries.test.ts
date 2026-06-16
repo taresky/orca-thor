@@ -98,4 +98,13 @@ describe('useComposerState host-context boundaries', () => {
     )
     expect(submitLookup).toContain('sourceContext: selectedRepoGitHubSourceContext')
   })
+
+  it('resolves quick-create base refs through the worktree-create precedence helper', () => {
+    const section = sourceBetween(HOOK_SOURCE, 'const submitBaseBranch', 'const createDisplayName')
+
+    expect(section).toContain('resolveWorktreeCreateBaseBranch')
+    expect(section).toContain('explicitBaseBranch: baseBranch')
+    expect(section).toContain('repoWorktreeBaseRef: selectedRepo.worktreeBaseRef')
+    expect(section).toContain('getRuntimeRepoBaseRefDefault')
+  })
 })

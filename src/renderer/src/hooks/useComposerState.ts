@@ -26,6 +26,7 @@ import { tuiAgentToAgentKind } from '@/lib/telemetry'
 import { isGitRepoKind } from '../../../shared/repo-kind'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import { getRuntimeRepoBaseRefDefault } from '@/runtime/runtime-repo-client'
+import { resolveWorktreeCreateBaseBranch } from '@/runtime/worktree-create-base'
 import {
   buildTaskSourceContextFromRepo,
   type TaskSourceContext
@@ -2655,11 +2656,15 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
           workspaceName,
           preserveWorkspaceNameEdits: branchNameOverridePreservesNameEdits
         })
-        const submitBaseBranch =
-          selectedRepoIsGit && !baseBranch
-            ? ((await getRuntimeRepoBaseRefDefault(selectedRepoSettings, repoId).catch(() => null))
-                ?.defaultBaseRef ?? undefined)
-            : baseBranch
+        const submitBaseBranch = selectedRepoIsGit
+          ? await resolveWorktreeCreateBaseBranch({
+              explicitBaseBranch: baseBranch,
+              repoWorktreeBaseRef: selectedRepo.worktreeBaseRef,
+              loadDefaultBaseRef: async () =>
+                (await getRuntimeRepoBaseRefDefault(selectedRepoSettings, repoId).catch(() => null))
+                  ?.defaultBaseRef
+            })
+          : undefined
         const createDisplayName =
           smartGitHubResolution?.displayName ??
           (nameIsAutoManaged ? submitTitleName?.displayName : undefined)
