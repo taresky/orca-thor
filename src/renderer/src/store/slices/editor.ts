@@ -35,6 +35,7 @@ import {
   stripCredentialsFromMessage
 } from '../../../../shared/git-remote-error'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
+import { clampMarkdownTocPanelWidth } from '../../../../shared/markdown-toc-panel-width'
 import { folderWorkspaceKey } from '../../../../shared/workspace-scope'
 import type { RemoteOpKind } from '@/components/right-sidebar/source-control-primary-action'
 import { shouldForcePushWithLeaseForUpstream } from '../../../../shared/git-upstream-status'
@@ -332,6 +333,10 @@ export type EditorSlice = {
   // true values keeps the record minimal and the default implicit.
   markdownFrontmatterVisible: Record<string, boolean>
   setMarkdownFrontmatterVisible: (fileId: string, visible: boolean) => void
+
+  // Markdown table of contents
+  markdownTocPanelWidth: number
+  setMarkdownTocPanelWidth: (width: number) => void
 
   // Right sidebar
   rightSidebarOpen: boolean
@@ -1450,6 +1455,13 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
       }
       return { markdownFrontmatterVisible: { ...s.markdownFrontmatterVisible, [fileId]: true } }
     }),
+
+  // Markdown table of contents
+  markdownTocPanelWidth: 240,
+  setMarkdownTocPanelWidth: (width) =>
+    set((s) => ({
+      markdownTocPanelWidth: clampMarkdownTocPanelWidth(width, undefined, s.markdownTocPanelWidth)
+    })),
 
   // Right sidebar
   rightSidebarOpen: false,
