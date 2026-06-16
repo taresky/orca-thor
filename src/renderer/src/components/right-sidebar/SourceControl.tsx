@@ -2477,13 +2477,11 @@ function SourceControlInner(): React.JSX.Element {
       setHostedReviewCreationState(null)
       return
     }
-    // Why: skip refetches while the user's PR flow is mid-flight. AI generation
-    // rebases the branch (changing ahead/behind), and submission runs network
-    // calls that briefly perturb the same counts. Either flip can switch
-    // canCreate to false and tear down the composer underneath the user. The
-    // post-completion eligibility refresh in handlePullRequestCreated /
-    // onBranchChangedByGeneration restores the truth once the work settles.
-    if (prGenerating || isCreatingPr) {
+    // Why: skip refetches while the user's PR flow is mid-flight. AI generation,
+    // Create PR intent, and submission can all perturb ahead/behind or dirty
+    // state temporarily. Recomputing eligibility mid-flow can tear down the
+    // composer or rotate dropdown hints before the final refresh restores truth.
+    if (prGenerating || isCreatingPr || isCreatePrIntentInFlight) {
       return
     }
     let stale = false
@@ -2531,6 +2529,7 @@ function SourceControlInner(): React.JSX.Element {
     hasUncommittedEntries,
     isBranchVisible,
     isCreatingPr,
+    isCreatePrIntentInFlight,
     isFolder,
     linkedGitHubPR,
     fallbackGitHubPRNumber,
