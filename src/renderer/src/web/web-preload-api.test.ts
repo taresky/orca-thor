@@ -309,7 +309,7 @@ describe('web settings preload API', () => {
     expect(stored.autoRenameBranchFromWorkDefaultedOn).toBe(true)
   })
 
-  it('hydrates compact worktree cards from a paired runtime', async () => {
+  it('keeps compact worktree cards local when hydrating paired runtime settings', async () => {
     const runtimeCalls: { method: string; params: unknown }[] = []
     vi.doMock('./web-runtime-client', () => ({
       WebRuntimeClient: class {
@@ -337,8 +337,8 @@ describe('web settings preload API', () => {
       compactWorktreeCards?: boolean
     }
 
-    expect(settings.compactWorktreeCards).toBe(true)
-    expect(stored.compactWorktreeCards).toBe(true)
+    expect(settings.compactWorktreeCards).toBe(false)
+    expect(stored.compactWorktreeCards).toBe(false)
     expect(runtimeCalls).toEqual([{ method: 'settings.get', params: undefined }])
   })
 
@@ -375,7 +375,7 @@ describe('web settings preload API', () => {
     expect(runtimeCalls).toEqual([{ method: 'settings.get', params: undefined }])
   })
 
-  it('forwards compact worktree card updates to a paired runtime', async () => {
+  it('keeps compact worktree card updates local for paired web clients', async () => {
     const runtimeCalls: { method: string; params: unknown }[] = []
     vi.doMock('./web-runtime-client', () => ({
       WebRuntimeClient: class {
@@ -400,10 +400,13 @@ describe('web settings preload API', () => {
 
     const settings = await globals.window.api.settings.set({ compactWorktreeCards: true })
 
+    const stored = JSON.parse(globals.storage.getItem('orca.web.settings.v1') ?? '{}') as {
+      compactWorktreeCards?: boolean
+    }
+
     expect(settings.compactWorktreeCards).toBe(true)
-    expect(runtimeCalls).toEqual([
-      { method: 'settings.update', params: { compactWorktreeCards: true } }
-    ])
+    expect(stored.compactWorktreeCards).toBe(true)
+    expect(runtimeCalls).toEqual([])
   })
 
   it('forwards new worktree card style updates to a paired runtime', async () => {

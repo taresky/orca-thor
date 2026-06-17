@@ -925,18 +925,6 @@ computeWorktreePathMock.mockImplementation(
 ensurePathWithinWorkspaceMock.mockImplementation((targetPath: string) => targetPath)
 
 describe('OrcaRuntimeService', () => {
-  it('projects compactWorktreeCards to paired client settings', () => {
-    const runtime = new OrcaRuntimeService({
-      ...store,
-      getSettings: () => ({
-        ...store.getSettings(),
-        compactWorktreeCards: true
-      })
-    } as never)
-
-    expect(runtime.getClientSettings()).toMatchObject({ compactWorktreeCards: true })
-  })
-
   it('projects experimentalNewWorktreeCardStyle to paired client settings', () => {
     const runtime = new OrcaRuntimeService({
       ...store,
@@ -947,31 +935,6 @@ describe('OrcaRuntimeService', () => {
     } as never)
 
     expect(runtime.getClientSettings()).toMatchObject({ experimentalNewWorktreeCardStyle: true })
-  })
-
-  it('accepts compactWorktreeCards updates from paired clients', () => {
-    let settings = {
-      ...store.getSettings(),
-      compactWorktreeCards: false
-    }
-    const updateSettings = vi.fn((updates: Partial<typeof settings>) => {
-      settings = { ...settings, ...updates }
-      return settings
-    })
-    const runtime = new OrcaRuntimeService({
-      ...store,
-      getSettings: () => settings,
-      updateSettings
-    } as never)
-
-    expect(runtime.updateClientSettings({ compactWorktreeCards: true })).toMatchObject({
-      compactWorktreeCards: true
-    })
-    expect(updateSettings).toHaveBeenCalledWith(
-      { compactWorktreeCards: true },
-      { notifyListeners: true }
-    )
-    expect(runtime.getClientSettings()).toMatchObject({ compactWorktreeCards: true })
   })
 
   it('accepts experimentalNewWorktreeCardStyle updates from paired clients', () => {

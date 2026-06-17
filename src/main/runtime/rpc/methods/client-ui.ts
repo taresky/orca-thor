@@ -136,7 +136,6 @@ const SettingsUpdate = z
     defaultTaskViewPreset: z
       .enum(['issues', 'my-issues', 'prs', 'my-prs', 'review', 'all'])
       .optional(),
-    compactWorktreeCards: z.boolean().optional(),
     experimentalNewWorktreeCardStyle: z.boolean().optional(),
     agentStatusHooksEnabled: z.boolean().optional(),
     defaultRepoSelection: z.array(z.string()).nullable().optional(),

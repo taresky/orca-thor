@@ -696,7 +696,6 @@ type RuntimeStore = {
     defaultRepoSelection?: GlobalSettings['defaultRepoSelection']
     defaultLinearTeamSelection?: GlobalSettings['defaultLinearTeamSelection']
     githubProjects?: GlobalSettings['githubProjects']
-    compactWorktreeCards?: GlobalSettings['compactWorktreeCards']
     experimentalNewWorktreeCardStyle?: GlobalSettings['experimentalNewWorktreeCardStyle']
     gitlabProjects?: GlobalSettings['gitlabProjects']
     experimentalWorktreeSymlinks?: boolean
@@ -2018,7 +2017,6 @@ export class OrcaRuntimeService {
     | 'defaultRepoSelection'
     | 'defaultLinearTeamSelection'
     | 'githubProjects'
-    | 'compactWorktreeCards'
     | 'experimentalNewWorktreeCardStyle'
   > {
     if (!this.store?.getSettings) {
@@ -2038,7 +2036,6 @@ export class OrcaRuntimeService {
       defaultRepoSelection: settings.defaultRepoSelection ?? null,
       defaultLinearTeamSelection: settings.defaultLinearTeamSelection ?? null,
       githubProjects: settings.githubProjects,
-      compactWorktreeCards: settings.compactWorktreeCards === true,
       experimentalNewWorktreeCardStyle: settings.experimentalNewWorktreeCardStyle === true
     }
   }
@@ -2057,7 +2054,6 @@ export class OrcaRuntimeService {
       | 'defaultRepoSelection'
       | 'defaultLinearTeamSelection'
       | 'githubProjects'
-      | 'compactWorktreeCards'
       | 'experimentalNewWorktreeCardStyle'
     >
   ): Pick<
@@ -2074,7 +2070,6 @@ export class OrcaRuntimeService {
     | 'defaultRepoSelection'
     | 'defaultLinearTeamSelection'
     | 'githubProjects'
-    | 'compactWorktreeCards'
     | 'experimentalNewWorktreeCardStyle'
   > {
     if (!this.store?.getSettings || !this.store.updateSettings) {
