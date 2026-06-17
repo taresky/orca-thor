@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   createCreatePrIntentRunToken,
+  createPrIntentCurrentTargetConflictsWithToken,
   createPrIntentGitStatusMatchesToken,
   createPrIntentRunTokenMatches,
   getCreatePrIntentStagePaths,
@@ -42,6 +43,33 @@ describe('source-control Create PR intent flow helpers', () => {
     expect(createPrIntentGitStatusMatchesToken(token, { branch: 'feature/pr' })).toBe(true)
     expect(createPrIntentGitStatusMatchesToken(token, { branch: 'refs/heads/other' })).toBe(false)
     expect(createPrIntentGitStatusMatchesToken(token, { branch: null })).toBe(false)
+  })
+
+  it('does not treat navigating to another worktree as an intent conflict', () => {
+    const token = createCreatePrIntentRunToken({
+      repoId: 'repo-1',
+      worktreeId: 'wt-1',
+      worktreePath: '/repo/wt-1',
+      branch: 'feature/pr'
+    })
+
+    expect(
+      createPrIntentCurrentTargetConflictsWithToken(token, {
+        repoId: 'repo-1',
+        worktreeId: 'wt-2',
+        worktreePath: '/repo/wt-2',
+        branch: 'other'
+      })
+    ).toBe(false)
+
+    expect(
+      createPrIntentCurrentTargetConflictsWithToken(token, {
+        repoId: 'repo-1',
+        worktreeId: 'wt-1',
+        worktreePath: '/repo/wt-1',
+        branch: 'other'
+      })
+    ).toBe(true)
   })
 
   it('stages only safe unstaged and untracked paths', () => {

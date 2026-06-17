@@ -37,6 +37,16 @@ export function createPrIntentRunTokenMatches(
   )
 }
 
+export function createPrIntentCurrentTargetConflictsWithToken(
+  token: CreatePrIntentRunToken,
+  current: CreatePrIntentCurrentTarget
+): boolean {
+  if (current.worktreeId !== token.worktreeId) {
+    return false
+  }
+  return !createPrIntentRunTokenMatches(token, current)
+}
+
 export function createPrIntentGitStatusMatchesToken(
   token: CreatePrIntentRunToken,
   status: { branch?: string | null }
