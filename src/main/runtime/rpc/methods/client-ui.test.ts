@@ -237,7 +237,10 @@ describe('client UI RPC methods', () => {
     }
     const response = await dispatcher.dispatch(makeRequest('ui.set', payload))
 
-    expect(runtime.updateUIState).toHaveBeenCalledWith(payload)
+    expect(runtime.updateUIState).toHaveBeenCalledWith({
+      ...payload,
+      worktreeCardProperties: ['status', 'unread', 'branch', 'inline-agents']
+    })
     expect(response).toMatchObject({ ok: true, result: { ui: updated } })
   })
 
@@ -327,7 +330,7 @@ describe('client UI RPC methods', () => {
     )
 
     expect(runtime.updateUIState).toHaveBeenCalledWith({
-      worktreeCardProperties: ['status', 'issue', 'pr']
+      worktreeCardProperties: ['status', 'unread', 'ci', 'issue', 'pr']
     })
     expect(response).toMatchObject({ ok: true, result: { ui: updated } })
   })
