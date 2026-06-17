@@ -56,10 +56,7 @@ import { installWindowVisibilityInterval, isWindowVisible } from '@/lib/window-v
 import { isMacAppDataPath } from '@/lib/passive-macos-app-data-access'
 import { runWorktreeDelete } from './delete-worktree-flow'
 import { WorktreeTitleInlineRename } from './WorktreeTitleInlineRename'
-import {
-  canShowWorkspaceDeleteQuickAction,
-  useWorkspaceDeleteModifierPressed
-} from './workspace-delete-quick-action'
+import { canShowWorkspaceDeleteQuickAction } from './workspace-delete-quick-action'
 import { DetachedHeadBadge } from '@/components/DetachedHeadBadge'
 import { getWorktreeGitIdentityDisplay } from '@/lib/worktree-git-identity-display'
 import { getFlushWorktreeCardPaddingLeft } from './worktree-list-indentation'
@@ -397,7 +394,6 @@ const WorktreeCard = React.memo(function WorktreeCard({
         }
     : null
   const isDeleting = deleteState?.isDeleting ?? false
-  const deleteModifierPressed = useWorkspaceDeleteModifierPressed()
 
   const showDetailedCardProperties = !compactCards
   const showIssue = cardProps.includes('issue')
@@ -602,10 +598,9 @@ const WorktreeCard = React.memo(function WorktreeCard({
     },
     [worktree.id, worktree.isUnread, updateWorktreeMeta]
   )
-  // Why: delete is destructive, so it only appears while the user is holding
-  // Option/Alt instead of being part of the ordinary hover chrome.
+  // Why: delete is destructive, so the trash icon stays hidden until row hover
+  // (or keyboard focus within the row) instead of sitting in the default chrome.
   const showDeleteQuickAction = canShowWorkspaceDeleteQuickAction({
-    deleteModifierPressed,
     isDeleting,
     isMainWorktree: worktree.isMainWorktree
   })
