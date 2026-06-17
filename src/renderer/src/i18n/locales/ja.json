@@ -509,7 +509,10 @@
         "b2ead86962": "PR ベースを解決できませんでした。",
         "a9ff236145": "一部の添付ファイルをアップロードできませんでした。",
         "3db83fc58a": "添付ファイルに使用できるリモート プロジェクト パスがありません。",
-        "ba6cb77082": "プロジェクトへの接続に失敗しました。"
+        "ba6cb77082": "プロジェクトへの接続に失敗しました。",
+        "chooseOrAddProjectBeforeWorkspace": "ワークスペースを作成する前に、プロジェクトを選択または追加してください。",
+        "folderWorkspaceCreateFailedTitle": "フォルダーワークスペースを作成できませんでした",
+        "folderWorkspaceCreateFailedMessage": "フォルダーワークスペースを作成できませんでした。上のエラー詳細を確認して、もう一度お試しください。"
       },
       "useGlobalFileDrop": {
         "38c9f034ff": "ドロップされたファイルのアップロードに失敗しました。",
@@ -1034,6 +1037,9 @@
         "7711ad5122": "ローカルセットアップコマンド",
         "e5db1b0419": "組み合わせセットアップコマンド",
         "addProjectBeforeWorkspace": "ワークスペースを作成する前にプロジェクトを追加します。",
+        "connectProjectFirst": "先にこのプロジェクトに接続してください",
+        "connectSourceLookup": "接続",
+        "reconnectSourceLookup": "再接続",
         "sshNotConnected": "SSH not connected",
         "connectingSsh": "Connecting SSH...",
         "sshAuthenticationFailed": "SSH authentication failed",
@@ -1253,7 +1259,7 @@
         "92b0f9d921": "認証されているので、再試行してください。",
         "cd8c34aac1": "gh",
         "cf82170065": "repo にスターを付けることができませんでした。確認する",
-        "30c36231c1": "Orca のおかげで時間を節約できたなら、GitHub のスターは大いに役立ちます。これは、他の開発者がプロ​​ジェクトを発見するのに役立ち、チームの改善を出荷する意欲を維持します。",
+        "30c36231c1": "Orca はオープンソースです。今日役に立ったなら、GitHub のスターが他の開発者の発見につながります。",
         "b5e685e4d9": "閉じる",
         "5f6df21046": "Orcaを楽しんでいますか？",
         "2d67b6c849": "GitHub でスターを付ける",
@@ -1262,7 +1268,7 @@
         "996bf76e46": "ブラウザーでGitHubを開いて完了してください。",
         "d32015fec7": "開いています...",
         "157bb5ecbb": "GitHubを開く",
-        "8c967b4d15": "今はしない",
+        "8c967b4d15": "あとで",
         "73dfd4eb8d": "今後表示しない"
       },
       "TaskPage": {
@@ -2224,7 +2230,14 @@
             "ebd2fa844d": "閉じる",
             "1d1a7a9c1f": "キャンセル",
             "6b9a6975f8": "terminal にはまだ実行中のプロセスがあります。terminal を閉じるとプロセスが強制終了されます。",
-            "78b79d854d": "Terminal を閉じますか?"
+            "78b79d854d": "Terminal を閉じますか?",
+            "stop_agent_title": "このエージェントを停止しますか?",
+            "stop_command_title": "実行中のコマンドを停止しますか?",
+            "stop_agent_description": "この terminal を閉じると、エージェントの現在の作業が停止します。",
+            "stop_command_description": "この terminal を閉じると、その中で実行中のコマンドが停止します。",
+            "dont_ask_again": "実行中の terminal では今後確認しない",
+            "stop_agent_confirm": "エージェントを停止",
+            "stop_command_confirm": "停止して閉じる"
           },
           "MobileDriverOverlay": {
             "c6460cf584": "操作を取り戻す",
@@ -4038,7 +4051,7 @@
           "create": "ワークスペースを作成",
           "sourceProject": "タスクソース",
           "chooseSourceProject": "タスクソースを選択",
-          "createStart": "Create & Start Agent"
+          "createFailed": "フォルダーワークスペースを作成できませんでした。"
         },
         "ProjectOrderManualDefaultNotice": {
           "a1f4c2d8e0": "手動のプロジェクト順序がデフォルトになりました",
@@ -6052,7 +6065,9 @@
           "af0c3b6e39": "Windows では、右クリックしてクリップボードを terminal に貼り付けます。 Ctrl キーを押しながら右クリックしてコンテキスト メニューを開きます。",
           "29154326bb": "の上",
           "ab20575a8a": "オフ",
-          "ab3a1f9068": "wsl.exe"
+          "ab3a1f9068": "wsl.exe",
+          "ask_before_closing_running_terminals_title": "Ask Before Closing Running Terminals",
+          "ask_before_closing_running_terminals_description": "Show a confirmation before closing a terminal that has a running command or agent."
         },
         "TerminalSettingsPreview": {
           "a63953a48a": "{{value0}} テーマのプレビュー",
@@ -7660,7 +7675,9 @@
             "e989914ad6": "フォントファミリー",
             "33031c1465": "文字サイズ",
             "0fe0073f0c": "新規ペインとライブ アップデートのデフォルトの terminal フォント サイズ。",
-            "5930244899": "フォントサイズ"
+            "5930244899": "フォントサイズ",
+            "ask_before_closing_running_terminals_title": "Ask Before Closing Running Terminals",
+            "ask_before_closing_running_terminals_description": "Show a confirmation before closing a terminal that has a running command or agent."
           },
           "windows": {
             "search": {
@@ -8391,6 +8408,7 @@
             "createPrIntentPushing": "コミットをプッシュ中…",
             "createPrIntentRemoteFailed": "リモートブランチを更新できませんでした。Create PR を再試行してください。",
             "createPrIntentGeneratingDetails": "レビューの詳細を生成中…",
+            "createPrIntentBranchChangedDuringDetails": "レビューの詳細を生成中にブランチが変更されました。Create PR を再試行してください。",
             "createPrIntentCreatingReview": "レビューを作成中…",
             "a91f8e2b01": "リスト表示",
             "b82e9f3c12": "ツリー表示",
@@ -8691,6 +8709,8 @@
                   "74fc171e99": "強制プッシュ中です…",
                   "16aee3a5c1": "Commit 中です…",
                   "e61b0d7a3c": "コミットを公開する前にブランチをチェックアウトしてください。",
+                  "1d47e850cf": "リンクされたレビュー ブランチに更新をプッシュ",
+                  "c39d0c75c3": "リンクされたレビュー ブランチのターゲットを利用できません。",
                   "8c6d15a07d": "PR を作成",
                   "d37e68f61d": "レビュー用にブランチを準備中…",
                   "c72e5e65d1": "このブランチを準備して {{value0}} を作成"
@@ -9154,7 +9174,22 @@
             "fda67f0b61": "現在のプロジェクト",
             "3e8bb1176a": "設定で Linear を接続してイシューを検索します。",
             "69ce292138": "Linear",
-            "9c004911c3": "gitlab"
+            "9c004911c3": "gitlab",
+            "switchTaskSourceTitle": "タスクソースを切り替えますか？",
+            "differentTaskSource": "、選択中のタスクソースとは異なります。",
+            "currentTaskSource": "現在のタスクソース",
+            "placeholderNameOrLinearUrl": "名前または Linear URL を入力",
+            "placeholderWorkspaceName": "ワークスペース名を入力",
+            "placeholderSmartWithBranchGitLabLinear": "名前、#1234、ブランチ、GitHub/GitLab または Linear URL を入力",
+            "placeholderSmartGitLabLinear": "名前、#1234、GitHub/GitLab または Linear URL を入力",
+            "placeholderSmartWithBranchGitLab": "名前、#1234、ブランチ、GitHub または GitLab URL を入力",
+            "placeholderSmartGitLab": "名前、#1234、GitHub または GitLab URL を入力",
+            "unavailable": "利用できません",
+            "searchGitHub": "GitHub PR と Issue を検索",
+            "searchGitLab": "GitLab MR と Issue を検索",
+            "searchBranches": "ブランチを検索",
+            "searchLinear": "Linear Issue を検索",
+            "workspaceName": "ワークスペース名"
           },
           "ProjectHostSetupCombobox": {
             "empty": "No hosts are ready for this project.",
@@ -10560,7 +10595,11 @@
             "8e24fe4f75": "クラッシュレポートが送信されました。",
             "8b8473c544": "クラッシュレポートがコピーされました。",
             "b175e90213": "クラッシュレポートはありません。",
-            "765591798d": "クラッシュレポートを確認しています..."
+            "765591798d": "クラッシュレポートを確認しています...",
+            "b2e36f53a1": "Failed to send crash report. Diagnostic ticket {{value0}} was uploaded but not linked.",
+            "ead6fc0510": "No automatic crash report was captured. You can still send details and include recent diagnostic logs when available.",
+            "b082f27490": "Attach recent diagnostic logs",
+            "e59f0b9427": "Sends a capped redacted log bundle with the report."
           }
         }
       },
@@ -11263,7 +11302,7 @@
               "hostCount": "{{value0}} hosts",
               "searchProjects": "Search projects...",
               "noMatches": "No projects match your search.",
-              "chooseSource": "Choose task source"
+              "chooseSource": "タスクソースを選択"
             }
           }
         }

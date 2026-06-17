@@ -509,7 +509,10 @@
         "b2ead86962": "No se pudo resolver la base de relaciones públicas.",
         "a9ff236145": "Algunos archivos adjuntos no se pudieron cargar.",
         "3db83fc58a": "No hay ninguna ruta de proyecto remoto disponible para los archivos adjuntos.",
-        "ba6cb77082": "No se pudo conectar al proyecto."
+        "ba6cb77082": "No se pudo conectar al proyecto.",
+        "chooseOrAddProjectBeforeWorkspace": "Elige o agrega un proyecto antes de crear un espacio de trabajo.",
+        "folderWorkspaceCreateFailedTitle": "No se pudo crear el espacio de trabajo de carpeta",
+        "folderWorkspaceCreateFailedMessage": "No se pudo crear el espacio de trabajo de carpeta. Revisa los detalles del error de arriba e inténtalo de nuevo."
       },
       "useGlobalFileDrop": {
         "38c9f034ff": "No se pudieron cargar los archivos eliminados.",
@@ -1034,6 +1037,9 @@
         "7711ad5122": "Comando de configuración local",
         "e5db1b0419": "Comando de configuración combinado",
         "addProjectBeforeWorkspace": "Agregue un proyecto antes de crear un espacio de trabajo.",
+        "connectProjectFirst": "Conecta este proyecto primero",
+        "connectSourceLookup": "Conectar",
+        "reconnectSourceLookup": "Volver a conectar",
         "sshNotConnected": "SSH not connected",
         "connectingSsh": "Connecting SSH...",
         "sshAuthenticationFailed": "SSH authentication failed",
@@ -1253,7 +1259,7 @@
         "92b0f9d921": "está autenticado y vuelve a intentarlo.",
         "cd8c34aac1": "gh",
         "cf82170065": "No se pudo destacar el repo. Cerciorarse",
-        "30c36231c1": "Si Orca te ha ahorrado tiempo, una estrella de GitHub es de gran ayuda. Ayuda a otros desarrolladores a descubrir el proyecto y mantiene al equipo motivado para implementar mejoras.",
+        "30c36231c1": "Orca es de código abierto. Si te ayudó hoy, una estrella en GitHub ayuda a otros desarrolladores a encontrarlo.",
         "b5e685e4d9": "Despedir",
         "5f6df21046": "¿Disfrutando de Orca?",
         "2d67b6c849": "Dar estrella en GitHub",
@@ -1262,7 +1268,7 @@
         "996bf76e46": "Abre GitHub para terminar en tu navegador.",
         "d32015fec7": "Abriendo...",
         "157bb5ecbb": "Abrir GitHub",
-        "8c967b4d15": "Ahora no",
+        "8c967b4d15": "Más tarde",
         "73dfd4eb8d": "No volver a preguntar"
       },
       "TaskPage": {
@@ -2224,7 +2230,14 @@
             "ebd2fa844d": "Cerca",
             "1d1a7a9c1f": "Cancelar",
             "6b9a6975f8": "La terminal todavía tiene un proceso en ejecución. Si cierra la terminal, el proceso finalizará.",
-            "78b79d854d": "¿Cerrar terminal?"
+            "78b79d854d": "¿Cerrar terminal?",
+            "stop_agent_title": "¿Detener este agente?",
+            "stop_command_title": "¿Detener comando en ejecución?",
+            "stop_agent_description": "Al cerrar esta terminal, se detendrá el trabajo actual del agente.",
+            "stop_command_description": "Al cerrar esta terminal, se detendrá el comando que se está ejecutando en ella.",
+            "dont_ask_again": "No volver a preguntar para terminales en ejecución",
+            "stop_agent_confirm": "Detener agente",
+            "stop_command_confirm": "Detener y cerrar"
           },
           "MobileDriverOverlay": {
             "c6460cf584": "Devolver",
@@ -4038,7 +4051,7 @@
           "create": "Crear espacio de trabajo",
           "sourceProject": "Origen de tareas",
           "chooseSourceProject": "Elige el origen de tareas",
-          "createStart": "Create & Start Agent"
+          "createFailed": "No se pudo crear el espacio de trabajo de carpeta."
         },
         "ProjectOrderManualDefaultNotice": {
           "a1f4c2d8e0": "El orden manual de proyectos ahora es el predeterminado",
@@ -6030,7 +6043,9 @@
           "af0c3b6e39": "En Windows, haga clic derecho y pegue el portapapeles en la terminal. Utilice Ctrl+clic derecho para abrir el menú contextual.",
           "29154326bb": "en",
           "ab20575a8a": "apagado",
-          "ab3a1f9068": "wsl.exe"
+          "ab3a1f9068": "wsl.exe",
+          "ask_before_closing_running_terminals_title": "Ask Before Closing Running Terminals",
+          "ask_before_closing_running_terminals_description": "Show a confirmation before closing a terminal that has a running command or agent."
         },
         "TerminalSettingsPreview": {
           "a63953a48a": "Vista previa del tema {{value0}}",
@@ -7638,7 +7653,9 @@
               "description": "Import theme YAML files as Orca terminal themes.",
               "keyword_yaml": "yaml",
               "keyword_custom": "custom"
-            }
+            },
+            "ask_before_closing_running_terminals_title": "Ask Before Closing Running Terminals",
+            "ask_before_closing_running_terminals_description": "Show a confirmation before closing a terminal that has a running command or agent."
           },
           "windows": {
             "search": {
@@ -8391,6 +8408,7 @@
             "createPrIntentPushing": "Subiendo commits…",
             "createPrIntentRemoteFailed": "No se pudo actualizar la rama remota. Vuelve a intentar Crear PR.",
             "createPrIntentGeneratingDetails": "Generando detalles de revisión…",
+            "createPrIntentBranchChangedDuringDetails": "La rama cambió mientras se generaban los detalles de la revisión. Vuelve a intentar Crear PR.",
             "createPrIntentCreatingReview": "Creando revisión…",
             "a91f8e2b01": "Ver como lista",
             "b82e9f3c12": "Ver como árbol",
@@ -8691,6 +8709,8 @@
                   "74fc171e99": "Empuje forzado en progreso...",
                   "16aee3a5c1": "Compromiso en progreso...",
                   "e61b0d7a3c": "Cambia a una rama antes de publicar commits.",
+                  "1d47e850cf": "Envía actualizaciones a la rama de revisión vinculada",
+                  "c39d0c75c3": "El destino de la rama de revisión vinculada no está disponible.",
                   "8c6d15a07d": "Crear PR",
                   "d37e68f61d": "Preparando la rama para revisión…",
                   "c72e5e65d1": "Prepara esta rama y crea un {{value0}}"
@@ -9154,7 +9174,22 @@
             "fda67f0b61": "proyecto actual",
             "3e8bb1176a": "Conecte Linear en Configuración para buscar problemas.",
             "69ce292138": "lineal",
-            "9c004911c3": "gitlab"
+            "9c004911c3": "gitlab",
+            "switchTaskSourceTitle": "¿Cambiar el origen de tareas?",
+            "differentTaskSource": ", que es diferente del origen de tareas seleccionado.",
+            "currentTaskSource": "origen de tareas actual",
+            "placeholderNameOrLinearUrl": "Escribe un nombre o una URL de Linear",
+            "placeholderWorkspaceName": "Escribe un nombre de espacio de trabajo",
+            "placeholderSmartWithBranchGitLabLinear": "Escribe un nombre, #1234, rama, GitHub/GitLab o URL de Linear",
+            "placeholderSmartGitLabLinear": "Escribe un nombre, #1234, GitHub/GitLab o URL de Linear",
+            "placeholderSmartWithBranchGitLab": "Escribe un nombre, #1234, rama, GitHub o URL de GitLab",
+            "placeholderSmartGitLab": "Escribe un nombre, #1234, GitHub o URL de GitLab",
+            "unavailable": "No disponible",
+            "searchGitHub": "Buscar PR e incidencias de GitHub",
+            "searchGitLab": "Buscar MR e incidencias de GitLab",
+            "searchBranches": "Buscar ramas",
+            "searchLinear": "Buscar incidencias de Linear",
+            "workspaceName": "Nombre del espacio de trabajo"
           },
           "ProjectHostSetupCombobox": {
             "empty": "No hosts are ready for this project.",
@@ -10560,7 +10595,11 @@
             "8e24fe4f75": "Informe de fallo enviado.",
             "8b8473c544": "Se copió el informe de fallos.",
             "b175e90213": "No hay ningún informe de fallo disponible.",
-            "765591798d": "Comprobando informes de fallos..."
+            "765591798d": "Comprobando informes de fallos...",
+            "b2e36f53a1": "Failed to send crash report. Diagnostic ticket {{value0}} was uploaded but not linked.",
+            "ead6fc0510": "No automatic crash report was captured. You can still send details and include recent diagnostic logs when available.",
+            "b082f27490": "Attach recent diagnostic logs",
+            "e59f0b9427": "Sends a capped redacted log bundle with the report."
           }
         }
       },
@@ -11263,7 +11302,7 @@
               "hostCount": "{{value0}} hosts",
               "searchProjects": "Search projects...",
               "noMatches": "No projects match your search.",
-              "chooseSource": "Choose task source"
+              "chooseSource": "Elige el origen de tareas"
             }
           }
         }

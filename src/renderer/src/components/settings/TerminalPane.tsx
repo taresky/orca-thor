@@ -426,6 +426,47 @@ export function TerminalPane({
 
           <SearchableSetting
             title={translate(
+              'auto.components.settings.TerminalPane.ask_before_closing_running_terminals_title',
+              'Ask Before Closing Running Terminals'
+            )}
+            description={translate(
+              'auto.components.settings.TerminalPane.ask_before_closing_running_terminals_description',
+              'Show a confirmation before closing a terminal that has a running command or agent.'
+            )}
+            keywords={[
+              'confirm',
+              'confirmation',
+              'close',
+              'terminal',
+              'running',
+              'command',
+              'agent',
+              'process',
+              'prompt',
+              'stop'
+            ]}
+          >
+            <SettingsSwitchRow
+              label={translate(
+                'auto.components.settings.TerminalPane.ask_before_closing_running_terminals_title',
+                'Ask Before Closing Running Terminals'
+              )}
+              description={translate(
+                'auto.components.settings.TerminalPane.ask_before_closing_running_terminals_description',
+                'Show a confirmation before closing a terminal that has a running command or agent.'
+              )}
+              checked={!settings.skipCloseTerminalWithRunningProcessConfirm}
+              onChange={() =>
+                updateSettings({
+                  skipCloseTerminalWithRunningProcessConfirm:
+                    !settings.skipCloseTerminalWithRunningProcessConfirm
+                })
+              }
+            />
+          </SearchableSetting>
+
+          <SearchableSetting
+            title={translate(
               'auto.components.settings.TerminalPane.8eefeaa3da',
               'Focus Follows Mouse'
             )}

@@ -273,6 +273,8 @@ export type ProjectGroup = {
   parentPath: string | null
   /** SSH target ID for folder-backed groups imported from a remote root. */
   connectionId?: string | null
+  /** Renderer-owned host stamp for groups fetched from a runtime environment. */
+  executionHostId?: string | null
   parentGroupId: string | null
   createdFrom: ProjectGroupCreatedFrom
   tabOrder: number
@@ -2531,6 +2533,10 @@ export type GlobalSettings = {
    *  again" checkbox inside it or from the General settings pane. We keep this
    *  defaulted to false so first-time behavior stays safe. */
   skipDeleteWorktreeConfirm: boolean
+  /** Why: closing a terminal with child processes kills foreground work. Keep
+   *  this separate from other destructive confirmations so power users can speed
+   *  up terminal cleanup without weakening workspace or automation safeguards. */
+  skipCloseTerminalWithRunningProcessConfirm: boolean
   /** Why: deleting an automation also deletes its run history. Keep this
    *  separate from worktree deletion so skipping one destructive confirmation
    *  does not silently skip the other. */
@@ -3101,6 +3107,9 @@ export type PersistedUIState = {
   /** Once the user has starred Orca (from any entry point) we permanently
    *  suppress the nag — no further thresholds, no notifications. */
   starNagCompleted?: boolean
+  /** Timestamp until which nonterminal dismissals suppress threshold prompts.
+   *  Force-show bypasses this for dev/testing. */
+  starNagDeferredUntil?: number | null
   trustedOrcaHooks?: PersistedTrustedOrcaHooks
   setupScriptPromptDismissedRepoIds?: string[]
   /** Whether the experimental pet overlay is currently visible. Separate

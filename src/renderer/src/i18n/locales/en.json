@@ -509,7 +509,10 @@
         "b2ead86962": "Failed to resolve PR base.",
         "a9ff236145": "Some attachments could not be uploaded.",
         "3db83fc58a": "No project path is available on this host for attachments.",
-        "ba6cb77082": "Failed to connect to project."
+        "ba6cb77082": "Failed to connect to project.",
+        "chooseOrAddProjectBeforeWorkspace": "Choose or add a project before creating a workspace.",
+        "folderWorkspaceCreateFailedTitle": "Folder workspace creation failed",
+        "folderWorkspaceCreateFailedMessage": "The folder workspace could not be created. Check the error details above, then try again."
       },
       "useGlobalFileDrop": {
         "38c9f034ff": "Failed to upload dropped files.",
@@ -1035,6 +1038,9 @@
         "e5db1b0419": "Combined setup command",
         "runOn": "Run on",
         "addProjectBeforeWorkspace": "Add a project before creating a workspace.",
+        "connectProjectFirst": "Connect this project first",
+        "connectSourceLookup": "Connect",
+        "reconnectSourceLookup": "Reconnect",
         "setupHostExistingFolderTitle": "Set up {{value0}}",
         "cloneProjectOnHost": "Clone project",
         "cloneUrlPlaceholder": "https://github.com/owner/repo.git",
@@ -1253,7 +1259,7 @@
         "92b0f9d921": "is authenticated and try again.",
         "cd8c34aac1": "gh",
         "cf82170065": "Could not star the repo. Make sure",
-        "30c36231c1": "If Orca has saved you time, a GitHub star goes a long way. It helps other developers discover the project and keeps the team motivated to ship improvements.",
+        "30c36231c1": "Orca is open source. If it helped today, a GitHub star helps other developers find it.",
         "b5e685e4d9": "Dismiss",
         "5f6df21046": "Enjoying Orca?",
         "2d67b6c849": "Star on GitHub",
@@ -1262,7 +1268,7 @@
         "996bf76e46": "Open GitHub to finish in your browser.",
         "d32015fec7": "Opening...",
         "157bb5ecbb": "Open GitHub",
-        "8c967b4d15": "Not now",
+        "8c967b4d15": "Later",
         "73dfd4eb8d": "Don't ask again"
       },
       "TaskPage": {
@@ -2224,7 +2230,14 @@
             "ebd2fa844d": "Close",
             "1d1a7a9c1f": "Cancel",
             "6b9a6975f8": "The terminal still has a running process. If you close the terminal, the process will be killed.",
-            "78b79d854d": "Close Terminal?"
+            "78b79d854d": "Close Terminal?",
+            "stop_agent_title": "Stop this agent?",
+            "stop_command_title": "Stop running command?",
+            "stop_agent_description": "Closing this terminal will stop the agent's current work.",
+            "stop_command_description": "Closing this terminal will stop the command running inside it.",
+            "dont_ask_again": "Don't ask again for running terminals",
+            "stop_agent_confirm": "Stop Agent",
+            "stop_command_confirm": "Stop and Close"
           },
           "MobileDriverOverlay": {
             "c6460cf584": "Take back",
@@ -4082,10 +4095,10 @@
           "connectFailed": "Failed to connect to project.",
           "noRepos": "Add a Git project under this folder to attach GitHub or GitLab tasks.",
           "title": "Create Folder Workspace",
-          "createStart": "Create & Start Agent",
-          "create": "Create Workspace",
+          "create": "Create workspace",
           "sourceProject": "Task Source",
-          "chooseSourceProject": "Choose task source"
+          "chooseSourceProject": "Choose task source",
+          "createFailed": "Failed to create folder workspace."
         },
         "ProjectOrderManualDefaultNotice": {
           "a1f4c2d8e0": "Manual project order is now the default",
@@ -6067,7 +6080,9 @@
           "af0c3b6e39": "On Windows, right-click pastes the clipboard into the terminal. Use Ctrl+right-click to open the context menu.",
           "29154326bb": "on",
           "ab20575a8a": "off",
-          "ab3a1f9068": "wsl.exe"
+          "ab3a1f9068": "wsl.exe",
+          "ask_before_closing_running_terminals_title": "Ask Before Closing Running Terminals",
+          "ask_before_closing_running_terminals_description": "Show a confirmation before closing a terminal that has a running command or agent."
         },
         "TerminalSettingsPreview": {
           "a63953a48a": "Preview {{value0}} theme",
@@ -7675,7 +7690,9 @@
             "e989914ad6": "Font Family",
             "33031c1465": "text size",
             "0fe0073f0c": "Default terminal font size for new panes and live updates.",
-            "5930244899": "Font Size"
+            "5930244899": "Font Size",
+            "ask_before_closing_running_terminals_title": "Ask Before Closing Running Terminals",
+            "ask_before_closing_running_terminals_description": "Show a confirmation before closing a terminal that has a running command or agent."
           },
           "windows": {
             "search": {
@@ -8391,6 +8408,7 @@
             "createPrIntentPushing": "Pushing commits…",
             "createPrIntentRemoteFailed": "Could not update the remote branch. Retry Create PR.",
             "createPrIntentGeneratingDetails": "Generating review details…",
+            "createPrIntentBranchChangedDuringDetails": "Branch changed while generating review details. Retry Create PR.",
             "createPrIntentCreatingReview": "Creating review…",
             "a91f8e2b01": "View as list",
             "b82e9f3c12": "View as tree",
@@ -8691,6 +8709,8 @@
                   "74fc171e99": "Force Push in progress…",
                   "16aee3a5c1": "Commit in progress…",
                   "e61b0d7a3c": "Check out a branch before publishing commits.",
+                  "1d47e850cf": "Push updates to the linked review branch",
+                  "c39d0c75c3": "Linked review branch target is unavailable.",
                   "8c6d15a07d": "Create PR",
                   "d37e68f61d": "Preparing branch for review…",
                   "c72e5e65d1": "Prepare this branch and create a {{value0}}"
@@ -9154,7 +9174,22 @@
             "fda67f0b61": "current project",
             "3e8bb1176a": "Connect Linear in Settings to search issues.",
             "69ce292138": "linear",
-            "9c004911c3": "gitlab"
+            "9c004911c3": "gitlab",
+            "switchTaskSourceTitle": "Switch task source?",
+            "differentTaskSource": ", which is different from the selected task source.",
+            "currentTaskSource": "current task source",
+            "placeholderNameOrLinearUrl": "Type a name or Linear URL",
+            "placeholderWorkspaceName": "Type a workspace name",
+            "placeholderSmartWithBranchGitLabLinear": "Type a name, #1234, branch, GitHub/GitLab or Linear URL",
+            "placeholderSmartGitLabLinear": "Type a name, #1234, GitHub/GitLab or Linear URL",
+            "placeholderSmartWithBranchGitLab": "Type a name, #1234, branch, GitHub or GitLab URL",
+            "placeholderSmartGitLab": "Type a name, #1234, GitHub or GitLab URL",
+            "unavailable": "Unavailable",
+            "searchGitHub": "Search GitHub PRs and issues",
+            "searchGitLab": "Search GitLab MRs and issues",
+            "searchBranches": "Search branches",
+            "searchLinear": "Search Linear issues",
+            "workspaceName": "Workspace name"
           },
           "ProjectHostSetupCombobox": {
             "empty": "No hosts are ready for this project.",
@@ -10560,7 +10595,11 @@
             "8e24fe4f75": "Crash report sent.",
             "8b8473c544": "Crash report copied.",
             "b175e90213": "No crash report is available.",
-            "765591798d": "Checking for crash reports..."
+            "765591798d": "Checking for crash reports...",
+            "b2e36f53a1": "Failed to send crash report. Diagnostic ticket {{value0}} was uploaded but not linked.",
+            "ead6fc0510": "No automatic crash report was captured. You can still send details and include recent diagnostic logs when available.",
+            "b082f27490": "Attach recent diagnostic logs",
+            "e59f0b9427": "Sends a capped redacted log bundle with the report."
           }
         }
       },
