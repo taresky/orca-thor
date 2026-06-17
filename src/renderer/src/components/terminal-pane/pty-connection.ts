@@ -2501,7 +2501,7 @@ export function connectPanePty(
       return transport.serializeBuffer(opts)
     }
 
-    function isHiddenStartupRendererQueryWindowActive(): boolean {
+    function isHiddenStartupDeliveryGateHoldActive(): boolean {
       return (
         shouldSnapshotHiddenCodexOutput &&
         Date.now() < hiddenStartupRendererQueryWindowExpiresAt &&
@@ -2602,7 +2602,7 @@ export function connectPanePty(
         !shouldWritePtyOutputForeground(deps.isVisibleRef.current) &&
         // Why: codex startup probes need the live xterm to answer renderer
         // queries for 10s — never gate delivery while the window is active.
-        !isHiddenStartupRendererQueryWindowActive()
+        !isHiddenStartupDeliveryGateHoldActive()
       const isFirstSyncForPty = hiddenDeliverySyncedPtyId !== ptyId
       hiddenDeliverySyncedPtyId = ptyId
       if (shouldHide) {
