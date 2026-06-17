@@ -2850,7 +2850,13 @@ export function connectPanePty(
     }
 
     function isHiddenStartupRendererQueryWindowActive(): boolean {
-      return shouldSnapshotHiddenCodexOutput && hiddenStartupRendererQueryPending.length > 0
+      return (
+        shouldSnapshotHiddenCodexOutput &&
+        // Why: non-query bytes during the startup window can dirty hidden xterm
+        // state, so the parser must observe them before answering CPR/DECRQM.
+        (Date.now() < hiddenStartupRendererQueryWindowExpiresAt ||
+          hiddenStartupRendererQueryPending.length > 0)
+      )
     }
 
     function takeHiddenStartupRendererQueryPendingForForeground(data: string): {
