@@ -4315,7 +4315,11 @@
           "68a468752e": "检查中...",
           "c689392435": "重新检查",
           "a31e2aa302": "无法复制安装命令。",
-          "378ad26865": "复制安装命令。"
+          "378ad26865": "复制安装命令。",
+          "copiedCommand": "Copied command.",
+          "failedToCopyCommand": "Failed to copy command.",
+          "copyCommandAria": "Copy command",
+          "runCommandDescription": "Press Enter to run the command."
         },
         "AgentsPane": {
           "d83834f5e6": "检测已安装的 Agent...",
@@ -5241,7 +5245,8 @@
           "9bedd2a6e5": "使 Agent 能够通过 Orca 传递上下文并协调工作。",
           "07641b9768": "编排技能",
           "2aacdb0517": "跨切换、工作树切换和子 Agent 工作协调编码 Agent。",
-          "191ac34567": "Agent 编排"
+          "191ac34567": "Agent 编排",
+          "copyUpdateCommand": "Copy update command"
         },
         "OrchestrationSetupCard": {
           "e7d2a5146c": "使 Agent 能够通过 Orca 传递上下文并协调工作。",
@@ -5259,7 +5264,12 @@
           "b99f375eb2": "在 terminal 中运行此命令来为您的 Agent 安装编排技能。",
           "2914abcfa2": "安装编排技能",
           "d3dc559225": "无法复制安装命令。",
-          "239bf9132b": "复制安装命令。"
+          "239bf9132b": "复制安装命令。",
+          "copiedUpdateCommand": "Copied update command.",
+          "failedUpdateCommand": "Failed to copy update command.",
+          "updateTitle": "Update orchestration skill",
+          "updateDescription": "Run this command in a terminal to update the orchestration skill for your agents.",
+          "copyUpdateCommandAria": "Copy orchestration skill update command"
         },
         "PrivacyDiagnosticBundleControls": {
           "dc8404a930": "创建诊断文件",

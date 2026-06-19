@@ -3668,7 +3668,6 @@
           "1a0eec0d35": "Status",
           "b5536d5a88": "Tasks",
           "8d62c68b35": "Notes",
-          "automation": "Automation",
           "2d74665a56": "Ports",
           "65a9820bd1": "Agent statuses",
           "219ebf1961": "Branch name"
@@ -4331,7 +4330,11 @@
           "68a468752e": "Checking...",
           "c689392435": "Re-check",
           "a31e2aa302": "Failed to copy install command.",
-          "378ad26865": "Copied install command."
+          "378ad26865": "Copied install command.",
+          "copiedCommand": "Copied command.",
+          "failedToCopyCommand": "Failed to copy command.",
+          "copyCommandAria": "Copy command",
+          "runCommandDescription": "Press Enter to run the command."
         },
         "AgentsPane": {
           "d83834f5e6": "Detecting installed agents…",
@@ -5294,7 +5297,8 @@
           "9bedd2a6e5": "Enables agents to hand off context and coordinate work through Orca.",
           "07641b9768": "Orchestration skill",
           "2aacdb0517": "Coordinate coding agents across handoffs, worktree handovers, and child-agent work.",
-          "191ac34567": "Agent Orchestration"
+          "191ac34567": "Agent Orchestration",
+          "copyUpdateCommand": "Copy update command"
         },
         "OrchestrationSetupCard": {
           "e7d2a5146c": "Enables agents to hand off context and coordinate work through Orca.",
@@ -5312,7 +5316,12 @@
           "b99f375eb2": "Run this command in a terminal to install the orchestration skill for your agents.",
           "2914abcfa2": "Install orchestration skill",
           "d3dc559225": "Failed to copy install command.",
-          "239bf9132b": "Copied install command."
+          "239bf9132b": "Copied install command.",
+          "copiedUpdateCommand": "Copied update command.",
+          "failedUpdateCommand": "Failed to copy update command.",
+          "updateTitle": "Update orchestration skill",
+          "updateDescription": "Run this command in a terminal to update the orchestration skill for your agents.",
+          "copyUpdateCommandAria": "Copy orchestration skill update command"
         },
         "PrivacyDiagnosticBundleControls": {
           "dc8404a930": "Create diagnostic file",

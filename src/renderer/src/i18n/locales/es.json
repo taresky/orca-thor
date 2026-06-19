@@ -3656,8 +3656,7 @@
           "automation": "Automation",
           "2d74665a56": "Puertos",
           "65a9820bd1": "Estados del agente",
-          "219ebf1961": "Nombre de rama",
-          "automation": "Automation"
+          "219ebf1961": "Nombre de rama"
         },
         "SshDisconnectedDialog": {
           "ca4a7892af": "Conectando...",
@@ -4331,7 +4330,11 @@
           "68a468752e": "De cheques...",
           "c689392435": "Vuelva a comprobar",
           "a31e2aa302": "No se pudo copiar el comando de instalación.",
-          "378ad26865": "Comando de instalación copiado."
+          "378ad26865": "Comando de instalación copiado.",
+          "copiedCommand": "Copied command.",
+          "failedToCopyCommand": "Failed to copy command.",
+          "copyCommandAria": "Copy command",
+          "runCommandDescription": "Press Enter to run the command."
         },
         "AgentsPane": {
           "d83834f5e6": "Detectando agents instalados…",
@@ -5257,7 +5260,8 @@
           "9bedd2a6e5": "Permite a los agents traspasar contexto y coordinar el trabajo a través de Orca.",
           "07641b9768": "Habilidad de orquestación",
           "2aacdb0517": "Coordine a los agents de codificación en traspasos, traspasos de árboles de trabajo y trabajo de agents secundarios.",
-          "191ac34567": "Orquestación de Agents"
+          "191ac34567": "Orquestación de Agents",
+          "copyUpdateCommand": "Copy update command"
         },
         "OrchestrationSetupCard": {
           "e7d2a5146c": "Permite a los agents traspasar contexto y coordinar el trabajo a través de Orca.",
@@ -5275,7 +5279,12 @@
           "b99f375eb2": "Ejecute este comando en una terminal para instalar la habilidad de orquestación para sus agents.",
           "2914abcfa2": "Instalar habilidad de orquestación",
           "d3dc559225": "No se pudo copiar el comando de instalación.",
-          "239bf9132b": "Comando de instalación copiado."
+          "239bf9132b": "Comando de instalación copiado.",
+          "copiedUpdateCommand": "Copied update command.",
+          "failedUpdateCommand": "Failed to copy update command.",
+          "updateTitle": "Update orchestration skill",
+          "updateDescription": "Run this command in a terminal to update the orchestration skill for your agents.",
+          "copyUpdateCommandAria": "Copy orchestration skill update command"
         },
         "PrivacyDiagnosticBundleControls": {
           "dc8404a930": "Crear archivo de diagnóstico",

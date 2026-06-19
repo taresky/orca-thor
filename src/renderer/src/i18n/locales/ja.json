@@ -4315,7 +4315,11 @@
           "68a468752e": "確認中...",
           "c689392435": "再確認",
           "a31e2aa302": "インストールコマンドのコピーに失敗しました。",
-          "378ad26865": "インストールコマンドをコピーしました。"
+          "378ad26865": "インストールコマンドをコピーしました。",
+          "copiedCommand": "Copied command.",
+          "failedToCopyCommand": "Failed to copy command.",
+          "copyCommandAria": "Copy command",
+          "runCommandDescription": "Press Enter to run the command."
         },
         "AgentsPane": {
           "d83834f5e6": "インストールされている agents を検出しています…",
@@ -5278,7 +5282,8 @@
           "9bedd2a6e5": "agents がコンテキストを引き継ぎ、Orca を通じて作業を調整できるようにします。",
           "07641b9768": "オーケストレーションスキル",
           "2aacdb0517": "ハンドオフ、ワークツリーのハンドオーバー、および子 agents の作業全体にわたってコーディング agents を調整します。",
-          "191ac34567": "Agent オーケストレーション"
+          "191ac34567": "Agent オーケストレーション",
+          "copyUpdateCommand": "Copy update command"
         },
         "OrchestrationSetupCard": {
           "e7d2a5146c": "agents がコンテキストを引き継ぎ、Orca を通じて作業を調整できるようにします。",
@@ -5296,7 +5301,12 @@
           "b99f375eb2": "terminal でこのコマンドを実行して、agents のオーケストレーション スキルをインストールします。",
           "2914abcfa2": "オーケストレーション スキルをインストールする",
           "d3dc559225": "インストールコマンドのコピーに失敗しました。",
-          "239bf9132b": "インストールコマンドをコピーしました。"
+          "239bf9132b": "インストールコマンドをコピーしました。",
+          "copiedUpdateCommand": "Copied update command.",
+          "failedUpdateCommand": "Failed to copy update command.",
+          "updateTitle": "Update orchestration skill",
+          "updateDescription": "Run this command in a terminal to update the orchestration skill for your agents.",
+          "copyUpdateCommandAria": "Copy orchestration skill update command"
         },
         "PrivacyDiagnosticBundleControls": {
           "dc8404a930": "診断ファイルを作成",
