@@ -365,7 +365,9 @@ describe('WorktreeCard quick actions', () => {
     )
 
     expect(markup).toContain('aria-label="Delete workspace"')
+    expect(markup).toContain('can-hover:pointer-events-none')
     expect(markup).toContain('group-hover/worktree-card:opacity-100')
+    expect(markup).toContain('group-hover/worktree-card:pointer-events-auto')
   })
 
   it('shows delete for folder workspace instances', () => {

@@ -1447,14 +1447,19 @@ const WorktreeCard = React.memo(function WorktreeCard({
               {showDeleteQuickAction && (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="icon-xs"
                       data-workspace-board-preserve-open=""
                       onPointerDown={stopQuickActionPointerPropagation}
                       onClick={handleWorkspaceQuickAction}
                       className={cn(
-                        'inline-flex size-4 items-center justify-center rounded bg-transparent opacity-0 transition-colors transition-opacity',
-                        'group-hover/worktree-card:opacity-100 group-focus-within/worktree-card:opacity-100 focus-visible:opacity-100',
+                        'size-4 rounded bg-transparent p-0 text-muted-foreground transition-[background-color,color,opacity]',
+                        'can-hover:pointer-events-none can-hover:opacity-0',
+                        'group-hover/worktree-card:pointer-events-auto group-hover/worktree-card:opacity-100',
+                        'group-focus-within/worktree-card:pointer-events-auto group-focus-within/worktree-card:opacity-100',
+                        'focus-visible:pointer-events-auto focus-visible:opacity-100',
                         'text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive'
                       )}
                       aria-label={translate(
@@ -1463,7 +1468,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
                       )}
                     >
                       <Trash2 className="size-3.5" />
-                    </button>
+                    </Button>
                   </TooltipTrigger>
                   <TooltipContent side="right" sideOffset={8}>
                     {translate(
