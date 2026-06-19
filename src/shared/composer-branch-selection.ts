@@ -77,6 +77,26 @@ export function resolveComposerBranchReuse(args: {
   }
 }
 
+/**
+ * Issue #5181: the branch-name override to apply for a picked branch. A local
+ * branch already checked out in another worktree can't be reused, so it must
+ * NOT be pinned as the override — pinning it would collide and silently produce
+ * a suffixed branch. In that case fall back to letting the worktree name derive
+ * a fresh branch from the selected ref as base; otherwise use the selection's
+ * override unchanged.
+ */
+export function resolveComposerReuseOverride(args: {
+  refName: string
+  localBranchName: string
+  branchNameOverride: string | undefined
+  branchCheckedOutElsewhere: boolean
+}): string | undefined {
+  if (args.branchCheckedOutElsewhere && args.refName === args.localBranchName) {
+    return undefined
+  }
+  return args.branchNameOverride
+}
+
 export function resolveComposerBranchNameOverrideForCreate(args: {
   branchNameOverride: string | undefined
   branchAutoName: string

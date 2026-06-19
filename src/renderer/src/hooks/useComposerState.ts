@@ -154,7 +154,8 @@ import {
   isBranchCheckedOutInWorktrees,
   resolveComposerBranchNameOverrideForCreate,
   resolveComposerBranchReuse,
-  resolveComposerBranchSelection
+  resolveComposerBranchSelection,
+  resolveComposerReuseOverride
 } from './composer-branch-selection'
 import { translate } from '@/i18n/i18n'
 
@@ -2159,6 +2160,11 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         setCompareBaseRef(undefined)
         setPushTarget(undefined)
         setBranchNameOverride(undefined)
+        // Why (#5181): reuse state is branch-scoped, so a repo switch must clear
+        // it alongside the branch override (matches the other reset paths).
+        setBranchNameOverridePreservesNameEdits(false)
+        setReuseEligibleBranch(null)
+        setReuseSelectedBranch(false)
         setForkPushWarning(null)
         setStartFromResetHint(hint)
       }
@@ -2230,6 +2236,10 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         setBaseBranch(undefined)
         setPushTarget(undefined)
         setBranchNameOverride(undefined)
+        // Why (#5181): clear branch-scoped reuse state on a project switch too.
+        setBranchNameOverridePreservesNameEdits(false)
+        setReuseEligibleBranch(null)
+        setReuseSelectedBranch(false)
         setForkPushWarning(null)
         setStartFromResetHint(null)
         return
@@ -2559,6 +2569,9 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       // renaming the worktree folder. Reuse is impossible when the branch is
       // already checked out in another worktree (git allows it in only one), so
       // gate eligibility on that and don't pin the override to a busy branch.
+      // Note: worktreesByRepo only covers visible worktrees; a branch busy only
+      // in a hidden external worktree falls through to the backend conflict
+      // check, which rejects it with a clear "already exists locally" error.
       const branchCheckedOutElsewhere = isBranchCheckedOutInWorktrees(
         localBranchName,
         (worktreesByRepo[repoId] ?? []).map((worktree) => worktree.branch)
@@ -2573,13 +2586,12 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       setReuseEligibleBranch(nextReuseEligibleBranch)
       setReuseSelectedBranch(defaultReuse)
       setBranchNameOverridePreservesNameEdits(defaultReuse)
-      // Why: a busy local branch can't be reused — keeping it as the override
-      // would collide and silently produce a suffixed branch, so drop it and let
-      // the worktree name derive a fresh branch from the selected ref as base.
-      const effectiveOverride =
-        branchCheckedOutElsewhere && refName === localBranchName
-          ? undefined
-          : selection.branchNameOverride
+      const effectiveOverride = resolveComposerReuseOverride({
+        refName,
+        localBranchName,
+        branchNameOverride: selection.branchNameOverride,
+        branchCheckedOutElsewhere
+      })
       if (selection.name !== undefined && selection.lastAutoName !== undefined) {
         setName(selection.name)
         lastAutoNameRef.current = selection.lastAutoName

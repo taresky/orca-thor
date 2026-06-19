@@ -701,9 +701,10 @@ export default function NewWorkspaceComposerCard({
                     type="checkbox"
                     checked={reuseSelectedBranch}
                     onChange={(event) => onReuseSelectedBranchChange(event.target.checked)}
-                    // Why: kept out of the tab order while collapsed so users can't
-                    // focus a hidden control on non-reusable branches.
-                    tabIndex={canReuseSelectedBranch ? undefined : -1}
+                    // Why: while collapsed the row is aria-hidden, so disable the
+                    // input too — keeps a hidden control out of the tab order and
+                    // fully inert (no focusable control inside an aria-hidden tree).
+                    disabled={!canReuseSelectedBranch}
                     className="sr-only"
                   />
                   <span>

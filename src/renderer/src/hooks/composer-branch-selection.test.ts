@@ -3,7 +3,8 @@ import {
   isBranchCheckedOutInWorktrees,
   resolveComposerBranchNameOverrideForCreate,
   resolveComposerBranchReuse,
-  resolveComposerBranchSelection
+  resolveComposerBranchSelection,
+  resolveComposerReuseOverride
 } from './composer-branch-selection'
 
 describe('resolveComposerBranchSelection', () => {
@@ -86,6 +87,45 @@ describe('isBranchCheckedOutInWorktrees', () => {
     ).toBe(true)
     expect(isBranchCheckedOutInWorktrees('feature-x', ['feature-x'])).toBe(true)
     expect(isBranchCheckedOutInWorktrees('feature-x', ['refs/heads/main', ''])).toBe(false)
+    expect(isBranchCheckedOutInWorktrees('feature-x', [])).toBe(false)
+  })
+})
+
+describe('resolveComposerReuseOverride', () => {
+  it('keeps the selection override for a reusable (non-busy) local branch', () => {
+    expect(
+      resolveComposerReuseOverride({
+        refName: 'feature-x',
+        localBranchName: 'feature-x',
+        branchNameOverride: 'feature-x',
+        branchCheckedOutElsewhere: false
+      })
+    ).toBe('feature-x')
+  })
+
+  it('drops the override for a local branch checked out in another worktree', () => {
+    // Why: pinning a busy branch would collide and produce a suffixed branch.
+    expect(
+      resolveComposerReuseOverride({
+        refName: 'feature-x',
+        localBranchName: 'feature-x',
+        branchNameOverride: 'feature-x',
+        branchCheckedOutElsewhere: true
+      })
+    ).toBeUndefined()
+  })
+
+  it('keeps the override for a remote-only ref even if its local name is busy', () => {
+    // Why: a remote-only ref (ref !== local name) creates a fresh local tracking
+    // branch, so the busy check on the local name must not drop its override.
+    expect(
+      resolveComposerReuseOverride({
+        refName: 'origin/feature-x',
+        localBranchName: 'feature-x',
+        branchNameOverride: 'feature-x',
+        branchCheckedOutElsewhere: true
+      })
+    ).toBe('feature-x')
   })
 })
 

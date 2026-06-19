@@ -232,21 +232,38 @@ describe('NewWorkspaceComposerCard folder task source mode', () => {
     )
   })
 
-  it('invokes onReuseSelectedBranchChange when the reuse checkbox is toggled', () => {
-    const changes: boolean[] = []
+  it('emits the toggled value from the reuse checkbox in both directions', () => {
+    const clickReuseCheckbox = (): void => {
+      const reuseLabel = [...(current?.container.querySelectorAll('label') ?? [])].find((label) =>
+        label.textContent?.includes('Reuse branch')
+      )
+      const checkbox = reuseLabel?.querySelector<HTMLInputElement>('input[type="checkbox"]')
+      expect(checkbox).toBeTruthy()
+      act(() => checkbox?.click())
+    }
+
+    // Checked -> unchecked (opting out of reuse).
+    const offChanges: boolean[] = []
     current = renderCard({
-      advancedOpen: true,
       canReuseSelectedBranch: true,
       reuseSelectedBranch: true,
-      onReuseSelectedBranchChange: (next) => changes.push(next)
+      onReuseSelectedBranchChange: (next) => offChanges.push(next)
     })
-    const reuseLabel = [...current.container.querySelectorAll('label')].find((label) =>
-      label.textContent?.includes('Reuse branch')
-    )
-    const checkbox = reuseLabel?.querySelector<HTMLInputElement>('input[type="checkbox"]')
-    expect(checkbox).toBeTruthy()
-    act(() => checkbox?.click())
-    expect(changes).toEqual([false])
+    clickReuseCheckbox()
+    expect(offChanges).toEqual([false])
+
+    act(() => current?.root.unmount())
+    current?.container.remove()
+
+    // Unchecked -> checked (opting into reuse — the action that pins the branch).
+    const onChanges: boolean[] = []
+    current = renderCard({
+      canReuseSelectedBranch: true,
+      reuseSelectedBranch: false,
+      onReuseSelectedBranchChange: (next) => onChanges.push(next)
+    })
+    clickReuseCheckbox()
+    expect(onChanges).toEqual([true])
   })
 
   it('does not disable folder workspace creation when only source lookup needs SSH', () => {
