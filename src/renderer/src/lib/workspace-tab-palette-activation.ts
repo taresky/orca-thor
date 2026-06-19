@@ -110,7 +110,6 @@ export function activateWorkspaceTabPaletteResult(
   }
 
   state.setActiveFile(result.entityId)
-  state.activateTab(result.tabId)
   state.setActiveTabType('editor')
   return { status: 'activated' }
 }

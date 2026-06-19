@@ -227,6 +227,56 @@ describe('activateWorkspaceTabPaletteResult', () => {
     expect(mocks.focusTerminalTabSurface).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['editor' as const, 'editor-tab-1', '/tmp/wt-1/src/app.ts'],
+    ['conflict-review' as const, 'conflict-tab-1', 'wt-1::conflict-review'],
+    ['check-details' as const, 'check-tab-1', 'wt-1::check-details::check-run:42']
+  ])('activates %s tabs with their exact unified tab id', (contentType, tabId, entityId) => {
+    mocks.store.unifiedTabsByWorktree = {
+      'wt-1': [
+        {
+          id: tabId,
+          entityId,
+          groupId: 'group-2',
+          worktreeId: 'wt-1',
+          contentType,
+          label: 'Editor tab',
+          customLabel: null,
+          color: null,
+          sortOrder: 0,
+          createdAt: 0
+        }
+      ]
+    }
+    mocks.store.groupsByWorktree = {
+      'wt-1': [
+        {
+          id: 'group-2',
+          worktreeId: 'wt-1',
+          activeTabId: tabId,
+          tabOrder: [tabId]
+        }
+      ]
+    }
+    mocks.store.openFiles = [{ id: entityId, worktreeId: 'wt-1' }]
+
+    expect(
+      activateWorkspaceTabPaletteResult(
+        makeResult({
+          tabId,
+          entityId,
+          groupId: 'group-2',
+          contentType
+        })
+      )
+    ).toEqual({ status: 'activated' })
+
+    expect(mocks.store.focusGroup).toHaveBeenCalledWith('wt-1', 'group-2')
+    expect(mocks.store.setActiveFile).toHaveBeenCalledWith(entityId)
+    expect(mocks.store.activateTab).toHaveBeenLastCalledWith(tabId)
+    expect(mocks.store.setActiveTabType).toHaveBeenCalledWith('editor')
+  })
+
   it('returns stale failures before focusing a removed group or tab', () => {
     mocks.store.groupsByWorktree = { 'wt-1': [] }
 

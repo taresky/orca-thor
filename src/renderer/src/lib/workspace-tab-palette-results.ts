@@ -67,6 +67,8 @@ function scoreWorkspaceTabMatch({
   matchIndex: number
   entry: SearchableWorkspaceTab
 }): number {
+  // Why: lower scores rank first; field weights preserve title > path > agent
+  // snippet > worktree > repo ordering while tab position breaks ties.
   let score =
     fieldWeight +
     matchIndex +

@@ -1,3 +1,4 @@
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { RetainedAgentEntry } from '@/store/slices/agent-status'
 import type { OpenFile } from '@/store/slices/editor'
@@ -6,11 +7,15 @@ import type { SleepingAgentSessionRecord } from '../../../shared/agent-session-r
 import type { Tab, TabGroup, TerminalTab, Worktree } from '../../../shared/types'
 import { buildSearchableWorkspaceTabs, searchWorkspaceTabs } from './workspace-tab-palette-search'
 
+const WT_ROOT = path.join('tmp', 'wt-1')
+const SRC_APP_RELATIVE_PATH = path.join('src', 'app.ts')
+const SRC_APP_PATH = path.join(WT_ROOT, SRC_APP_RELATIVE_PATH)
+
 function makeWorktree(overrides: Partial<Worktree> = {}): Worktree {
   return {
     id: 'wt-1',
     repoId: 'repo-1',
-    path: '/tmp/wt-1',
+    path: WT_ROOT,
     head: 'abc123',
     branch: 'refs/heads/feature/workspace-tab-search',
     isBare: false,
@@ -61,9 +66,9 @@ function makeTerminalTab(overrides: Partial<TerminalTab> = {}): TerminalTab {
 
 function makeOpenFile(overrides: Partial<OpenFile> = {}): OpenFile {
   return {
-    id: '/tmp/wt-1/src/app.ts',
-    filePath: '/tmp/wt-1/src/app.ts',
-    relativePath: 'src/app.ts',
+    id: SRC_APP_PATH,
+    filePath: SRC_APP_PATH,
+    relativePath: SRC_APP_RELATIVE_PATH,
     worktreeId: 'wt-1',
     language: 'typescript',
     isDirty: false,
@@ -167,10 +172,12 @@ describe('workspace-tab-palette-search', () => {
   })
 
   it('indexes editor-family tabs through existing editor labels and paths', () => {
+    const previewRelativePath = path.join('docs', 'readme.md')
+    const previewPath = path.join(WT_ROOT, previewRelativePath)
     const file = makeOpenFile({
-      id: '/tmp/wt-1/docs/readme.md:preview',
-      filePath: '/tmp/wt-1/docs/readme.md',
-      relativePath: 'docs/readme.md',
+      id: `${previewPath}:preview`,
+      filePath: previewPath,
+      relativePath: previewRelativePath,
       mode: 'markdown-preview'
     })
     const entries = buildEntries({
@@ -184,7 +191,7 @@ describe('workspace-tab-palette-search', () => {
           }),
           makeUnifiedTab({
             id: 'missing-diff',
-            entityId: '/tmp/wt-1/missing.ts',
+            entityId: path.join(WT_ROOT, 'missing.ts'),
             contentType: 'diff'
           })
         ]
@@ -203,10 +210,84 @@ describe('workspace-tab-palette-search', () => {
 
     expect(entries.map((entry) => entry.tab.id)).toEqual(['editor-preview'])
     expect(searchWorkspaceTabs(entries, 'preview')[0]?.title).toBe('readme.md (preview)')
-    expect(searchWorkspaceTabs(entries, 'docs/readme')[0]?.secondaryRange).toEqual({
+    expect(searchWorkspaceTabs(entries, path.join('docs', 'readme'))[0]?.secondaryRange).toEqual({
       start: 0,
       end: 11
     })
+  })
+
+  it('indexes all editor-family content types when their backing file is open', () => {
+    const editorFile = makeOpenFile({
+      id: SRC_APP_PATH,
+      filePath: SRC_APP_PATH,
+      relativePath: SRC_APP_RELATIVE_PATH,
+      mode: 'edit'
+    })
+    const diffFile = makeOpenFile({
+      id: 'wt-1::diff::staged::src/app.ts',
+      filePath: SRC_APP_PATH,
+      relativePath: SRC_APP_RELATIVE_PATH,
+      mode: 'diff',
+      diffSource: 'staged'
+    })
+    const conflictReviewFile = makeOpenFile({
+      id: 'wt-1::conflict-review',
+      filePath: WT_ROOT,
+      relativePath: 'Conflict Review',
+      mode: 'conflict-review'
+    })
+    const checkDetailsFile = makeOpenFile({
+      id: 'wt-1::check-details::check-run:42',
+      filePath: WT_ROOT,
+      relativePath: 'CI / Typecheck',
+      mode: 'check-details'
+    })
+    const files = [editorFile, diffFile, conflictReviewFile, checkDetailsFile]
+    const entries = buildEntries({
+      unifiedTabsByWorktree: {
+        'wt-1': [
+          makeUnifiedTab({
+            id: 'editor-tab',
+            entityId: editorFile.id,
+            contentType: 'editor'
+          }),
+          makeUnifiedTab({
+            id: 'diff-tab',
+            entityId: diffFile.id,
+            contentType: 'diff'
+          }),
+          makeUnifiedTab({
+            id: 'conflict-tab',
+            entityId: conflictReviewFile.id,
+            contentType: 'conflict-review'
+          }),
+          makeUnifiedTab({
+            id: 'check-tab',
+            entityId: checkDetailsFile.id,
+            contentType: 'check-details'
+          })
+        ]
+      },
+      openFiles: files,
+      groupsByWorktree: {
+        'wt-1': [
+          makeGroup({
+            activeTabId: 'editor-tab',
+            tabOrder: ['editor-tab', 'diff-tab', 'conflict-tab', 'check-tab']
+          })
+        ]
+      }
+    })
+
+    expect(entries.map((entry) => entry.tab.contentType)).toEqual([
+      'editor',
+      'diff',
+      'conflict-review',
+      'check-details'
+    ])
+    expect(searchWorkspaceTabs(entries, 'staged diff')[0]?.tabId).toBe('diff-tab')
+    expect(searchWorkspaceTabs(entries, 'conflict review')[0]?.tabId).toBe('conflict-tab')
+    expect(searchWorkspaceTabs(entries, 'typecheck')[0]?.tabId).toBe('check-tab')
   })
 
   it('attaches live, retained, and sleeping agent metadata only to matching terminal tabs', () => {

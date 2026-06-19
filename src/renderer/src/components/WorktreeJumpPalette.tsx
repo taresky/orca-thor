@@ -570,7 +570,9 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
             repoName,
             worktreeSortIndex,
             isCurrentPage:
-              workspace.id === activeBrowserTabId && workspace.activePageId === page.id,
+              activeTabType === 'browser' &&
+              workspace.id === activeBrowserTabId &&
+              workspace.activePageId === page.id,
             isCurrentWorktree: activeWorktreeId === worktree.id
           })
         }
@@ -579,6 +581,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
     return entries
   }, [
     activeBrowserTabId,
+    activeTabType,
     activeWorktreeId,
     browserPagesByWorkspace,
     browserTabsByWorktree,
@@ -721,6 +724,8 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
     (BrowserPaletteItem | SimulatorPaletteItem | WorkspaceTabPaletteItem)[]
   >(
     () =>
+      // Why: these result builders emit comparable ascending scores, so one sort
+      // keeps cross-source ranking consistent within the OPEN TABS section.
       [...browserItems, ...simulatorItems, ...workspaceTabItems].sort((a, b) => {
         if (a.result.score !== b.result.score) {
           return a.result.score - b.result.score
