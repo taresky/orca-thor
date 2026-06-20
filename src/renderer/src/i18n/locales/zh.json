@@ -4345,7 +4345,7 @@
           "e4a28e8894": "Codex 报告 {{value0}} 登录需要重新登录。在开始新的 Codex 会话之前再次登录。",
           "75ca9b718e": "Codex 报告活动账户需要重新登录。在开始新的 Codex 会话之前重新对其进行身份验证。",
           "b11078a9c2": "wsl",
-          "350b2a1aa7": "Use your current",
+          "350b2a1aa7": "用你已有的",
           "e05d0ff737": "使用您当前 {{value0}} Claude 登录名。"
         },
         "AdvancedPane": {
@@ -4370,19 +4370,19 @@
           "f97b986b7f": "wsl"
         },
         "AgentSkillSetupPanel": {
-          "0b810ec59f": "Press Enter to run the command.",
+          "0b810ec59f": "按 Enter 运行命令。",
           "ed197f59a2": "复制命令",
-          "817d3f9f18": "Copy command",
+          "817d3f9f18": "复制命令",
           "5289300939": "未安装",
           "9fcebceb2a": "已安装",
           "68a468752e": "检查中...",
           "c689392435": "重新检查",
-          "a31e2aa302": "Failed to copy command.",
-          "378ad26865": "Copied command.",
-          "copiedCommand": "Copied command.",
-          "failedToCopyCommand": "Failed to copy command.",
-          "copyCommandAria": "Copy command",
-          "runCommandDescription": "Press Enter to run the command."
+          "a31e2aa302": "复制命令失败。",
+          "378ad26865": "已复制命令。",
+          "copiedCommand": "已复制命令。",
+          "failedToCopyCommand": "复制命令失败。",
+          "copyCommandAria": "复制命令",
+          "runCommandDescription": "按 Enter 运行命令。"
         },
         "AgentsPane": {
           "d83834f5e6": "检测已安装的 Agent...",
@@ -4394,7 +4394,7 @@
           "92033495ff": "自动",
           "9b175d0f5e": "打开新工作区时预先选择的 Agent。",
           "385212c7a1": "默认 Agent",
-          "f9f127d664": "Override the binary path or name, and edit the default launch arguments or environment for this agent.",
+          "f9f127d664": "覆盖二进制路径或名称，并编辑此 agent 的默认启动参数或环境。",
           "f95b5c79b8": "安装",
           "fe4d630c94": "文档",
           "8dc0192e48": "已禁用",
@@ -4417,14 +4417,14 @@
           "cfb3f35775": "参数",
           "6f99bf5dd0": "无默认参数",
           "8fbe1f37c1": "环境",
-          "2d133152fa": "No default environment",
-          "agentPermissions": "Agent Permissions",
-          "agentPermissionsInfo": "Agent permissions info",
+          "2d133152fa": "无默认环境",
+          "agentPermissions": "Agent 权限",
+          "agentPermissionsInfo": "Agent 权限信息",
           "agentPermissionsTooltip": "Custom agent arguments stay unchanged when switching modes.",
-          "agentPermissionsDescription": "Choose whether Orca launches agents with fewer permission prompts or with manual checks.",
+          "agentPermissionsDescription": "选择 Orca 是以更少的权限提示启动 agent，还是手动检查。",
           "agentPermissionsYolo": "Yolo",
-          "agentPermissionsManual": "Manual",
-          "3f1bdf3cb4": "Environment text is too large to parse safely."
+          "agentPermissionsManual": "手动",
+          "3f1bdf3cb4": "环境文本过长，无法安全解析。"
         },
         "AppIconSelector": {
           "d5a112dc9b": "下一个图标",
@@ -4567,9 +4567,9 @@
           "7b649a578a": "创建中…",
           "4399c77caa": "默认",
           "4af9a17947": "kagi",
-          "c0f85056d9": "Browser profiles on this Orca server.",
-          "86b7c83fee": "This computer",
-          "6480776a03": "Browser profiles for the selected host.",
+          "c0f85056d9": "此 Orca 服务器上的浏览器配置。",
+          "86b7c83fee": "本机",
+          "6480776a03": "所选主机的浏览器配置。",
           "5e19a692f7": "主机"
         },
         "BrowserProfileRow": {
@@ -4872,8 +4872,8 @@
           "d58fccfd84": "导航",
           "5cb5475664": "关闭固定标签页前确认",
           "36b2a5dc6d": "关闭固定标签页前显示确认对话框。",
-          "projectRuntime": "Project Runtime",
-          "projectRuntimeDescription": "Default runtime for local Windows projects that do not override it."
+          "projectRuntime": "项目运行时",
+          "projectRuntimeDescription": "不覆盖此项的本地 Windows 项目的默认运行时。"
         },
         "GeneralSupportSection": {
           "af7d9f4396": "感谢您的支持！",
@@ -5076,10 +5076,10 @@
           "a565377c38": "未安装",
           "15cf990798": "未经过验证",
           "f7eb5f0b24": "未安装",
-          "3ba07f933b": "Connect issue trackers Orca can use to browse tasks and start workspaces with linked context.",
-          "70e885705b": "Task providers",
-          "1683acbac4": "Connect the source hosts Orca can use for pull requests, merge requests, checks, and review status.",
-          "298c65ecac": "Review providers"
+          "3ba07f933b": "连接 Orca 可用于浏览任务并启动带链接上下文工作区的议题追踪器。",
+          "70e885705b": "任务提供商",
+          "1683acbac4": "连接 Orca 可用于 pull request、merge request、检查和评审状态的源代码主机。",
+          "298c65ecac": "评审提供商"
         },
         "KagiSessionLinkForm": {
           "92f0b4e472": "清除",
@@ -5523,27 +5523,27 @@
           "ee5a290616": "作为文件夹打开。 Git 功能对此工作区不可用。",
           "323debba71": "类型：",
           "499a437335": "身份",
-          "availableHosts": "Available Hosts",
-          "availableHostsDescription": "Hosts where this project is set up.",
-          "availableHostsHelp": "Project paths and worktree settings are host-specific; creating a workspace can target any ready setup.",
-          "viewingHost": "Viewing host",
+          "availableHosts": "可用主机",
+          "availableHostsDescription": "已设置此项目的主机。",
+          "availableHostsHelp": "项目路径和工作树设置按主机独立；创建工作区时可指向任意已就绪的设置。",
+          "viewingHost": "查看主机",
           "currentSetup": "Current",
           "hostSetupStateReady": "Ready",
-          "hostSetupStateNotSetUp": "Not set up",
-          "hostSetupStateSettingUp": "Setting up",
-          "hostSetupStateError": "Error",
-          "hostSetupStateUnsupported": "Unsupported",
-          "setupPathPending": "Path pending",
+          "hostSetupStateNotSetUp": "未设置",
+          "hostSetupStateSettingUp": "设置中",
+          "hostSetupStateError": "错误",
+          "hostSetupStateUnsupported": "不支持",
+          "setupPathPending": "路径待定",
           "openSetup": "Open",
           "removeSetup": "Remove",
-          "hostSetupBlockedVersion": "Orca server version is incompatible",
-          "hostSetupMissingCapability": "Update Orca on this host to set up projects",
-          "setupProjectOnHost": "Set up on another host",
-          "setupProjectOnHostHelp": "Choose a host, then import an existing checkout, clone the repository there, or track a setup that will be provisioned later.",
+          "hostSetupBlockedVersion": "Orca 服务器版本不兼容",
+          "hostSetupMissingCapability": "在此主机上更新 Orca 以设置项目",
+          "setupProjectOnHost": "在其他主机上设置",
+          "setupProjectOnHostHelp": "选择一台主机，然后导入已有检出、在那里克隆仓库，或跟踪稍后才配置的设置。",
           "setupExistingFolder": "导入现有文件夹",
-          "setupExistingFolderHelp": "Make this project available on another host by linking a checkout that already exists there.",
+          "setupExistingFolderHelp": "通过链接那台主机上已有的检出，让此项目在其他主机也可用。",
           "setupExistingFolderPathPlaceholder": "/path/to/project/on/host",
-          "cloneUrlPlaceholder": "Repository URL",
+          "cloneUrlPlaceholder": "仓库 URL",
           "cloneDestinationPlaceholder": "/destination/on/host",
           "setupKindGit": "Git repo",
           "setupKindFolder": "文件夹",
@@ -5552,27 +5552,27 @@
           "cloningHost": "克隆中...",
           "cloneHost": "克隆",
           "creatingPendingSetup": "Creating...",
-          "createPendingSetup": "Track setup",
-          "hostSetupCheckingCapability": "Checking host capabilities",
-          "hostAvailability": "Host availability",
-          "hostAvailabilityHelp": "Add this same project on another connected host.",
-          "addToAnotherHost": "Add to another host",
-          "addProjectHost": "Add project to host",
-          "addProjectHostHelp": "Choose where this project should also be available.",
+          "createPendingSetup": "跟踪设置",
+          "hostSetupCheckingCapability": "检查主机能力",
+          "hostAvailability": "主机可用性",
+          "hostAvailabilityHelp": "在另一台已连接的主机上添加此项目。",
+          "addToAnotherHost": "添加到其他主机",
+          "addProjectHost": "将项目添加到主机",
+          "addProjectHostHelp": "选择此项目还应在何处可用。",
           "closeHostSetup": "关闭",
           "setupHostLabel": "主机",
           "browseFolder": "浏览文件夹",
-          "browseFolderHelp": "Use an existing checkout or folder on this host.",
-          "otherWaysToAdd": "Other ways to add",
-          "cloneFromUrl": "Clone from URL",
-          "cloneFromUrlHelp": "Clone this repository onto the selected host.",
-          "addPlannedHost": "Add host placeholder",
-          "addPlannedHostHelp": "Remember this host and finish adding the project later.",
-          "existingFolder": "Existing folder",
+          "browseFolderHelp": "使用此主机上已有的检出或文件夹。",
+          "otherWaysToAdd": "其他添加方式",
+          "cloneFromUrl": "从 URL 克隆",
+          "cloneFromUrlHelp": "将此仓库克隆到所选主机。",
+          "addPlannedHost": "添加主机占位符",
+          "addPlannedHostHelp": "记下此主机，稍后再完成添加项目。",
+          "existingFolder": "已有文件夹",
           "addPlannedHostToHost": "Add {{host}}",
-          "addPlannedHostConfirm": "This only records that the project should be available on this host. You can add the folder or clone later.",
-          "projectRuntime": "Project Runtime",
-          "projectRuntimeDescription": "Choose whether this project runs on Windows or WSL."
+          "addPlannedHostConfirm": "这仅记录项目应在此主机上可用。你可以稍后添加文件夹或克隆。",
+          "projectRuntime": "项目运行时",
+          "projectRuntimeDescription": "选择此项目运行在 Windows 还是 WSL。"
         },
         "RepositorySourceControlAiActionRows": {
           "548a6e1281": "命令模板",
@@ -5750,9 +5750,9 @@
           "65660d4548": "macOS 权限",
           "c6c01ac209": "通过手机控制终端和智能体。",
           "c40dadaac8": "移动端",
-          "c2ee313198": "Use existing machines over SSH for files, terminals, Git, and workspaces.",
+          "c2ee313198": "通过 SSH 使用已有机器处理文件、terminals、Git 和工作区。",
           "9b02492d1f": "SSH 远程主机",
-          "b5ee17826b": "Pair remote Orca runtimes for persistent sessions, richer remote state, and web or mobile handoff.",
+          "b5ee17826b": "配对远程 Orca 运行时，以获得持久会话、更丰富的远程状态，以及 Web 或移动端接续。",
           "7686cb5c36": "将此浏览器连接到已保存的 Orca 服务器。",
           "bd0181eeca": "远程 Orca 服务器",
           "8acf3f22e0": "Orca 统计数据以及 Claude、Codex 和 OpenCode 使用情况分析。",
@@ -5802,7 +5802,7 @@
           "43b68e10f0": "您有未保存的 Git AI Author 更改。离开将丢弃它们。",
           "17bdee4ff1": "放弃未保存的 Git AI Author 更改？",
           "084d8fac5b": "隐私与安全",
-          "23931df7e8": "Remote Hosts",
+          "23931df7e8": "远程主机",
           "mobile_group": "移动端",
           "8bd117d669": "界面",
           "e1578cd4bc": "工作流程",
@@ -5826,10 +5826,10 @@
           "cb330ef7f8": "{{value0}} 的",
           "c822571b2e": "匹配“{{value0}}”",
           "3119c012a5": "字符串",
-          "builtin_themes": "Built-in",
-          "imported_from": "Imported from {{value0}}",
-          "imported_themes": "Imported",
-          "search_terminal_themes": "Search terminal themes"
+          "builtin_themes": "内置",
+          "imported_from": "从 {{value0}} 导入",
+          "imported_themes": "已导入",
+          "search_terminal_themes": "搜索 terminal 主题"
         },
         "SettingsSidebar": {
           "e0900f83e7": "SSH",
@@ -6172,8 +6172,8 @@
           "29154326bb": "在",
           "ab20575a8a": "离开",
           "ab3a1f9068": "执行程序",
-          "ask_before_closing_running_terminals_title": "Ask Before Closing Running Terminals",
-          "ask_before_closing_running_terminals_description": "Show a confirmation before closing a terminal that has a running command or agent."
+          "ask_before_closing_running_terminals_title": "关闭运行中的 Terminal 前询问",
+          "ask_before_closing_running_terminals_description": "在关闭有运行中命令或 agent 的 terminal 前显示确认。"
         },
         "TerminalSettingsPreview": {
           "a63953a48a": "预览 {{value0}} 主题",
@@ -6197,8 +6197,8 @@
           "7add204bd5": "选择深色模式下使用的 terminal 主题。",
           "9499ad1dc4": "黑暗主题",
           "f012172e21": "选择深色模式下用于 terminal 窗格的主题。",
-          "import_themes_title": "Import Themes",
-          "import_themes_description": "Imported themes are available in both the dark and light theme pickers."
+          "import_themes_title": "导入主题",
+          "import_themes_description": "已导入的主题在深色和浅色主题选择器中都可用。"
         },
         "TerminalWindowSection": {
           "1705318506": "ANSI 洋红色",
@@ -6469,8 +6469,8 @@
             "8a17fd6026": "稳定",
             "a79d266f71": "会话",
             "afbf35be68": "稳定会话",
-            "agentPermissions": "Agent Permissions",
-            "agentPermissionsDescription": "Switch agent permission defaults between Yolo and Manual."
+            "agentPermissions": "Agent 权限",
+            "agentPermissionsDescription": "在 Yolo 和手动之间切换 agent 权限默认值。"
           }
         },
         "appearance": {
@@ -6553,8 +6553,8 @@
             "f4997e0f8a": "联系",
             "a278406ed5": "偏僻的",
             "6ecad74eb3": "SSH",
-            "f17d66d0d2": "Show remote host connection status in the status bar.",
-            "57fb424c56": "Remote Hosts",
+            "f17d66d0d2": "在状态栏显示远程主机连接状态。",
+            "57fb424c56": "远程主机",
             "35565867cb": "登月计划",
             "de586def95": "订阅",
             "00a028f25f": "用法",
@@ -7042,8 +7042,8 @@
             "4c95d08fa2": "工作区目录",
             "161a86a9da": "关闭固定标签页前确认",
             "8e593f04fc": "关闭固定标签页前显示确认对话框。",
-            "defaultProjectRuntime": "Default Project Runtime",
-            "defaultProjectRuntimeDescription": "Choose the runtime inherited by local Windows projects."
+            "defaultProjectRuntime": "默认项目运行时",
+            "defaultProjectRuntimeDescription": "选择本地 Windows 项目继承的运行时。"
           }
         },
         "git": {
@@ -7509,16 +7509,16 @@
             "92af66c7ce": "项目名称",
             "883aad2801": "侧边栏和选项卡的项目特定显示详细信息。",
             "7e1e456a95": "显示名称",
-            "availableHosts": "Available Hosts",
-            "availableHostsDescription": "Hosts where this project is set up.",
+            "availableHosts": "可用主机",
+            "availableHostsDescription": "已设置此项目的主机。",
             "host": "主机",
             "ssh": "ssh",
             "remote": "远程",
             "vm": "vm",
             "keepForkUpToDate": "保持 Fork 最新",
             "keepForkUpToDateDescription": "从 upstream 安全地快进此 Fork。",
-            "projectRuntime": "Project Runtime",
-            "projectRuntimeDescription": "Choose whether this project runs on Windows or WSL.",
+            "projectRuntime": "项目运行时",
+            "projectRuntimeDescription": "选择此项目运行在 Windows 还是 WSL。",
             "copy": "copy",
             "clone": "clone",
             "apfs": "apfs"
@@ -7796,20 +7796,20 @@
             "0fe0073f0c": "新窗格和实时更新的默认 terminal 字体大小。",
             "5930244899": "字体大小",
             "warp_import": {
-              "title": "Import themes from Warp",
-              "description": "Import Warp themes as Orca terminal themes.",
+              "title": "从 Warp 导入主题",
+              "description": "将 Warp 主题导入为 Orca terminal 主题。",
               "keyword_warp": "warp",
               "keyword_themes": "themes",
               "keyword_yaml": "yaml"
             },
             "yaml_import": {
-              "title": "Import from YAML",
-              "description": "Import theme YAML files as Orca terminal themes.",
+              "title": "从 YAML 导入",
+              "description": "将主题 YAML 文件导入为 Orca terminal 主题。",
               "keyword_yaml": "yaml",
               "keyword_custom": "自定义"
             },
-            "ask_before_closing_running_terminals_title": "Ask Before Closing Running Terminals",
-            "ask_before_closing_running_terminals_description": "Show a confirmation before closing a terminal that has a running command or agent."
+            "ask_before_closing_running_terminals_title": "关闭运行中的 Terminal 前询问",
+            "ask_before_closing_running_terminals_description": "在关闭有运行中命令或 agent 的 terminal 前显示确认。"
           },
           "windows": {
             "search": {
@@ -7926,65 +7926,65 @@
           }
         },
         "WarpThemeImportModal": {
-          "title": "Import themes from Warp",
-          "description": "Import Warp themes as Orca terminal themes.",
-          "yaml_title": "Import theme YAML",
-          "yaml_description": "Import theme YAML files (Warp format) as Orca terminal themes.",
-          "yaml_no_themes_found": "No themes found in the selected files.",
+          "title": "从 Warp 导入主题",
+          "description": "将 Warp 主题导入为 Orca terminal 主题。",
+          "yaml_title": "导入主题 YAML",
+          "yaml_description": "将主题 YAML 文件（Warp 格式）导入为 Orca terminal 主题。",
+          "yaml_no_themes_found": "所选文件中未找到主题。",
           "choose_file": "选择文件",
-          "choose_folder": "Choose Folder",
+          "choose_folder": "选择文件夹",
           "loading": "正在加载 Warp 主题...",
-          "found_theme_one": "Found 1 theme",
-          "found_theme_other": "Found {{value0}} themes",
-          "found_in_source": " in {{value0}}",
-          "clear_all": "Clear all",
-          "select_all": "Select all",
-          "colors_only": "Colors only",
-          "no_themes_found": "No custom Warp themes found.",
-          "builtin_themes_hint": "Warp's preloaded themes are part of the Warp app and can't be read from disk. Orca already includes most of them, like Dracula, Gruvbox, Solarized, and Tokyo Night.",
+          "found_theme_one": "找到 1 个主题",
+          "found_theme_other": "找到 {{value0}} 个主题",
+          "found_in_source": " 位于 {{value0}}",
+          "clear_all": "全部清除",
+          "select_all": "全选",
+          "colors_only": "仅颜色",
+          "no_themes_found": "未找到自定义 Warp 主题。",
+          "builtin_themes_hint": "Warp 的预装主题是 Warp 应用的一部分，无法从磁盘读取。Orca 已包含其中大多数，如 Dracula、Gruvbox、Solarized 和 Tokyo Night。",
           "custom_theme_yaml_hint": "自定义和社区主题必须以 YAML 文件形式存在于 Warp themes 文件夹中，自动导入才能发现它们。如果你克隆了 Warp 的公开主题 repo，请使用 Choose Folder 导入该 repo 副本。",
           "choose_manually": "选择主题 YAML 文件或文件夹以手动导入。",
-          "skipped_files": "Skipped files",
-          "more_skipped_files": "{{value0}} more skipped files.",
+          "skipped_files": "已跳过文件",
+          "more_skipped_files": "还有 {{value0}} 个已跳过的文件。",
           "cancel": "取消",
-          "import_theme_one": "Import 1 Theme",
-          "import_theme_other": "Import {{value0}} Themes",
-          "import_themes": "Import Themes"
+          "import_theme_one": "导入 1 个主题",
+          "import_theme_other": "导入 {{value0}} 个主题",
+          "import_themes": "导入主题"
         },
         "useWarpThemeImport": {
           "unknown_error": "未知错误",
-          "imported_one": "Imported 1 theme",
-          "imported_other": "Imported {{value0}} themes",
+          "imported_one": "已导入 1 个主题",
+          "imported_other": "已导入 {{value0}} 个主题",
           "import_failed": "导入主题失败",
-          "over_limit_one": "Importing these themes would exceed the {{value0}} custom terminal theme limit. Deselect 1 new theme and try again.",
-          "over_limit_other": "Importing these themes would exceed the {{value0}} custom terminal theme limit. Deselect {{value1}} new themes and try again."
+          "over_limit_one": "导入这些主题会超出 {{value0}} 个自定义 terminal 主题的上限。请取消选择 1 个新主题后重试。",
+          "over_limit_other": "导入这些主题会超出 {{value0}} 个自定义 terminal 主题的上限。请取消选择 {{value1}} 个新主题后重试。"
         },
         "YamlThemeImportButton": {
-          "label": "Import from YAML"
+          "label": "从 YAML 导入"
         },
         "cli": {
           "source": {
             "control": {
               "integration": {
                 "cards": {
-                  "d5b3be8ecd": "Re-check",
-                  "8cbc39f862": "Learn more",
+                  "d5b3be8ecd": "重新检查",
+                  "8cbc39f862": "了解更多",
                   "707180d09c": "glab auth login",
-                  "4be0616873": "The GitLab CLI is installed but not authenticated. Run this command in a terminal:",
+                  "4be0616873": "GitLab CLI 已安装但未通过身份验证。请在 terminal 中运行此命令：",
                   "54a640af7a": "Install GitLab CLI",
                   "b56fd5676a": "Install the GitLab CLI to enable merge requests, issues, and pipelines.",
-                  "faddeb763d": "GitLab CLI status is not available in this runtime yet.",
-                  "a47f71e357": "CLI.",
+                  "faddeb763d": "此运行时暂不支持 GitLab CLI 状态。",
+                  "a47f71e357": "CLI。",
                   "2a6b359e75": "glab",
-                  "1f2b347bd3": "Merge requests, issues, todos, and pipelines via the",
+                  "1f2b347bd3": "通过",
                   "8d90249d22": "gh auth login",
-                  "2e44dda68a": "The GitHub CLI is installed but not authenticated. Run this command in a terminal:",
+                  "2e44dda68a": "GitHub CLI 已安装但未通过身份验证。请在 terminal 中运行此命令：",
                   "7755c28af5": "Install GitHub CLI",
                   "23cb5a0dee": "Install the GitHub CLI to enable pull requests, issues, and checks.",
-                  "6f30fc4216": "GitHub CLI status is not available in this runtime yet.",
+                  "6f30fc4216": "此运行时暂不支持 GitHub CLI 状态。",
                   "6b2cfb52b4": "gh",
-                  "b4d900e7f1": "Pull requests, issues, and checks via the",
-                  "account_scope_prefix": "Account scope"
+                  "b4d900e7f1": "通过",
+                  "account_scope_prefix": "账户范围"
                 }
               }
             }
@@ -7994,27 +7994,27 @@
           "tracker": {
             "integration": {
               "cards": {
-                "c90f2ef419": "Re-check",
+                "c90f2ef419": "重新检查",
                 "dd3529015d": "Disconnect {{value0}}",
-                "8b2408a8e5": "Jira is connected for this runtime. Re-check if the connected site list looks stale.",
-                "8c20e76308": "Each connected Jira site has one token stored by the active runtime.",
-                "c24e56c532": "Test",
+                "8b2408a8e5": "此运行时已连接 Jira。如果已连接的站点列表看起来过期，请重新检查。",
+                "8c20e76308": "每个已连接的 Jira 站点都由活动运行时存储一个 token。",
+                "c24e56c532": "测试",
                 "3e7c10d286": "Testing...",
-                "a2c0015fb8": "Verified",
+                "a2c0015fb8": "已验证",
                 "e2ff968276": "连接 Jira",
-                "60996beda6": "Add Jira site",
-                "7ca5ffffdb": "Browse, create, and start work from Jira Cloud issues.",
-                "a1093a06c7": "Checking Jira access before showing setup actions.",
+                "60996beda6": "添加 Jira 站点",
+                "7ca5ffffdb": "从 Jira Cloud 议题浏览、创建并开始工作。",
+                "a1093a06c7": "在显示设置操作前正在检查 Jira 访问权限。",
                 "9fa04a032e": "{{value0}} site{{value1}} connected",
-                "cef18762a2": "Add access with a Personal API key from your Linear settings. Full-access keys can see every team the key owner can reach.",
+                "cef18762a2": "用 Linear 设置里的个人 API 密钥添加访问权限。完全访问密钥可看到密钥所有者能访问的所有团队。",
                 "6224fe9d34": "每个已连接的 Linear 工作区都有一个由活动运行时存储的密钥。全权限密钥可覆盖密钥所有者可访问的所有团队；受限密钥可随时更换。",
                 "1a12e33fe5": "添加 Linear 访问",
-                "622c224082": "Add workspace access",
+                "622c224082": "添加工作区访问权限",
                 "eae4a9f16b": "添加 Linear 访问以浏览和链接议题。",
-                "fe9231215b": "Checking Linear access before showing setup actions.",
+                "fe9231215b": "在显示设置操作前正在检查 Linear 访问权限。",
                 "e1f5e6424c": "{{value0}} workspace{{value1}} connected",
                 "disconnect_all": "断开连接",
-                "account_scope_prefix": "Account scope"
+                "account_scope_prefix": "账户范围"
               }
             }
           }
@@ -8024,55 +8024,55 @@
             "control": {
               "integration": {
                 "cards": {
-                  "793a06e899": "Re-check",
-                  "1a9475dace": "Learn more",
-                  "19fb419c12": "Gitea credentials are configured but could not authenticate. Check the token, API base URL, and repository permissions, then restart Orca if environment variables changed.",
-                  "60708f23da": "only when Orca cannot derive the API URL from the remote.",
+                  "793a06e899": "重新检查",
+                  "1a9475dace": "了解更多",
+                  "19fb419c12": "Gitea 凭据已配置但无法通过身份验证。请检查 token、API 基础 URL 和仓库权限；如果环境变量已更改，请重启 Orca。",
+                  "60708f23da": "仅当 Orca 无法从 remote 推导出 API URL 时。",
                   "709057ad91": "ORCA_GITEA_API_BASE_URL",
-                  "6da9dfa5de": "for private repositories, and set",
+                  "6da9dfa5de": "用于私有仓库，并设置",
                   "6d5c2a3005": "ORCA_GITEA_TOKEN",
-                  "fcbe0469fd": "Public repositories are detected from their git remote. Set",
-                  "0613928cb3": "Gitea status is not available in this runtime yet.",
-                  "05863d2599": "Pull requests and commit statuses via the Gitea REST API.",
-                  "52f75876be": "Pull requests and commit statuses for detected repositories",
+                  "fcbe0469fd": "公开仓库会从其 git remote 检测。设置",
+                  "0613928cb3": "此运行时暂不支持 Gitea 状态。",
+                  "05863d2599": "通过 Gitea REST API 获取 pull request 和 commit 状态。",
+                  "52f75876be": "已检测仓库的 pull request 和 commit 状态",
                   "0b5242f8a2": "{{value0}} · Pull requests and commit statuses",
-                  "40f678df73": "Azure DevOps credentials are configured but could not authenticate. Check the token, API base URL, and repository permissions, then restart Orca if environment variables changed.",
-                  "7bd345e3f6": "only when Orca cannot derive the API base URL from the git remote.",
+                  "40f678df73": "Azure DevOps 凭据已配置但无法通过身份验证。请检查 token、API 基础 URL 和仓库权限；如果环境变量已更改，请重启 Orca。",
+                  "7bd345e3f6": "仅当 Orca 无法从 git remote 推导出 API 基础 URL 时。",
                   "186a6689df": "ORCA_AZURE_DEVOPS_API_BASE_URL",
-                  "b8a10b07c1": ". Set",
+                  "b8a10b07c1": "。设置",
                   "fbfd237f5e": "ORCA_AZURE_DEVOPS_ACCESS_TOKEN",
-                  "087feb92f1": ", or set",
+                  "087feb92f1": "，或设置",
                   "48842720d2": "ORCA_AZURE_DEVOPS_TOKEN",
-                  "7bbc9c64f0": "Set",
-                  "f3f47dc7de": "Azure DevOps status is not available in this runtime yet.",
-                  "0eb50d5593": "Pull requests and build statuses via Azure DevOps REST API tokens.",
-                  "54636c65d4": "Pull requests and build statuses for detected Azure Repos",
+                  "7bbc9c64f0": "设置",
+                  "f3f47dc7de": "此运行时暂不支持 Azure DevOps 状态。",
+                  "0eb50d5593": "通过 Azure DevOps REST API token 获取 pull request 和构建状态。",
+                  "54636c65d4": "已检测 Azure Repos 的 pull request 和构建状态",
                   "ea204f5e03": "{{value0}} · Pull requests and build statuses",
-                  "6154b02093": "Bitbucket credentials are configured but could not authenticate. Check the token and repository permissions, then restart Orca if environment variables changed.",
+                  "6154b02093": "Bitbucket 凭据已配置但无法通过身份验证。请检查 token 和仓库权限；如果环境变量已更改，请重启 Orca。",
                   "e63fe8f627": "ORCA_BITBUCKET_ACCESS_TOKEN",
                   "19416c874c": "ORCA_BITBUCKET_API_TOKEN",
                   "fc71a0e7aa": "and",
                   "63a7f47392": "ORCA_BITBUCKET_EMAIL",
-                  "24ac1c69dc": "Bitbucket status is not available in this runtime yet.",
-                  "a924e8dcd1": "Pull requests and build statuses via Bitbucket Cloud API tokens.",
-                  "0fa5629dad": "Pull requests and build statuses"
+                  "24ac1c69dc": "此运行时暂不支持 Bitbucket 状态。",
+                  "a924e8dcd1": "通过 Bitbucket Cloud API token 获取 pull request 和构建状态。",
+                  "0fa5629dad": "pull request 和构建状态"
                 }
               }
             }
           }
         },
         "computerUseSummary": {
-          "permissionsRequired": "{{value0}} permission{{value1}} required before agents can operate app windows.",
-          "checkingTitle": "Checking Computer Use access.",
-          "checkingDescription": "Orca is checking macOS privacy permissions for the Computer Use helper.",
-          "unavailableTitle": "Computer Use is unavailable.",
+          "permissionsRequired": "在 agent 可操作应用窗口前需要 {{value0}} 项权限{{value1}}。",
+          "checkingTitle": "正在检查计算机控制访问权限。",
+          "checkingDescription": "Orca 正在检查计算机控制助手的 macOS 隐私权限。",
+          "unavailableTitle": "计算机控制不可用。",
           "unavailableDescription": "Computer Use permissions are unavailable because {{value0}}.",
-          "readyTitle": "Computer Use is ready.",
-          "readyDescription": "Agents can inspect and operate app windows when you ask.",
-          "permissionsTitle": "Finish setup to use local apps."
+          "readyTitle": "计算机控制已就绪。",
+          "readyDescription": "当你要求时，Agent 可以检查并操作应用窗口。",
+          "permissionsTitle": "完成设置以使用本地应用。"
         },
         "computerUseSkillRuntime": {
-          "thisDevice": "This device"
+          "thisDevice": "此设备"
         },
         "WorkspaceDirectorySetting": {
           "1a2b3c4d5e": "客户端默认值",
@@ -8084,28 +8084,28 @@
         },
         "ProviderHostScopeControl": {
           "scope_label": "{{value0}}: {{value1}}",
-          "change_host": "Open Remote Servers"
+          "change_host": "打开远程服务器"
         },
         "providerAccountScope": {
-          "remoteServer": "Remote server: {{value0}}",
-          "remoteServerCredentials": "Credentials and account checks for this provider are owned by this remote server. Use Settings > Remote Orca Servers > Advanced to edit another default runtime scope.",
-          "localMac": "Local Mac",
-          "localCredentials": "Credentials and account checks for this provider are owned by this desktop client. Use Settings > Remote Orca Servers > Advanced to edit server-owned credentials.",
-          "remoteServerRateLimit": "{{value0}} API budget is fetched from the CLI on this remote server. Use Settings > Remote Orca Servers > Advanced to view another default runtime budget.",
-          "localRateLimit": "{{value0}} API budget is fetched from the CLI on this desktop client. Use Settings > Remote Orca Servers > Advanced to view server-owned budgets."
+          "remoteServer": "远程服务器：{{value0}}",
+          "remoteServerCredentials": "此提供商的凭据和账户检查由该远程服务器拥有。使用“设置 > 远程 Orca 服务器 > 高级”编辑另一个默认运行时范围。",
+          "localMac": "本地 Mac",
+          "localCredentials": "此提供商的凭据和账户检查由该桌面客户端拥有。使用“设置 > 远程 Orca 服务器 > 高级”编辑服务器拥有的凭据。",
+          "remoteServerRateLimit": "{{value0}} API 预算从此远程服务器上的 CLI 获取。使用“设置 > 远程 Orca 服务器 > 高级”查看另一个默认运行时预算。",
+          "localRateLimit": "{{value0}} API 预算从此桌面客户端上的 CLI 获取。使用“设置 > 远程 Orca 服务器 > 高级”查看服务器拥有的预算。"
         },
         "settingOwnership": {
-          "clientDefault": "Client default",
-          "sourceControlAiDefaults": "Recipes, prompts, and hosted-review defaults are shared by this client; model choices and discovery stay scoped to the host where the agent runs.",
-          "projectOnThisHost": "Project on this host",
-          "repositorySourceControlAi": "These overrides apply to this project setup and inherit the client Source Control AI defaults until customized.",
-          "agentLaunchDefaults": "Default agent, command overrides, CLI arguments, and launch environment are client preferences. SSH and remote server launches still validate host availability at run time.",
-          "clientDefaultProjectScopes": "Client default + project scopes",
-          "terminalQuickCommands": "Commands are saved on this client, then scoped globally or to a project setup so they run from the selected terminal context.",
-          "hostOverride": "Host override",
-          "workspaceDirectory": "The client default is inherited until a host needs its own worktree directory.",
-          "providerHost": "Provider host",
-          "providerAccounts": "Credentials and account checks belong to the local client or selected remote server that owns the provider integration."
+          "clientDefault": "客户端默认",
+          "sourceControlAiDefaults": "方案、提示和托管评审默认值由此客户端共享；模型选择和发现则限定在 agent 运行的主机内。",
+          "projectOnThisHost": "此主机上的项目",
+          "repositorySourceControlAi": "这些覆盖项应用于此项目设置，并继承客户端的源代码管理 AI 默认值，直至自定义。",
+          "agentLaunchDefaults": "默认 agent、命令覆盖、CLI 参数和启动环境是客户端偏好。SSH 和远程服务器启动仍会在运行时验证主机可用性。",
+          "clientDefaultProjectScopes": "客户端默认 + 项目范围",
+          "terminalQuickCommands": "命令保存在此客户端，然后限定为全局或某项目设置，以便从所选 terminal 上下文运行。",
+          "hostOverride": "主机覆盖",
+          "workspaceDirectory": "在主机需要自己的工作树目录之前，继承客户端默认值。",
+          "providerHost": "提供商主机",
+          "providerAccounts": "凭据和账户检查归属于本地客户端或拥有该提供商集成的所选远程服务器。"
         },
         "RepositoryForkSyncSection": {
           "defaultBranch": "默认分支",
@@ -8135,38 +8135,38 @@
           "off": "关闭"
         },
         "DefaultWindowsProjectRuntimeSetting": {
-          "defaultRuntime": "Default project runtime",
+          "defaultRuntime": "默认项目运行时",
           "windows": "Windows",
           "wsl": "WSL",
-          "selectDistro": "Select distro",
-          "windowsDescription": "Projects inherit Windows unless a project overrides it.",
-          "wslUnavailable": "WSL is not available. Projects that inherit WSL will need repair.",
-          "distroRequired": "Choose a WSL distro before projects can inherit WSL.",
-          "wslDescription": "Projects inherit {{value0}} via WSL unless a project overrides it."
+          "selectDistro": "选择发行版",
+          "windowsDescription": "除非项目覆盖，否则项目继承 Windows。",
+          "wslUnavailable": "WSL 不可用。继承 WSL 的项目需要修复。",
+          "distroRequired": "在项目可继承 WSL 之前，请选择一个 WSL 发行版。",
+          "wslDescription": "除非项目覆盖，否则项目通过 WSL 继承 {{value0}}。"
         },
         "ProjectWindowsRuntimeSetting": {
-          "projectRuntime": "Project runtime",
+          "projectRuntime": "项目运行时",
           "defaultRuntime": "Default ({{value0}})",
           "windows": "Windows",
           "wsl": "WSL",
-          "selectDistro": "Select distro",
-          "runtimeChangeHelp": "Runtime changes apply to new terminals, agent checks, and skill discovery for this project. Existing terminals keep their current runtime.",
-          "wslUnavailable": "WSL is not available. Switch this project to Windows or repair WSL.",
-          "distroMissing": "{{value0}} is not installed in WSL. Choose an installed distro or switch this project to Windows.",
-          "distroRequired": "Choose a WSL distro or switch this project to Windows.",
-          "inheritedWsl": "No project override. General settings select {{value0}} via WSL.",
-          "projectWsl": "This project runs in {{value0}} via WSL.",
-          "inheritedWindows": "No project override. General settings select Windows.",
-          "projectWindows": "This project runs on Windows.",
+          "selectDistro": "选择发行版",
+          "runtimeChangeHelp": "运行时更改应用于此项目的新 terminal、agent 检查和技能发现。已有 terminal 保留其当前运行时。",
+          "wslUnavailable": "WSL 不可用。请将此项目切换到 Windows 或修复 WSL。",
+          "distroMissing": "WSL 中未安装 {{value0}}。请选择已安装的发行版，或将此项目切换到 Windows。",
+          "distroRequired": "选择一个 WSL 发行版，或将此项目切换到 Windows。",
+          "inheritedWsl": "无项目覆盖。通用设置通过 WSL 选择 {{value0}}。",
+          "projectWsl": "此项目通过 WSL 运行在 {{value0}} 中。",
+          "inheritedWindows": "无项目覆盖。通用设置选择 Windows。",
+          "projectWindows": "此项目运行在 Windows 上。",
           "liveTerminalSingular": "{{count}} 个正在运行的终端",
           "liveTerminalPlural": "{{count}} 个正在运行的终端",
           "activeTaskSingular": "{{count}} 个活动任务",
           "activeTaskPlural": "{{count}} 个活动任务",
           "runtimeSessionJoin": "{{value0}}和{{value1}}",
           "runtimeSessionWarning": "{{value0}}会继续在当前运行时中运行。继续前请等待任务完成或重启终端。",
-          "pendingRuntimeChange": "Runtime change pending. New project work will use the selected runtime after you apply.",
+          "pendingRuntimeChange": "运行时更改待处理。应用后，新项目工作将使用所选运行时。",
           "cancel": "Cancel",
-          "applyRuntimeChange": "Apply runtime change"
+          "applyRuntimeChange": "应用运行时更改"
         },
         "PrivacyDiagnosticsRows": {
           "5a7cbe069a": "已设置 DO_NOT_TRACK=1，创建和发送诊断文件已停用。",
@@ -8176,34 +8176,34 @@
           "e27c8d45bf": "诊断已被环境变量停用。"
         },
         "ShortcutCommandBlock": {
-          "eb72c52c28": "Press a shortcut, or double-tap a modifier (e.g. {{value0}}). Esc cancels.",
-          "70b5d25583": "{{value0}} shortcut",
-          "287e07ddde": "Modified",
-          "3c83cd7d1c": "Disabled",
-          "07939d084e": "Reset {{value0}} to default",
-          "9b02917027": "Reset to default",
-          "a799f90f82": "Disable {{value0}}",
-          "25e6e76618": "Disable shortcut",
-          "035a822ef0": "Add shortcut",
-          "a0e2ef0e61": "Add another shortcut for {{value0}}",
-          "245c83af24": "Add another shortcut",
-          "482a60225d": "Enable {{value0}}",
-          "6287677c37": "Enable",
-          "01481b964c": "Add shortcut for {{value0}}"
+          "eb72c52c28": "按下快捷键，或双击修饰键（例如 {{value0}}）。Esc 取消。",
+          "70b5d25583": "{{value0}} 快捷键",
+          "287e07ddde": "已修改",
+          "3c83cd7d1c": "已禁用",
+          "07939d084e": "将 {{value0}} 重置为默认",
+          "9b02917027": "重置为默认",
+          "a799f90f82": "禁用 {{value0}}",
+          "25e6e76618": "禁用快捷键",
+          "035a822ef0": "添加快捷键",
+          "a0e2ef0e61": "为 {{value0}} 添加另一个快捷键",
+          "245c83af24": "添加另一个快捷键",
+          "482a60225d": "启用 {{value0}}",
+          "6287677c37": "启用",
+          "01481b964c": "为 {{value0}} 添加快捷键"
         },
         "ShortcutRecorderButton": {
-          "1a13bb054d": "Press shortcut keys for {{value0}}. Escape cancels.",
-          "3732775d74": "Add shortcut for {{value0}}",
-          "88764af2c1": "Change shortcut for {{value0}}",
-          "30feb099d6": "Change shortcut {{value0}} of {{value1}} for {{value2}}",
-          "5d982a2a1f": "Listening for shortcut",
-          "152e0bcd64": "Add shortcut",
-          "5bd56445da": "Change shortcut",
-          "f5ed5dcbf6": "Press keys…"
+          "1a13bb054d": "为 {{value0}} 按下快捷键。Esc 取消。",
+          "3732775d74": "为 {{value0}} 添加快捷键",
+          "88764af2c1": "更改 {{value0}} 的快捷键",
+          "30feb099d6": "更改 {{value2}} 的第 {{value0}}/{{value1}} 个快捷键",
+          "5d982a2a1f": "正在录制快捷键",
+          "152e0bcd64": "添加快捷键",
+          "5bd56445da": "更改快捷键",
+          "f5ed5dcbf6": "按下按键…"
         },
         "ShortcutRemoveButton": {
           "9e29aff18b": "Remove {{value0}} shortcut {{value1}}",
-          "2a9588b1c2": "Remove this binding"
+          "2a9588b1c2": "移除此绑定"
         }
       },
       "right": {
