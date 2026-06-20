@@ -270,10 +270,13 @@ export function useRepoHeaderDrag({
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('blur', onBlur)
       cancelAutoscroll()
-      if (clickSwallowTimeoutRef.current !== null) {
-        clearTimeout(clickSwallowTimeoutRef.current)
-        clickSwallowTimeoutRef.current = null
-      }
+      // Why: do NOT clear clickSwallowTimeoutRef here. endDrag sets up the
+      // swallow listener + this failsafe and then flips sessionArmed off, which
+      // re-runs this cleanup. On a click-less abort (pointercancel) no click
+      // ever arrives to self-remove the swallow, so the failsafe is the only
+      // thing that removes it — cancelling it would leak the listener and eat
+      // the user's next click on the drag handle. The failsafe firing later is
+      // harmless (a no-op removeEventListener once the listener is gone).
     }
   }, [cancelAutoscroll, computeDrop, endDrag, ensureAutoscroll, refreshHeaderRects, sessionArmed])
 
