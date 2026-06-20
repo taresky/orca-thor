@@ -18,7 +18,6 @@ import {
   waitForTerminalOutput
 } from './helpers/terminal'
 import { scrollActiveTerminalToText } from './artificial-opencode-active-terminal-scroll'
-import { waitForPtyShellEcho } from './terminal-pty-readiness'
 
 type BrowserTerminalPane = {
   terminal: {
@@ -514,7 +513,6 @@ test.describe('Terminal raw emoji table scroll restore repro', () => {
     await setWideRenderedTableViewport(orcaPage)
     await waitForActiveTerminalColumns(orcaPage, RAW_EMOJI_BOX_TABLE_WIDTH)
     const ptyId = await waitForActivePanePtyId(orcaPage)
-    await waitForPtyShellEcho(orcaPage, ptyId, 20_000)
     const runId = randomUUID()
     const scriptPath = path.join(testRepoPath, `.orca-raw-emoji-fixture-table-${runId}.mjs`)
     writeFileSync(scriptPath, rawEmojiFixtureBoxTableScript(EMOJI_TABLE_FIXTURE, runId))
@@ -522,6 +520,8 @@ test.describe('Terminal raw emoji table scroll restore repro', () => {
     try {
       const completionMarker = rawEmojiFixtureCompletionMarker(runId)
       const frameTailMarker = rawEmojiFixtureFrameTailMarker(runId)
+      // Why: the fixture marker is the shell-readiness signal here; an extra
+      // Ctrl+C/Ctrl+U preflight can race Windows ConPTY startup and eat input.
       await sendToTerminal(orcaPage, ptyId, `node ${JSON.stringify(scriptPath)}\r`)
       // Why: Windows ConPTY can return the PowerShell prompt while xterm is
       // still flushing synchronized output if the pane is hidden immediately.
