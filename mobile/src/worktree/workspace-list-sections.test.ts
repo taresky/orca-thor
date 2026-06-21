@@ -181,4 +181,26 @@ describe('buildSections', () => {
 
     expect(sections).toEqual([{ title: 'zoom-img', data: [] }])
   })
+
+  it('does not add an empty repo section when all of its worktrees are filtered out', () => {
+    const sleeping = worktree({
+      repoId: 'repo-sleeping',
+      repo: 'sleeping-repo',
+      hasHostSidebarActivity: false
+    })
+    const sections = buildSections(
+      [sleeping],
+      'manual',
+      { filterRepoIds: new Set(), hideSleeping: true, hideDefaultBranch: false },
+      '',
+      'repo',
+      new Set(),
+      new Map([
+        ['sleeping-repo', 'repo-sleeping'],
+        ['empty-repo', 'repo-empty']
+      ])
+    )
+
+    expect(sections).toEqual([{ title: 'empty-repo', data: [] }])
+  })
 })

@@ -254,7 +254,7 @@ export function buildSections(
         byRepo.set(key, [w])
       }
     }
-    const representedRepoIds = new Set(filtered.map((w) => w.repoId))
+    const representedRepoIds = new Set(worktrees.map((w) => w.repoId))
     const query = search.trim().toLowerCase()
     for (const [displayName, id] of repoIdsByName) {
       if (representedRepoIds.has(id)) {
