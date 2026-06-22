@@ -228,6 +228,17 @@ let remoteWorkspaceSnapshotApplyDepth = 0
 let remoteWorkspaceSnapshotWriteSuppressUntil = 0
 const REMOTE_WORKSPACE_SNAPSHOT_WRITE_SUPPRESS_MS = 1000
 
+function isAgentStatusForRecentlyClosedTab(
+  store: Pick<AppState, 'recentlyClosedAgentStatusTabIds'>,
+  paneKey: string
+): boolean {
+  const tabId = parsePaneKey(paneKey)?.tabId
+  if (!tabId) {
+    return false
+  }
+  return store.recentlyClosedAgentStatusTabIds[tabId] === true
+}
+
 function getAuthoritativeDetectedWorktreeIds(state: AppState, repoId: string): Set<string> | null {
   const detected = state.detectedWorktreesByRepo[repoId]
   if (detected?.authoritative !== true) {
@@ -2642,6 +2653,9 @@ export function useIpcEvents(): void {
     ): AgentStatusApplyResult => {
       const store = useAppStore.getState()
       if (!store.workspaceSessionReady) {
+        return 'dropped'
+      }
+      if (isAgentStatusForRecentlyClosedTab(store, data.paneKey)) {
         return 'dropped'
       }
       const payload = normalizeAgentStatusPayload({

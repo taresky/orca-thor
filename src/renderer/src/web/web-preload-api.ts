@@ -655,7 +655,8 @@ function createWebPreloadApi(): Partial<PreloadApi> {
       onMigrationUnsupported: () => noopUnsubscribe,
       onMigrationUnsupportedClear: () => noopUnsubscribe,
       getMigrationUnsupportedSnapshot: () => Promise.resolve([]),
-      drop: () => {}
+      drop: () => {},
+      dropByTabPrefix: () => {}
     },
     mobile: {
       listNetworkInterfaces: () => Promise.resolve({ interfaces: [] }),

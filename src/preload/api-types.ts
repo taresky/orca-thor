@@ -2690,6 +2690,9 @@ export type PreloadApi = {
     /** Drop a paneKey from the main-process hook cache and the on-disk
      *  last-status file. Fire-and-forget. */
     drop: (paneKey: string) => void
+    /** Drop every cached hook status under one terminal tab prefix.
+     *  Fire-and-forget. */
+    dropByTabPrefix: (tabId: string) => void
   }
   mobile: {
     listNetworkInterfaces: () => Promise<{
