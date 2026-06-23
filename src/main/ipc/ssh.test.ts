@@ -482,7 +482,7 @@ describe('SSH IPC handlers', () => {
       reconnectAttempt: 0,
       remotePlatform: 'win32'
     })
-    expect(mockWindow.webContents.send).toHaveBeenCalledWith('ssh:state-changed', {
+    expect(broadcastToMainWindowsMock).toHaveBeenCalledWith('ssh:state-changed', {
       targetId: 'ssh-1',
       state: {
         targetId: 'ssh-1',
