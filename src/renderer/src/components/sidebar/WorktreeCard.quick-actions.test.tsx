@@ -35,6 +35,7 @@ vi.mock('@/store', () => ({
       hostedReviewCache: {},
       issueCache: {},
       openModal,
+      projectGroups: [],
       remoteBranchConflictByWorktreeId: {},
       settings,
       sshConnectionStates: new Map(),
@@ -181,7 +182,7 @@ describe('WorktreeCard quick actions', () => {
     expect(markup).not.toContain('bg-black/[0.08]')
   })
 
-  it('renders folder kind and directory in the detailed metadata row', () => {
+  it('renders folder directory name in the detailed metadata row without a Folder badge', () => {
     const markup = renderToStaticMarkup(
       <WorktreeCard
         worktree={makeWorktree({ displayName: 'Docs folder', branch: '' })}
@@ -191,12 +192,12 @@ describe('WorktreeCard quick actions', () => {
     )
 
     expect(markup).toContain('Docs folder')
-    expect(markup).toContain('>Folder</span>')
+    expect(markup).not.toContain('>Folder</span>')
     expect(markup).toContain('>quick-action</span>')
     expect(markup).toContain('data-worktree-card-meta-row=""')
   })
 
-  it('renders synthetic folder workspace directory in the detailed metadata row', () => {
+  it('renders synthetic folder workspace directory name in the detailed metadata row without a Folder badge', () => {
     const markup = renderToStaticMarkup(
       <WorktreeCard
         worktree={makeWorktree({
@@ -211,7 +212,7 @@ describe('WorktreeCard quick actions', () => {
     )
 
     expect(markup).toContain('Docs folder')
-    expect(markup).toContain('>Folder</span>')
+    expect(markup).not.toContain('>Folder</span>')
     expect(markup).toContain('>quick-action</span>')
     expect(markup).toContain('data-worktree-card-meta-row=""')
   })

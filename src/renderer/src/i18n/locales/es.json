@@ -3736,7 +3736,8 @@
           "automation": "Automation",
           "2d74665a56": "Puertos",
           "65a9820bd1": "Estados del agente",
-          "219ebf1961": "Nombre de rama"
+          "219ebf1961": "Nombre de rama",
+          "folderPathIdentity": "Rama / ruta de carpeta"
         },
         "SshDisconnectedDialog": {
           "ca4a7892af": "Conectando...",
@@ -3812,7 +3813,9 @@
           "021538e1d1": "SSH desconectado",
           "runtimeHostDisconnected": "Server disconnected",
           "runtimeHostProject": "Project on Orca server",
-          "automationCreated": "Created by automation"
+          "automationCreated": "Created by automation",
+          "branchIdentity": "Rama",
+          "branchFolderPathIdentity": "Rama o ruta de carpeta"
         },
         "WorktreeCardAgents": {
           "1b0a156717": "Agents"
@@ -4264,6 +4267,9 @@
           "current": "Actual",
           "searchPlaceholder": "Buscar árboles de trabajo...",
           "empty": "No hay árboles de trabajo elegibles que coincidan."
+        },
+        "WorktreeCardStatusSlot": {
+          "branchIdentity": "Rama"
         }
       },
       "shared": {
@@ -6217,19 +6223,19 @@
           "29154326bb": "en",
           "ab20575a8a": "apagado",
           "ab3a1f9068": "wsl.exe",
-          "ask_before_closing_running_terminals_title": "Ask Before Closing Running Terminals",
-          "ask_before_closing_running_terminals_description": "Show a confirmation before closing a terminal that has a running command or agent.",
+          "ask_before_closing_running_terminals_title": "Preguntar antes de cerrar terminales en ejecución",
+          "ask_before_closing_running_terminals_description": "Muestra una confirmación antes de cerrar un terminal que tiene un comando o agente en ejecución.",
           "scrollSpeed": {
-            "title": "Scroll Speed",
-            "description": "Tune normal terminal scrollback, fast modifier scrolling, and full-screen TUI wheel speed.",
-            "helper": "Adjust how wheel input feels in scrollback and in mouse-aware terminal apps.",
-            "reset": "Reset",
+            "title": "Velocidad de desplazamiento",
+            "description": "Ajusta el desplazamiento normal del terminal, el desplazamiento rápido con modificador y la velocidad de rueda en TUI de pantalla completa.",
+            "helper": "Ajusta cómo se siente la entrada de la rueda en el historial de desplazamiento y en apps de terminal compatibles con el ratón.",
+            "reset": "Restablecer",
             "normal": "Normal",
-            "normalDescription": "Scrollback wheel multiplier.",
-            "fast": "Fast",
-            "fastDescription": "Extra multiplier while scrolling with a modifier key.",
+            "normalDescription": "Multiplicador de la rueda en el historial.",
+            "fast": "Rápido",
+            "fastDescription": "Multiplicador extra al desplazarse con una tecla modificadora.",
             "tui": "TUI",
-            "tuiDescription": "Discrete wheel reports for full-screen terminal apps."
+            "tuiDescription": "Informes discretos de rueda para apps de terminal de pantalla completa."
           }
         },
         "TerminalSettingsPreview": {
@@ -7865,11 +7871,11 @@
               "keyword_yaml": "yaml",
               "keyword_custom": "custom"
             },
-            "ask_before_closing_running_terminals_title": "Ask Before Closing Running Terminals",
-            "ask_before_closing_running_terminals_description": "Show a confirmation before closing a terminal that has a running command or agent.",
+            "ask_before_closing_running_terminals_title": "Preguntar antes de cerrar terminales en ejecución",
+            "ask_before_closing_running_terminals_description": "Muestra una confirmación antes de cerrar un terminal que tiene un comando o agente en ejecución.",
             "scrollSpeed": {
-              "title": "Scroll Speed",
-              "description": "Tune normal terminal scrollback, fast modifier scrolling, and full-screen TUI wheel speed."
+              "title": "Velocidad de desplazamiento",
+              "description": "Ajusta el desplazamiento normal del terminal, el desplazamiento rápido con modificador y la velocidad de rueda en TUI de pantalla completa."
             }
           },
           "windows": {

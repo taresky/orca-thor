@@ -3717,7 +3717,8 @@
           "2d74665a56": "포트",
           "65a9820bd1": "Agent 상태",
           "219ebf1961": "브랜치 이름",
-          "automation": "자동화"
+          "automation": "자동화",
+          "folderPathIdentity": "브랜치 / 폴더 경로"
         },
         "SshDisconnectedDialog": {
           "ca4a7892af": "연결 중...",
@@ -3793,7 +3794,9 @@
           "021538e1d1": "SSH 연결이 끊어졌습니다.",
           "runtimeHostDisconnected": "Server disconnected",
           "runtimeHostProject": "Project on Orca server",
-          "automationCreated": "Created by automation"
+          "automationCreated": "Created by automation",
+          "branchIdentity": "브랜치",
+          "branchFolderPathIdentity": "브랜치 또는 폴더 경로"
         },
         "WorktreeCardAgents": {
           "1b0a156717": "Agents"
@@ -4264,6 +4267,9 @@
           "current": "현재",
           "searchPlaceholder": "워크트리 검색...",
           "empty": "일치하는 적격 워크트리가 없습니다."
+        },
+        "WorktreeCardStatusSlot": {
+          "branchIdentity": "브랜치"
         }
       },
       "shared": {
@@ -6205,16 +6211,16 @@
           "ask_before_closing_running_terminals_title": "실행 중인 Terminals을 닫기 전에 확인",
           "ask_before_closing_running_terminals_description": "실행 중인 명령이나 agent가 있는 terminal을 닫기 전에 확인 창을 표시합니다.",
           "scrollSpeed": {
-            "title": "Scroll Speed",
-            "description": "Tune normal terminal scrollback, fast modifier scrolling, and full-screen TUI wheel speed.",
-            "helper": "Adjust how wheel input feels in scrollback and in mouse-aware terminal apps.",
-            "reset": "Reset",
-            "normal": "Normal",
-            "normalDescription": "Scrollback wheel multiplier.",
-            "fast": "Fast",
-            "fastDescription": "Extra multiplier while scrolling with a modifier key.",
+            "title": "스크롤 속도",
+            "description": "일반 터미널 스크롤백, 수정 키 빠른 스크롤, 전체 화면 TUI 휠 속도를 조정합니다.",
+            "helper": "스크롤백과 마우스 지원 터미널 앱에서 휠 입력의 느낌을 조정합니다.",
+            "reset": "재설정",
+            "normal": "일반",
+            "normalDescription": "스크롤백 휠 배율.",
+            "fast": "빠름",
+            "fastDescription": "수정 키로 스크롤할 때의 추가 배율.",
             "tui": "TUI",
-            "tuiDescription": "Discrete wheel reports for full-screen terminal apps."
+            "tuiDescription": "전체 화면 터미널 앱을 위한 개별 휠 보고."
           }
         },
         "TerminalSettingsPreview": {
@@ -7853,8 +7859,8 @@
             "ask_before_closing_running_terminals_title": "실행 중인 Terminals을 닫기 전에 확인",
             "ask_before_closing_running_terminals_description": "실행 중인 명령이나 agent가 있는 terminal을 닫기 전에 확인을 표시합니다.",
             "scrollSpeed": {
-              "title": "Scroll Speed",
-              "description": "Tune normal terminal scrollback, fast modifier scrolling, and full-screen TUI wheel speed."
+              "title": "스크롤 속도",
+              "description": "일반 터미널 스크롤백, 수정 키 빠른 스크롤, 전체 화면 TUI 휠 속도를 조정합니다."
             }
           },
           "windows": {

@@ -3750,7 +3750,8 @@
           "8d62c68b35": "Notes",
           "2d74665a56": "Ports",
           "65a9820bd1": "Agent statuses",
-          "219ebf1961": "Branch name"
+          "219ebf1961": "Branch name",
+          "folderPathIdentity": "Branch / folder path"
         },
         "SshDisconnectedDialog": {
           "ca4a7892af": "Connecting...",
@@ -3826,7 +3827,9 @@
           "021538e1d1": "SSH disconnected",
           "runtimeHostDisconnected": "Server disconnected",
           "runtimeHostProject": "Project on Orca server",
-          "automationCreated": "Created by automation"
+          "automationCreated": "Created by automation",
+          "branchIdentity": "Branch",
+          "branchFolderPathIdentity": "Branch or folder path"
         },
         "WorktreeCardAgents": {
           "1b0a156717": "Agents"
@@ -4264,6 +4267,9 @@
           "current": "Current",
           "searchPlaceholder": "Search worktrees...",
           "empty": "No matching eligible worktrees."
+        },
+        "WorktreeCardStatusSlot": {
+          "branchIdentity": "Branch"
         }
       },
       "shared": {

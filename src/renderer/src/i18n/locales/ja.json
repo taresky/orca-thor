@@ -3717,7 +3717,8 @@
           "2d74665a56": "ポート",
           "65a9820bd1": "Agent ステータス",
           "219ebf1961": "ブランチ名",
-          "automation": "Automation"
+          "automation": "Automation",
+          "folderPathIdentity": "ブランチ / フォルダパス"
         },
         "SshDisconnectedDialog": {
           "ca4a7892af": "接続中...",
@@ -3793,7 +3794,9 @@
           "021538e1d1": "SSH が切断されました",
           "runtimeHostDisconnected": "Server disconnected",
           "runtimeHostProject": "Project on Orca server",
-          "automationCreated": "Created by automation"
+          "automationCreated": "Created by automation",
+          "branchIdentity": "ブランチ",
+          "branchFolderPathIdentity": "ブランチまたはフォルダパス"
         },
         "WorktreeCardAgents": {
           "1b0a156717": "Agents"
@@ -4264,6 +4267,9 @@
           "current": "現在",
           "searchPlaceholder": "ワークツリーを検索...",
           "empty": "一致する対象ワークツリーがありません。"
+        },
+        "WorktreeCardStatusSlot": {
+          "branchIdentity": "ブランチ"
         }
       },
       "shared": {
@@ -6239,19 +6245,19 @@
           "29154326bb": "の上",
           "ab20575a8a": "オフ",
           "ab3a1f9068": "wsl.exe",
-          "ask_before_closing_running_terminals_title": "Ask Before Closing Running Terminals",
-          "ask_before_closing_running_terminals_description": "Show a confirmation before closing a terminal that has a running command or agent.",
+          "ask_before_closing_running_terminals_title": "実行中のターミナルを閉じる前に確認",
+          "ask_before_closing_running_terminals_description": "実行中のコマンドまたはエージェントがあるターミナルを閉じる前に確認を表示します。",
           "scrollSpeed": {
-            "title": "Scroll Speed",
-            "description": "Tune normal terminal scrollback, fast modifier scrolling, and full-screen TUI wheel speed.",
-            "helper": "Adjust how wheel input feels in scrollback and in mouse-aware terminal apps.",
-            "reset": "Reset",
-            "normal": "Normal",
-            "normalDescription": "Scrollback wheel multiplier.",
-            "fast": "Fast",
-            "fastDescription": "Extra multiplier while scrolling with a modifier key.",
+            "title": "スクロール速度",
+            "description": "通常のターミナルスクロールバック、修飾キー付き高速スクロール、全画面 TUI のホイール速度を調整します。",
+            "helper": "スクロールバックやマウス対応ターミナルアプリでのホイール操作の感触を調整します。",
+            "reset": "リセット",
+            "normal": "通常",
+            "normalDescription": "スクロールバックのホイール倍率。",
+            "fast": "高速",
+            "fastDescription": "修飾キーを押しながらスクロールするときの追加倍率。",
             "tui": "TUI",
-            "tuiDescription": "Discrete wheel reports for full-screen terminal apps."
+            "tuiDescription": "全画面ターミナルアプリ向けの離散的なホイール通知。"
           }
         },
         "TerminalSettingsPreview": {
@@ -7887,11 +7893,11 @@
             "33031c1465": "文字サイズ",
             "0fe0073f0c": "新規ペインとライブ アップデートのデフォルトの terminal フォント サイズ。",
             "5930244899": "フォントサイズ",
-            "ask_before_closing_running_terminals_title": "Ask Before Closing Running Terminals",
-            "ask_before_closing_running_terminals_description": "Show a confirmation before closing a terminal that has a running command or agent.",
+            "ask_before_closing_running_terminals_title": "実行中のターミナルを閉じる前に確認",
+            "ask_before_closing_running_terminals_description": "実行中のコマンドまたはエージェントがあるターミナルを閉じる前に確認を表示します。",
             "scrollSpeed": {
-              "title": "Scroll Speed",
-              "description": "Tune normal terminal scrollback, fast modifier scrolling, and full-screen TUI wheel speed."
+              "title": "スクロール速度",
+              "description": "通常のターミナルスクロールバック、修飾キー付き高速スクロール、全画面 TUI のホイール速度を調整します。"
             }
           },
           "windows": {

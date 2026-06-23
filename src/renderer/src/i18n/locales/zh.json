@@ -3717,7 +3717,8 @@
           "2d74665a56": "端口",
           "65a9820bd1": "Agent 状态",
           "219ebf1961": "分支名称",
-          "automation": "Automation"
+          "automation": "Automation",
+          "folderPathIdentity": "分支 / 文件夹路径"
         },
         "SshDisconnectedDialog": {
           "ca4a7892af": "正在连接...",
@@ -3793,7 +3794,9 @@
           "021538e1d1": "SSH 已断开连接",
           "runtimeHostDisconnected": "Server disconnected",
           "runtimeHostProject": "Project on Orca server",
-          "automationCreated": "Created by automation"
+          "automationCreated": "Created by automation",
+          "branchIdentity": "分支",
+          "branchFolderPathIdentity": "分支或文件夹路径"
         },
         "WorktreeCardAgents": {
           "1b0a156717": "Agents"
@@ -4264,6 +4267,9 @@
           "current": "当前",
           "searchPlaceholder": "搜索工作树...",
           "empty": "没有匹配的可用工作树。"
+        },
+        "WorktreeCardStatusSlot": {
+          "branchIdentity": "分支"
         }
       },
       "shared": {
@@ -6205,16 +6211,16 @@
           "ask_before_closing_running_terminals_title": "关闭运行中的 Terminal 前询问",
           "ask_before_closing_running_terminals_description": "在关闭有运行中命令或 agent 的 terminal 前显示确认。",
           "scrollSpeed": {
-            "title": "Scroll Speed",
-            "description": "Tune normal terminal scrollback, fast modifier scrolling, and full-screen TUI wheel speed.",
-            "helper": "Adjust how wheel input feels in scrollback and in mouse-aware terminal apps.",
-            "reset": "Reset",
-            "normal": "Normal",
-            "normalDescription": "Scrollback wheel multiplier.",
-            "fast": "Fast",
-            "fastDescription": "Extra multiplier while scrolling with a modifier key.",
+            "title": "滚动速度",
+            "description": "调整普通终端回滚、修饰键快速滚动以及全屏 TUI 鼠标滚轮速度。",
+            "helper": "调整在回滚区域和支持鼠标的终端应用中的滚轮输入手感。",
+            "reset": "重置",
+            "normal": "普通",
+            "normalDescription": "回滚滚轮倍率。",
+            "fast": "快速",
+            "fastDescription": "按住修饰键滚动时的额外倍率。",
             "tui": "TUI",
-            "tuiDescription": "Discrete wheel reports for full-screen terminal apps."
+            "tuiDescription": "面向全屏终端应用的离散滚轮报告。"
           }
         },
         "TerminalSettingsPreview": {
@@ -7853,8 +7859,8 @@
             "ask_before_closing_running_terminals_title": "关闭运行中的 Terminal 前询问",
             "ask_before_closing_running_terminals_description": "在关闭有运行中命令或 agent 的 terminal 前显示确认。",
             "scrollSpeed": {
-              "title": "Scroll Speed",
-              "description": "Tune normal terminal scrollback, fast modifier scrolling, and full-screen TUI wheel speed."
+              "title": "滚动速度",
+              "description": "调整普通终端回滚、修饰键快速滚动以及全屏 TUI 鼠标滚轮速度。"
             }
           },
           "windows": {
