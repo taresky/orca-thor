@@ -78,20 +78,26 @@ test('explains guarded renderer recovery once after reload or restart markers', 
     )
     .toBeNull()
 
-  await orcaPage.evaluate(async () => {
-    await window.api.settings.set({ uiLanguage: 'es' })
-  })
-  await seedRecoveryMarker(orcaPage, 'session', 'lazy-chunk-reload')
-  await orcaPage.reload()
-  await waitForRendererBoot(orcaPage)
+  try {
+    await orcaPage.evaluate(async () => {
+      await window.api.settings.set({ uiLanguage: 'es' })
+    })
+    await seedRecoveryMarker(orcaPage, 'session', 'lazy-chunk-reload')
+    await orcaPage.reload()
+    await waitForRendererBoot(orcaPage)
 
-  await expect(orcaPage.getByText('Orca se recargó para recuperarse')).toBeVisible()
-  await expect(
-    orcaPage.getByText('Se recuperó de un error de carga recargando la interfaz de la app.')
-  ).toBeVisible()
-  await expect
-    .poll(() =>
-      orcaPage.evaluate((key) => window.sessionStorage.getItem(key), SESSION_NOTIFICATION_KEY)
-    )
-    .toBeNull()
+    await expect(orcaPage.getByText('Orca se recargó para recuperarse')).toBeVisible()
+    await expect(
+      orcaPage.getByText('Se recuperó de un error de carga recargando la interfaz de la app.')
+    ).toBeVisible()
+    await expect
+      .poll(() =>
+        orcaPage.evaluate((key) => window.sessionStorage.getItem(key), SESSION_NOTIFICATION_KEY)
+      )
+      .toBeNull()
+  } finally {
+    await orcaPage.evaluate(async () => {
+      await window.api.settings.set({ uiLanguage: 'en' })
+    })
+  }
 })

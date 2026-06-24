@@ -49,6 +49,8 @@ function classifyErrorMessage(message: string): string {
   const normalized = message.toLowerCase()
   const looksLikeJsonParseFailure =
     normalized.includes('json') || normalized.includes('not valid json')
+  // Why: recovery should catch broken emitted JS chunks without treating
+  // ordinary data-parse failures as app-shell corruption.
   if (
     (!looksLikeJsonParseFailure &&
       (normalized.includes('unexpected token') ||
@@ -59,6 +61,8 @@ function classifyErrorMessage(message: string): string {
   ) {
     return 'syntax'
   }
+  // Why: browsers report dynamic import failures differently, but these all
+  // indicate a missing/stale chunk that a guarded reload may repair.
   if (
     normalized.includes('failed to fetch dynamically imported module') ||
     normalized.includes('error loading dynamically imported module') ||
@@ -77,6 +81,8 @@ function classifyErrorCategory(messageClass: string, errorName: string): string 
   if (messageClass === 'syntax') {
     return 'syntax'
   }
+  // Why: webpack-style chunk failures can arrive as a name without a useful
+  // message, so keep the name as a narrow fetch fallback.
   if (messageClass === 'fetch' || errorName === 'ChunkLoadError') {
     return 'fetch'
   }
