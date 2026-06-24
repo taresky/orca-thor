@@ -764,7 +764,10 @@ describe('fetchWorktrees', () => {
 
     await store.getState().fetchWorktrees('repo-ssh')
 
-    expect(mockApi.worktrees.listDetected).toHaveBeenCalledWith({ repoId: 'repo-ssh' })
+    expect(mockApi.worktrees.listDetected).toHaveBeenCalledWith({
+      repoId: 'repo-ssh',
+      hostId: 'ssh:ssh-1'
+    })
     expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
     // Why: SSH worktrees are fetched via local IPC but belong to the SSH host;
     // they must carry the repo's ssh host id, not the local default.
@@ -1736,6 +1739,66 @@ describe('createWorktree base status merge', () => {
     })
   })
 
+  it('passes the owner host through local create IPC payloads', async () => {
+    const store = createTestStore()
+    const wt = makeWorktree({
+      id: 'repo1::/path/wt1',
+      repoId: 'repo1',
+      path: '/path/wt1'
+    })
+    store.setState({
+      repos: [
+        {
+          id: 'repo1',
+          path: '/path/repo1',
+          displayName: 'repo1',
+          badgeColor: '#000',
+          addedAt: 0
+        }
+      ]
+    } as Partial<AppState>)
+    mockApi.worktrees.create.mockResolvedValue({ worktree: wt })
+
+    await store
+      .getState()
+      .createWorktree(
+        'repo1',
+        'feature',
+        'origin/main',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { ownerHostId: 'local' }
+      )
+
+    expect(mockApi.worktrees.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repoId: 'repo1',
+        name: 'feature',
+        hostId: 'local'
+      })
+    )
+  })
+
   it('stamps the owning runtime host onto worktrees created on a remote runtime', async () => {
     const store = createTestStore()
     const created = makeWorktree({
@@ -1773,6 +1836,29 @@ describe('createWorktree base status merge', () => {
     expect(store.getState().worktreesByRepo['repo-remote']?.[0]).toEqual({
       ...created,
       hostId: 'runtime:env-1'
+    })
+  })
+
+  it('passes the owner host through local detected-list refreshes', async () => {
+    const store = createTestStore()
+    store.setState({
+      repos: [
+        {
+          id: 'repo1',
+          path: '/path/repo1',
+          displayName: 'repo1',
+          badgeColor: '#000',
+          addedAt: 0
+        }
+      ]
+    } as Partial<AppState>)
+    mockApi.worktrees.listDetected.mockResolvedValueOnce(makeDetectedResult('repo1', []))
+
+    await store.getState().fetchWorktrees('repo1', { ownerHostId: 'local' })
+
+    expect(mockApi.worktrees.listDetected).toHaveBeenCalledWith({
+      repoId: 'repo1',
+      hostId: 'local'
     })
   })
 
@@ -2893,6 +2979,57 @@ describe('worktree remote runtime mutations', () => {
     })
     expect(mockApi.worktrees.updateMeta).not.toHaveBeenCalled()
     expect(store.getState().worktreesByRepo.repo1[0]?.comment).toBe('remote note')
+  })
+
+  it('refreshes the owner host when remote metadata persistence loses the selector', async () => {
+    const store = createTestStore()
+    const wt = makeWorktree({
+      id: 'repo1::/path/wt1',
+      repoId: 'repo1',
+      path: '/path/wt1',
+      hostId: 'runtime:env-1'
+    })
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: null } as never,
+      repos: [
+        {
+          id: 'repo1',
+          path: '/local/repo1',
+          displayName: 'repo1',
+          badgeColor: '#000',
+          addedAt: 0
+        },
+        {
+          id: 'repo1',
+          path: '/remote/repo1',
+          displayName: 'repo1',
+          badgeColor: '#000',
+          addedAt: 0,
+          executionHostId: 'runtime:env-1'
+        }
+      ],
+      worktreesByRepo: { repo1: [wt] }
+    } as Partial<AppState>)
+    runtimeEnvironmentCall
+      .mockRejectedValueOnce(new Error('runtime_selector_not_found'))
+      .mockResolvedValueOnce({
+        id: 'rpc-refresh',
+        ok: true,
+        result: makeDetectedResult('repo1', [wt]),
+        _meta: { runtimeId: 'runtime-remote' }
+      })
+
+    await store.getState().updateWorktreeMeta(wt.id, { comment: 'remote note' })
+    await Promise.resolve()
+
+    expect(runtimeEnvironmentCall).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        selector: 'env-1',
+        method: 'worktree.detectedList'
+      })
+    )
+    expect(mockApi.worktrees.listDetected).not.toHaveBeenCalled()
   })
 
   it('persists SSH-owned worktree metadata through local IPC even when a runtime is focused', async () => {
@@ -4371,7 +4508,10 @@ describe('fetchAllWorktrees hydration-time purge (design §4.4)', () => {
         expect.objectContaining({ id: refreshedRemoteWorktree.id, hostId: 'runtime:env-1' })
       ])
     )
-    expect(mockApi.worktrees.listDetected).toHaveBeenCalledWith({ repoId: 'same-repo' })
+    expect(mockApi.worktrees.listDetected).toHaveBeenCalledWith({
+      repoId: 'same-repo',
+      hostId: 'local'
+    })
     expect(runtimeEnvironmentCall).toHaveBeenCalledWith({
       selector: 'env-1',
       method: 'worktree.detectedList',

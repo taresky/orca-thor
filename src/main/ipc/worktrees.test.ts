@@ -800,6 +800,63 @@ describe('registerWorktreeHandlers', () => {
     )
   })
 
+  it('uses the requested host when creating a local worktree for same-id repos', async () => {
+    const remoteRepo = {
+      id: 'repo-1',
+      path: '/runtime/repo',
+      displayName: 'repo',
+      badgeColor: '#000',
+      addedAt: 0,
+      executionHostId: 'runtime:gpu'
+    }
+    const localRepo = {
+      id: 'repo-1',
+      path: '/local/repo',
+      displayName: 'repo',
+      badgeColor: '#000',
+      addedAt: 0
+    }
+    store.getRepos.mockReturnValue([remoteRepo, localRepo])
+    store.getRepo.mockReturnValue(remoteRepo)
+    listWorktreesMock.mockResolvedValue([
+      {
+        path: '/workspace/feature',
+        head: 'abc123',
+        branch: 'refs/heads/feature',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+    store.getProjectHostSetups.mockReturnValue([
+      {
+        id: 'repo-1',
+        projectId: 'repo:repo-1',
+        hostId: 'local',
+        repoId: 'repo-1',
+        path: '/local/repo',
+        displayName: 'repo',
+        setupState: 'ready',
+        setupMethod: 'legacy-repo',
+        createdAt: 0,
+        updatedAt: 0
+      }
+    ])
+
+    await handlers['worktrees:create'](null, {
+      repoId: 'repo-1',
+      hostId: 'local',
+      name: 'feature'
+    })
+
+    expect(addWorktreeMock).toHaveBeenCalledWith(
+      '/local/repo',
+      '/workspace/feature',
+      'feature',
+      'origin/main',
+      false
+    )
+  })
+
   it('registers local worktree roots immediately after create', async () => {
     listWorktreesMock.mockResolvedValue([
       {
@@ -828,6 +885,53 @@ describe('registerWorktreeHandlers', () => {
       resolveRegisteredWorktreePath('/workspace/improve-dashboard', store as never)
     ).resolves.toBe(resolve('/workspace/improve-dashboard'))
     expect(listWorktreesMock).toHaveBeenCalledTimes(listWorktreesCallsAfterCreate)
+  })
+
+  it('uses the requested host when listing detected worktrees for same-id repos', async () => {
+    const remoteRepo = {
+      id: 'repo-1',
+      path: '/runtime/repo',
+      displayName: 'repo',
+      badgeColor: '#000',
+      addedAt: 0,
+      executionHostId: 'runtime:gpu'
+    }
+    const localRepo = {
+      id: 'repo-1',
+      path: '/local/repo',
+      displayName: 'repo',
+      badgeColor: '#000',
+      addedAt: 0
+    }
+    store.getRepos.mockReturnValue([remoteRepo, localRepo])
+    store.getRepo.mockReturnValue(remoteRepo)
+    listWorktreesMock.mockResolvedValue([
+      {
+        path: '/local/repo',
+        head: 'main',
+        branch: 'refs/heads/main',
+        isBare: false,
+        isMainWorktree: true
+      },
+      {
+        path: '/local/feature',
+        head: 'abc123',
+        branch: 'refs/heads/feature',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+
+    const result = (await handlers['worktrees:listDetected'](null, {
+      repoId: 'repo-1',
+      hostId: 'local'
+    })) as { worktrees: { path: string }[] }
+
+    expect(listWorktreesMock).toHaveBeenCalledWith('/local/repo')
+    expect(result.worktrees.map((worktree) => worktree.path)).toEqual([
+      '/local/repo',
+      '/local/feature'
+    ])
   })
 
   it('uses branchNameOverride for the git branch while keeping the sanitized worktree path', async () => {
@@ -2066,6 +2170,55 @@ describe('registerWorktreeHandlers', () => {
 
     expect(first).toEqual(second)
     expect(listWorktreesMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not reuse detected worktree scans across same-id repo hosts', async () => {
+    const localRepo = {
+      id: 'repo-1',
+      path: '/local/repo',
+      displayName: 'repo',
+      badgeColor: '#000',
+      addedAt: 0
+    }
+    const runtimeRepo = {
+      ...localRepo,
+      path: '/runtime/repo',
+      executionHostId: 'runtime:gpu'
+    }
+    store.getRepos.mockReturnValue([localRepo, runtimeRepo])
+    store.getRepo.mockReturnValue(localRepo)
+    listWorktreesMock
+      .mockResolvedValueOnce([
+        {
+          path: '/local/repo',
+          head: 'local-head',
+          branch: 'refs/heads/main',
+          isBare: false,
+          isMainWorktree: true
+        }
+      ])
+      .mockResolvedValueOnce([
+        {
+          path: '/runtime/repo',
+          head: 'runtime-head',
+          branch: 'refs/heads/main',
+          isBare: false,
+          isMainWorktree: true
+        }
+      ])
+
+    const local = (await handlers['worktrees:listDetected'](null, {
+      repoId: 'repo-1',
+      hostId: 'local'
+    })) as { worktrees: Worktree[] }
+    const runtime = (await handlers['worktrees:listDetected'](null, {
+      repoId: 'repo-1',
+      hostId: 'runtime:gpu'
+    })) as { worktrees: Worktree[] }
+
+    expect(listWorktreesMock).toHaveBeenCalledTimes(2)
+    expect(local.worktrees[0].path).toBe('/local/repo')
+    expect(runtime.worktrees[0].path).toBe('/runtime/repo')
   })
 
   it('coalesces concurrent authoritative detected worktree scans', async () => {
@@ -5674,6 +5827,46 @@ describe('registerWorktreeHandlers', () => {
     })
   })
 
+  it('does not remove another host legacy metadata alias for same-id repos', async () => {
+    const localRepo = {
+      id: 'repo-1',
+      path: '/workspace/repo',
+      displayName: 'repo',
+      badgeColor: '#000',
+      addedAt: 0
+    }
+    store.getRepo.mockReturnValue(localRepo)
+    store.getRepos.mockReturnValue([
+      localRepo,
+      {
+        ...localRepo,
+        path: '/runtime/repo',
+        executionHostId: 'runtime:gpu'
+      }
+    ])
+    mockKnownFeatureWorktree()
+    removeWorktreeMock.mockResolvedValue(undefined)
+    const canonicalWorktreeId = makeRepoWorktreeKey(localRepo, '/workspace/feature-wt')
+    const legacyWorktreeId = 'repo-1::/workspace/feature-wt'
+    store.getWorktreeMeta.mockImplementation((worktreeId: string) => {
+      if (worktreeId === canonicalWorktreeId) {
+        return makeWorktreeMeta({ hostId: 'local' })
+      }
+      if (worktreeId === legacyWorktreeId) {
+        return makeWorktreeMeta({ hostId: 'runtime:gpu' })
+      }
+      return undefined
+    })
+
+    await handlers['worktrees:remove'](null, {
+      worktreeId: canonicalWorktreeId
+    })
+
+    expect(store.removeWorktreeMeta).toHaveBeenCalledWith(canonicalWorktreeId)
+    expect(store.removeWorktreeMeta).not.toHaveBeenCalledWith(legacyWorktreeId)
+    expect(deleteWorktreeHistoryDirMock).not.toHaveBeenCalledWith(legacyWorktreeId)
+  })
+
   it('refuses to delete the root workspace for folder-mode repos', async () => {
     store.getRepo.mockReturnValue({
       id: 'repo-folder',
@@ -6680,8 +6873,8 @@ describe('registerWorktreeHandlers', () => {
 
     finishRemoval()
     await expect(Promise.all([first, second])).resolves.toEqual([{}, {}])
-    expect(store.removeWorktreeMeta).toHaveBeenCalledTimes(1)
-    expect(deleteWorktreeHistoryDirMock).toHaveBeenCalledTimes(1)
+    expect(store.removeWorktreeMeta).toHaveBeenCalledTimes(2)
+    expect(deleteWorktreeHistoryDirMock).toHaveBeenCalledTimes(2)
     expect(mainWindow.webContents.send).toHaveBeenCalledTimes(1)
   })
 

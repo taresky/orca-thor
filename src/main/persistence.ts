@@ -3680,10 +3680,22 @@ export class Store {
     return true
   }
 
-  removeProject(id: string): void {
-    this.state.repos = this.state.repos.filter((r) => r.id !== id)
+  removeProject(id: string, hostId?: string): void {
+    const normalizedHostId = hostId ? normalizeExecutionHostId(hostId) : null
+    if (hostId && !normalizedHostId) {
+      throw new Error(`Invalid host ID: ${hostId}`)
+    }
+    this.state.repos = this.state.repos.filter((repo) => {
+      if (repo.id !== id) {
+        return true
+      }
+      return normalizedHostId !== null && getRepoExecutionHostId(repo) !== normalizedHostId
+    })
     this.syncProjectHostSetupCompatibilityState()
-    this.cleanupRemovedProjectState(id)
+    this.cleanupRemovedProjectState(id, normalizedHostId ?? undefined)
+    if (normalizedHostId !== null && !this.state.repos.some((entry) => entry.id === id)) {
+      this.cleanupRemovedProjectState(id)
+    }
     this.scheduleSave()
   }
 
@@ -3782,9 +3794,17 @@ export class Store {
         | 'projectGroupOrder'
         | 'projectHostSetupMethod'
       >
-    > & { sourceControlAi?: Repo['sourceControlAi'] | null }
+    > & { sourceControlAi?: Repo['sourceControlAi'] | null },
+    hostId?: string
   ): Repo | null {
-    const repo = this.state.repos.find((r) => r.id === id)
+    const normalizedHostId = hostId ? normalizeExecutionHostId(hostId) : null
+    if (hostId && !normalizedHostId) {
+      throw new Error(`Invalid host ID: ${hostId}`)
+    }
+    const repo = this.state.repos.find(
+      (r) =>
+        r.id === id && (normalizedHostId === null || getRepoExecutionHostId(r) === normalizedHostId)
+    )
     if (!repo) {
       return null
     }
@@ -3924,7 +3944,8 @@ export class Store {
     args: Pick<ProjectHostSetupUpdateArgs, 'setupId' | 'hostId'>
   ): ProjectHostSetup | undefined {
     if (args.hostId === undefined) {
-      return this.state.projectHostSetups.find((entry) => entry.id === args.setupId)
+      const matches = this.state.projectHostSetups.filter((entry) => entry.id === args.setupId)
+      return matches.length === 1 ? matches[0] : undefined
     }
     const hostId = normalizeExecutionHostId(args.hostId)
     if (!hostId) {

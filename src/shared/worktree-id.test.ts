@@ -119,6 +119,13 @@ describe('parseWorktreeKey', () => {
     expect(parseWorktreeKey('orca-worktree://v1?hostId=local&repoId=repo%ZZ&path=%2Fx')).toBeNull()
     expect(parseWorktreeKey('orca-worktree://v1?hostId=local&repoId=repo&path=%E0%A4%A')).toBeNull()
   })
+
+  it('rejects non-canonical unescaped key parts', () => {
+    expect(
+      parseWorktreeKey('orca-worktree://v1?hostId=runtime:gpu&repoId=repo&path=%2Fx')
+    ).toBeNull()
+    expect(parseWorktreeKey('orca-worktree://v1?hostId=local&repoId=repo&path=/x')).toBeNull()
+  })
 })
 
 describe('parseAnyWorktreeId', () => {

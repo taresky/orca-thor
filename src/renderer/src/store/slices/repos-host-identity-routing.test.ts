@@ -127,6 +127,7 @@ describe('repo slice host identity routing', () => {
     ])
     expect(reposUpdate).toHaveBeenCalledWith({
       repoId: 'same-repo',
+      hostId: 'local',
       updates: { displayName: 'Local Renamed' }
     })
     expect(runtimeEnvironmentCall).not.toHaveBeenCalledWith(
@@ -148,6 +149,7 @@ describe('repo slice host identity routing', () => {
     ])
     expect(reposUpdate).toHaveBeenCalledWith({
       repoId: 'same-repo',
+      hostId: 'local',
       updates: { displayName: 'Local Renamed' }
     })
     expect(runtimeEnvironmentCall).not.toHaveBeenCalledWith(
@@ -285,7 +287,7 @@ describe('repo slice host identity routing', () => {
     expect(store.getState().projects).toEqual([
       expect.objectContaining({ id: 'repo:same-repo', sourceRepoIds: ['same-repo'] })
     ])
-    expect(reposRemove).toHaveBeenCalledWith({ repoId: 'same-repo' })
+    expect(reposRemove).toHaveBeenCalledWith({ repoId: 'same-repo', hostId: 'local' })
     expect(ptyKill).toHaveBeenCalledWith('local-pty')
     expect(ptyKill).not.toHaveBeenCalledWith('remote-pty')
   })
@@ -319,7 +321,7 @@ describe('repo slice host identity routing', () => {
 
     expect(store.getState().repos).toEqual([remoteDuplicate])
     expect(store.getState().worktreesByRepo['same-repo']).toEqual([remoteWorktree])
-    expect(reposRemove).toHaveBeenCalledWith({ repoId: 'same-repo' })
+    expect(reposRemove).toHaveBeenCalledWith({ repoId: 'same-repo', hostId: 'local' })
     expect(runtimeEnvironmentCall).not.toHaveBeenCalledWith(
       expect.objectContaining({ method: 'repo.rm' })
     )

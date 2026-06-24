@@ -235,7 +235,8 @@ function findProjectHostSetupByMutationArgs(
   args: Pick<ProjectHostSetupUpdateArgs, 'setupId' | 'hostId'>
 ): ProjectHostSetup | undefined {
   if (args.hostId === undefined) {
-    return setups.find((setup) => setup.id === args.setupId)
+    const matches = setups.filter((setup) => setup.id === args.setupId)
+    return matches.length === 1 ? matches[0] : undefined
   }
   const hostId = normalizeExecutionHostId(args.hostId)
   if (!hostId) {
@@ -284,7 +285,7 @@ function scheduleSafeAutoForkSync(get: () => AppState, repos: readonly Repo[]): 
     }
     const promise = syncRuntimeGitForkDefaultBranch(
       {
-        settings: settingsForRepoOwner(get(), repo.id),
+        settings: settingsForRepoOwner(get(), repo.id, getRepoExecutionHostId(repo)),
         worktreeId: repo.id,
         worktreePath: repo.path,
         connectionId: repo.connectionId ?? undefined
@@ -901,8 +902,15 @@ async function listRuntimeEnvironmentsForAllHostLoad(): Promise<{ id: string }[]
   }
 }
 
-function settingsForRepoOwner(state: Pick<AppState, 'repos' | 'settings'>, repoId: string) {
-  const repo = findRepoForHost(state.repos, repoId, { settings: state.settings })
+function settingsForRepoOwner(
+  state: Pick<AppState, 'repos' | 'settings'>,
+  repoId: string,
+  hostId?: ExecutionHostId | null
+) {
+  const repo = findRepoForHost(state.repos, repoId, {
+    ...(hostId ? { hostId } : {}),
+    settings: state.settings
+  })
   if (!repo) {
     return state.settings
   }
@@ -2260,7 +2268,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
         ? getProjectSetupRuntimeTarget(ownerHostId)
         : getActiveRuntimeTarget(settingsForRepoOwner(get(), projectId))
       await (target.kind === 'local'
-        ? window.api.repos.remove({ repoId: projectId })
+        ? window.api.repos.remove({ repoId: projectId, hostId: ownerHostId })
         : callRuntimeRpc(target, 'repo.rm', { repo: projectId }, { timeoutMs: 15_000 }))
 
       get().clearOrcaHookTrustForRepo(projectId)
@@ -2488,7 +2496,11 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
         const target = ownerTarget
         const updatedRepo =
           target.kind === 'local'
-            ? await window.api.repos.update({ repoId: projectId, updates: sanitizedUpdates })
+            ? await window.api.repos.update({
+                repoId: projectId,
+                hostId: ownerHostId,
+                updates: sanitizedUpdates
+              })
             : (
                 await callRuntimeRpc<{ repo: Repo }>(
                   target,

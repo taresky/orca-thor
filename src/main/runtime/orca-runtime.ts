@@ -1300,6 +1300,40 @@ function getRuntimeWorktreeMetaForRepoPath(
   return hasRuntimeAmbiguousRepoHost(store.getRepos(), repo) ? undefined : legacyMeta
 }
 
+function getRuntimeWorktreeRemovalIdAliases(
+  store: RuntimeStore,
+  repo: Repo,
+  path: string,
+  requestedId: string
+): string[] {
+  const canonicalId = getRuntimeRepoWorktreeId(repo, path)
+  const legacyId = getRuntimeLegacyRepoWorktreeId(repo, path)
+  const ids = new Set([canonicalId, requestedId])
+  const legacyMeta = store.getWorktreeMeta(legacyId)
+  const repoHostId = getRepoExecutionHostId(repo)
+  const requestedLegacyId = requestedId === legacyId
+  const legacyBelongsToRepoHost = legacyMeta?.hostId === repoHostId
+  const legacySafeWithoutMeta = legacyMeta === undefined
+  const legacyUnambiguous = !hasRuntimeAmbiguousRepoHost(store.getRepos(), repo)
+  if (requestedLegacyId || legacyBelongsToRepoHost || legacySafeWithoutMeta || legacyUnambiguous) {
+    ids.add(legacyId)
+  }
+  return [...ids]
+}
+
+function getRuntimeRemovalWorktreeMeta(
+  store: RuntimeStore,
+  worktreeIds: readonly string[]
+): WorktreeMeta | undefined {
+  for (const worktreeId of worktreeIds) {
+    const meta = store.getWorktreeMeta(worktreeId)
+    if (meta) {
+      return meta
+    }
+  }
+  return undefined
+}
+
 function migrateRuntimeLegacyWorktreeMetaIfSafe(
   store: RuntimeStore,
   repo: Repo,
@@ -14090,6 +14124,15 @@ export class OrcaRuntimeService {
     this.closeHeadlessBrowserPagesForWorktree(worktreeId)
   }
 
+  private removeWorktreeAliasesMetadataAndHistory(
+    store: RuntimeStore,
+    worktreeIds: readonly string[]
+  ): void {
+    for (const worktreeId of worktreeIds) {
+      this.removeWorktreeMetadataAndHistory(store, worktreeId)
+    }
+  }
+
   // Why: headless offscreen browser pages are main-process BrowserWindows that
   // outlive a worktree unless explicitly closed — removing a worktree without
   // closing its open panes leaks the windows for the life of the serve process.
@@ -14103,11 +14146,12 @@ export class OrcaRuntimeService {
   }
 
   private rememberPreservedBranchCleanupTarget(
-    worktreeId: string,
+    worktreeIds: string | readonly string[],
     result: RemoveWorktreeResult | undefined,
     fallbackHead: string | undefined,
     pushTarget: GitPushTarget | undefined
   ): void {
+    const ids = typeof worktreeIds === 'string' ? [worktreeIds] : worktreeIds
     if (result?.preservedBranch) {
       const head = result.preservedBranch.head ?? fallbackHead
       if (!head) {
@@ -14115,14 +14159,18 @@ export class OrcaRuntimeService {
           `Cannot safely offer force-delete for preserved branch "${result.preservedBranch.branchName}" without its saved commit.`
         )
       }
-      this.preservedBranchCleanupByWorktreeId.set(worktreeId, {
-        branchName: result.preservedBranch.branchName,
-        head,
-        ...(pushTarget ? { pushTarget } : {})
-      })
+      for (const worktreeId of ids) {
+        this.preservedBranchCleanupByWorktreeId.set(worktreeId, {
+          branchName: result.preservedBranch.branchName,
+          head,
+          ...(pushTarget ? { pushTarget } : {})
+        })
+      }
       return
     }
-    this.preservedBranchCleanupByWorktreeId.delete(worktreeId)
+    for (const worktreeId of ids) {
+      this.preservedBranchCleanupByWorktreeId.delete(worktreeId)
+    }
   }
 
   private preserveBranchHeadFallback(
@@ -14153,13 +14201,14 @@ export class OrcaRuntimeService {
     const repo = removalTarget
       ? findRuntimeRepoForRemovalTarget(this.store, removalTarget)
       : undefined
-    const canonicalRemovalTargetId =
-      removalTarget && repo ? getRuntimeRepoWorktreeId(repo, removalTarget.path) : undefined
+    const cleanupWorktreeIds =
+      removalTarget && repo
+        ? getRuntimeWorktreeRemovalIdAliases(this.store, repo, removalTarget.path, removalTarget.id)
+        : []
     const cleanupTarget = removalTarget
-      ? (this.preservedBranchCleanupByWorktreeId.get(removalTarget.id) ??
-        (canonicalRemovalTargetId
-          ? this.preservedBranchCleanupByWorktreeId.get(canonicalRemovalTargetId)
-          : undefined))
+      ? cleanupWorktreeIds
+          .map((worktreeId) => this.preservedBranchCleanupByWorktreeId.get(worktreeId))
+          .find((target) => target !== undefined)
       : undefined
     if (
       !removalTarget ||
@@ -14188,7 +14237,7 @@ export class OrcaRuntimeService {
       await cleanupUnusedWorktreePushTargetRemoteSsh(
         provider,
         repo.path,
-        removalTarget.id,
+        cleanupWorktreeIds,
         cleanupTarget.pushTarget,
         this.store
       )
@@ -14204,14 +14253,16 @@ export class OrcaRuntimeService {
         : forceDeleteLocalBranch(repo.path, cleanupTarget.branchName, cleanupTarget.head))
       await cleanupUnusedWorktreePushTargetRemote(
         repo.path,
-        removalTarget.id,
+        cleanupWorktreeIds,
         cleanupTarget.pushTarget,
         this.store,
         localWorktreeGitOptions
       )
     }
 
-    this.preservedBranchCleanupByWorktreeId.delete(removalTarget.id)
+    for (const worktreeId of cleanupWorktreeIds) {
+      this.preservedBranchCleanupByWorktreeId.delete(worktreeId)
+    }
     return { deleted: true }
   }
 
@@ -14265,6 +14316,21 @@ export class OrcaRuntimeService {
         this.notifyWorktreesChanged(repo.id)
         return {}
       }
+      const removalWorktreeIds = getRuntimeWorktreeRemovalIdAliases(
+        store,
+        repo,
+        removalTarget.path,
+        removalTarget.id
+      )
+      const clearRemovalState = (options: { clearPreservedBranch?: boolean } = {}) => {
+        for (const worktreeId of removalWorktreeIds) {
+          this.clearOptimisticReconcileToken(worktreeId)
+          if (options.clearPreservedBranch) {
+            this.preservedBranchCleanupByWorktreeId.delete(worktreeId)
+          }
+        }
+        this.removeWorktreeAliasesMetadataAndHistory(store, removalWorktreeIds)
+      }
       const provider = repo.connectionId ? requireSshGitProvider(repo.connectionId) : null
       const fsProvider = repo.connectionId ? getSshFilesystemProvider(repo.connectionId) : null
       const localWorktreeGitOptions = repo.connectionId
@@ -14276,7 +14342,7 @@ export class OrcaRuntimeService {
         : hasLocalWorktreeGitOptions
           ? await listWorktreesStrict(repo.path, localWorktreeGitOptions)
           : await listWorktreesStrict(repo.path)
-      const removedMeta = store.getWorktreeMeta(removalTarget.id)
+      const removedMeta = getRuntimeRemovalWorktreeMeta(store, removalWorktreeIds)
       const removedPushTarget = removedMeta?.pushTarget ?? removalTarget.pushTarget
       const registeredWorktree = findRegisteredDeletableWorktree(
         repo.path,
@@ -14330,7 +14396,7 @@ export class OrcaRuntimeService {
             await cleanupUnusedWorktreePushTargetRemoteSsh(
               provider!,
               repo.path,
-              removalTarget.id,
+              removalWorktreeIds,
               removedPushTarget,
               store
             )
@@ -14338,15 +14404,13 @@ export class OrcaRuntimeService {
             await removeLocalWorktreePath(removalTarget.path, localWorktreeGitOptions)
             await cleanupUnusedWorktreePushTargetRemote(
               repo.path,
-              removalTarget.id,
+              removalWorktreeIds,
               removedPushTarget,
               store,
               localWorktreeGitOptions
             )
           }
-          this.clearOptimisticReconcileToken(removalTarget.id)
-          this.removeWorktreeMetadataAndHistory(store, removalTarget.id)
-          this.preservedBranchCleanupByWorktreeId.delete(removalTarget.id)
+          clearRemovalState({ clearPreservedBranch: true })
           this.invalidateResolvedWorktreeCache()
           invalidateAuthorizedRootsCache()
           this.notifyWorktreesChanged(repo.id)
@@ -14365,20 +14429,18 @@ export class OrcaRuntimeService {
             ? cleanupUnusedWorktreePushTargetRemoteSsh(
                 provider!,
                 repo.path,
-                removalTarget.id,
+                removalWorktreeIds,
                 removedPushTarget,
                 store
               )
             : cleanupUnusedWorktreePushTargetRemote(
                 repo.path,
-                removalTarget.id,
+                removalWorktreeIds,
                 removedPushTarget,
                 store,
                 localWorktreeGitOptions
               ))
-          this.clearOptimisticReconcileToken(removalTarget.id)
-          this.removeWorktreeMetadataAndHistory(store, removalTarget.id)
-          this.preservedBranchCleanupByWorktreeId.delete(removalTarget.id)
+          clearRemovalState({ clearPreservedBranch: true })
           this.invalidateResolvedWorktreeCache()
           invalidateAuthorizedRootsCache()
           this.notifyWorktreesChanged(repo.id)
@@ -14399,18 +14461,17 @@ export class OrcaRuntimeService {
         await cleanupUnusedWorktreePushTargetRemoteSsh(
           provider!,
           repo.path,
-          removalTarget.id,
+          removalWorktreeIds,
           removedPushTarget,
           store
         )
         this.rememberPreservedBranchCleanupTarget(
-          removalTarget.id,
+          removalWorktreeIds,
           removalResult,
           registeredWorktree.head,
           removedPushTarget
         )
-        this.clearOptimisticReconcileToken(removalTarget.id)
-        this.removeWorktreeMetadataAndHistory(store, removalTarget.id)
+        clearRemovalState()
         this.invalidateResolvedWorktreeCache()
         invalidateAuthorizedRootsCache()
         this.notifyWorktreesChanged(repo.id)
@@ -14529,14 +14590,12 @@ export class OrcaRuntimeService {
           }).catch(() => {})
           await cleanupUnusedWorktreePushTargetRemote(
             repo.path,
-            removalTarget.id,
+            removalWorktreeIds,
             removedPushTarget,
             store,
             localWorktreeGitOptions
           )
-          this.clearOptimisticReconcileToken(removalTarget.id)
-          this.removeWorktreeMetadataAndHistory(store, removalTarget.id)
-          this.preservedBranchCleanupByWorktreeId.delete(removalTarget.id)
+          clearRemovalState({ clearPreservedBranch: true })
           this.invalidateResolvedWorktreeCache()
           invalidateAuthorizedRootsCache()
           this.notifyWorktreesChanged(repo.id)
@@ -14549,19 +14608,18 @@ export class OrcaRuntimeService {
 
       await cleanupUnusedWorktreePushTargetRemote(
         repo.path,
-        removalTarget.id,
+        removalWorktreeIds,
         removedPushTarget,
         store,
         localWorktreeGitOptions
       )
       this.rememberPreservedBranchCleanupTarget(
-        removalTarget.id,
+        removalWorktreeIds,
         removalResult,
         registeredWorktree.head,
         removedPushTarget
       )
-      this.clearOptimisticReconcileToken(removalTarget.id)
-      this.removeWorktreeMetadataAndHistory(store, removalTarget.id)
+      clearRemovalState()
       this.invalidateResolvedWorktreeCache()
       invalidateAuthorizedRootsCache()
       this.notifyWorktreesChanged(repo.id)
@@ -14856,7 +14914,12 @@ export class OrcaRuntimeService {
     opts: { agent: TuiAgent; prompt: string; title?: string }
   ): Promise<RuntimeTerminalCreate> {
     const worktree = await this.resolveWorktreeSelector(worktreeSelector)
-    const repo = this.store?.getRepo(worktree.repoId)
+    const repo = this.store
+      ? findRuntimeRepoForParsedWorktree(this.store.getRepos(), {
+          repoId: worktree.repoId,
+          hostId: worktree.hostId
+        })
+      : undefined
     if (!repo) {
       throw new Error('Repository for the selected workspace is no longer available.')
     }

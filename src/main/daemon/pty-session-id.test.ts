@@ -125,6 +125,15 @@ describe('parsePtySessionId', () => {
     expect(parsePtySessionId(mintPtySessionId(wt))).toEqual({ worktreeId: wt })
   })
 
+  it('rejects malformed or non-canonical host-qualified worktree keys', () => {
+    expect(
+      parsePtySessionId('orca-worktree://v1?hostId=local&repoId=repo%ZZ&path=%2Fx@@deadbeef')
+    ).toEqual({ worktreeId: null })
+    expect(
+      parsePtySessionId('orca-worktree://v1?hostId=runtime:gpu&repoId=repo&path=/x@@deadbeef')
+    ).toEqual({ worktreeId: null })
+  })
+
   it('rejects bare UUIDs (no @@)', () => {
     expect(parsePtySessionId(mintPtySessionId())).toEqual({ worktreeId: null })
   })

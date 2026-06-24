@@ -812,6 +812,14 @@ function Settings(): React.JSX.Element {
     }
   }, [runtimeTargetIdentity])
 
+  const repoHookRuntimeSettings = useMemo(
+    () =>
+      ({
+        activeRuntimeEnvironmentId: settings?.activeRuntimeEnvironmentId ?? null
+      }) as typeof settings,
+    [settings?.activeRuntimeEnvironmentId]
+  )
+
   useEffect(() => {
     if (neededRepoSectionIds.length === 0) {
       return
@@ -840,7 +848,7 @@ function Settings(): React.JSX.Element {
         }
         try {
           const result = await checkRuntimeHooks(
-            getRepoOwnerRoutedSettings(settings, repo),
+            getRepoOwnerRoutedSettings(repoHookRuntimeSettings, repo),
             repo.id
           )
           if (stale || requestSeq !== repoHooksRequestSeqRef.current) {
@@ -876,7 +884,7 @@ function Settings(): React.JSX.Element {
     return () => {
       stale = true
     }
-  }, [neededRepoSectionIds, repoBySettingsSectionId, repos, settings])
+  }, [neededRepoSectionIds, repoBySettingsSectionId, repoHookRuntimeSettings, repos])
 
   useEffect(() => {
     const scrollTargetId = pendingScrollTargetRef.current

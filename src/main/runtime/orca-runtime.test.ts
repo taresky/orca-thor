@@ -1608,7 +1608,9 @@ describe('OrcaRuntimeService', () => {
 
   it('matches explicit-id cwd PTYs for folder workspace instance IDs', async () => {
     const folderWorktreeRootId = makeLocalTestWorktreeId(TEST_FOLDER_WORKSPACE_PATH)
-    const folderWorktreeId = `${folderWorktreeRootId}${FOLDER_WORKSPACE_INSTANCE_SEPARATOR}11111111-1111-4111-8111-111111111111`
+    const folderWorktreeId = makeLocalTestWorktreeId(
+      `${TEST_FOLDER_WORKSPACE_PATH}${FOLDER_WORKSPACE_INSTANCE_SEPARATOR}11111111-1111-4111-8111-111111111111`
+    )
     vi.mocked(listWorktrees).mockClear()
     vi.mocked(listWorktrees).mockRejectedValue(
       new Error('folder explicit-id fallback should not rescan worktrees')
@@ -20712,6 +20714,48 @@ describe('OrcaRuntimeService', () => {
     )
 
     expect(result).toEqual({ deleted: true })
+    expect(forceDeleteLocalBranchMock).toHaveBeenCalledWith(
+      TEST_REPO_PATH,
+      'feature/test',
+      'def456'
+    )
+  })
+
+  it('cleans canonical and safe legacy runtime aliases when removing a worktree', async () => {
+    const legacyWorktreeId = `${TEST_REPO_ID}::${TEST_WORKTREE_PATH}`
+    const metaById: Record<string, WorktreeMeta> = {
+      [TEST_WORKTREE_ID]: makeWorktreeMeta({ hostId: 'local' }),
+      [legacyWorktreeId]: makeWorktreeMeta({ hostId: 'local' })
+    }
+    const removeWorktreeMeta = vi.fn((worktreeId: string) => {
+      delete metaById[worktreeId]
+    })
+    const runtimeStore = {
+      ...store,
+      getAllWorktreeMeta: () => metaById,
+      getWorktreeMeta: (worktreeId: string) => metaById[worktreeId],
+      removeWorktreeMeta
+    }
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+
+    await runtime.removeManagedWorktree(TEST_WORKTREE_ID)
+
+    expect(removeWorktreeMeta).toHaveBeenCalledWith(TEST_WORKTREE_ID)
+    expect(removeWorktreeMeta).toHaveBeenCalledWith(legacyWorktreeId)
+    expect(deleteWorktreeHistoryDirMock).toHaveBeenCalledWith(TEST_WORKTREE_ID)
+    expect(deleteWorktreeHistoryDirMock).toHaveBeenCalledWith(legacyWorktreeId)
+  })
+
+  it('force-deletes a preserved branch through a legacy runtime alias', async () => {
+    const legacyWorktreeId = `${TEST_REPO_ID}::${TEST_WORKTREE_PATH}`
+    const runtime = new OrcaRuntimeService(store)
+    vi.mocked(removeWorktree).mockResolvedValue({
+      preservedBranch: { branchName: 'feature/test', head: 'def456' }
+    })
+
+    await runtime.removeManagedWorktree(TEST_WORKTREE_ID)
+    await runtime.forceDeletePreservedBranch(legacyWorktreeId, 'feature/test', 'def456')
+
     expect(forceDeleteLocalBranchMock).toHaveBeenCalledWith(
       TEST_REPO_PATH,
       'feature/test',

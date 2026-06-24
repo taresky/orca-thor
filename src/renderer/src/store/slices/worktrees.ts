@@ -797,7 +797,8 @@ function settingsForWorktreeOwner(
 
 async function listDetectedWorktreesForRepo(
   settings: AppState['settings'],
-  repoId: string
+  repoId: string,
+  ownerHostId?: ExecutionHostId
 ): Promise<DetectedWorktreeListResult> {
   const target = getActiveRuntimeTarget(settings)
   if (target.kind === 'local') {
@@ -805,9 +806,12 @@ async function listDetectedWorktreesForRepo(
       listDetected?: typeof window.api.worktrees.listDetected
     }
     if (typeof worktreesApi.listDetected === 'function') {
-      return worktreesApi.listDetected({ repoId })
+      return worktreesApi.listDetected({ repoId, ...(ownerHostId ? { hostId: ownerHostId } : {}) })
     }
-    const legacyWorktrees = await worktreesApi.list({ repoId })
+    const legacyWorktrees = await worktreesApi.list({
+      repoId,
+      ...(ownerHostId ? { hostId: ownerHostId } : {})
+    })
     return toLegacyDetectedWorktreeResult(repoId, { worktrees: legacyWorktrees })
   }
   try {
@@ -1020,6 +1024,18 @@ function getWorktreeHostId(
   }
   const repo = findRepoForHost(state.repos, repoId, { settings: state.settings })
   return repo ? getRepoExecutionHostId(repo) : null
+}
+
+function refreshWorktreeOwner(
+  state: Pick<
+    AppState,
+    'repos' | 'settings' | 'worktreesByRepo' | 'detectedWorktreesByRepo' | 'fetchWorktrees'
+  >,
+  worktreeId: string
+): void {
+  const repoId = getRepoIdFromWorktreeId(worktreeId)
+  const ownerHostId = getWorktreeHostId(state, worktreeId)
+  void state.fetchWorktrees(repoId, ownerHostId ? { ownerHostId } : undefined)
 }
 
 function mergeLineageForHost(
@@ -1758,7 +1774,12 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
 
   fetchDetectedWorktrees: async (repoId) => {
     try {
-      const result = await listDetectedWorktreesForRepo(settingsForRepoOwner(get(), repoId), repoId)
+      const hostId = repoHostId(get(), repoId)
+      const result = await listDetectedWorktreesForRepo(
+        settingsForRepoOwner(get(), repoId, hostId),
+        repoId,
+        hostId
+      )
       set((s) =>
         areDetectedWorktreeResultsEqual(s.detectedWorktreesByRepo[repoId], result)
           ? s
@@ -1776,7 +1797,7 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
       const ownerState = get()
       const hostId = repoHostId(ownerState, repoId, options?.ownerHostId)
       const settings = settingsForRepoOwner(ownerState, repoId, hostId)
-      const detected = await listDetectedWorktreesForRepo(settings, repoId)
+      const detected = await listDetectedWorktreesForRepo(settings, repoId, hostId)
       if (options?.requireAuthoritative && !detected.authoritative) {
         return false
       }
@@ -1901,7 +1922,7 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
       await mapReposForWorktreeRefresh(repos, async (r) => {
         const hostId = getRepoExecutionHostId(r)
         const settings = settingsForKnownRepoOwner(get().settings, r)
-        const detected = await listDetectedWorktreesForRepo(settings, r.id)
+        const detected = await listDetectedWorktreesForRepo(settings, r.id, hostId)
         const worktrees = toVisibleWorktrees(detected, hostId)
         set((s) => {
           const matchOptions = worktreeHostMatchOptions(s, r.id, hostId)
@@ -1959,7 +1980,8 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
           const hostId = getRepoExecutionHostId(r)
           const detected = await listDetectedWorktreesForRepo(
             settingsForKnownRepoOwner(get().settings, r),
-            r.id
+            r.id,
+            hostId
           )
           const list = toVisibleWorktrees(detected, hostId)
           const current = get().worktreesByRepo[r.id]
@@ -2261,9 +2283,11 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
             ...(linkedGiteaPR !== undefined ? { linkedGiteaPR } : {}),
             ...(startup ? { startup } : {}),
             ...(creationId ? { creationId } : {}),
+            ...(options?.ownerHostId ? { hostId: options.ownerHostId } : {}),
             ...(automationProvenanceRequest ? { automationProvenanceRequest } : {})
           }
-          const target = getActiveRuntimeTarget(settingsForRepoOwner(get(), repoId))
+          const ownerHostId = options?.ownerHostId
+          const target = getActiveRuntimeTarget(settingsForRepoOwner(get(), repoId, ownerHostId))
           const result =
             target.kind === 'local'
               ? await window.api.worktrees.create(createArgs)
@@ -2325,7 +2349,10 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
           // then produces a duplicate entry in worktreesByRepo, which gives
           // React duplicate keys and can corrupt terminal DOM containers.
           set((s) => {
-            const createdWorktree = withRepoHostId(result.worktree, repoHostId(s, repoId))
+            const createdWorktree = withRepoHostId(
+              result.worktree,
+              repoHostId(s, repoId, ownerHostId)
+            )
             const current = s.worktreesByRepo[repoId] ?? []
             const alreadyPresent = current.some((w) => w.id === createdWorktree.id)
             const nextWorktrees = alreadyPresent
@@ -3069,11 +3096,11 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
       }
     } catch (err) {
       if (isRuntimeSelectorNotFoundError(err)) {
-        void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId))
+        refreshWorktreeOwner(get(), worktreeId)
         return
       }
       console.error('Failed to update worktree meta:', err)
-      void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId))
+      refreshWorktreeOwner(get(), worktreeId)
     }
   },
 
@@ -3147,11 +3174,11 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
           )
         } catch (err) {
           if (isRuntimeSelectorNotFoundError(err)) {
-            void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId))
+            refreshWorktreeOwner(get(), worktreeId)
             return
           }
           console.error('Failed to update worktree meta:', err)
-          void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId))
+          refreshWorktreeOwner(get(), worktreeId)
         }
       })
     )
@@ -3232,11 +3259,11 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
       lastActivityAt: now
     }).catch((err) => {
       if (isRuntimeSelectorNotFoundError(err)) {
-        void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId))
+        refreshWorktreeOwner(get(), worktreeId)
         return
       }
       console.error('Failed to persist unread worktree state:', err)
-      void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId))
+      refreshWorktreeOwner(get(), worktreeId)
     })
   },
 
@@ -3342,11 +3369,11 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
       isUnread: false
     }).catch((err) => {
       if (isRuntimeSelectorNotFoundError(err)) {
-        void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId))
+        refreshWorktreeOwner(get(), worktreeId)
         return
       }
       console.error('Failed to persist cleared unread worktree state:', err)
-      void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId))
+      refreshWorktreeOwner(get(), worktreeId)
     })
   },
 
@@ -3403,7 +3430,7 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
         return
       }
       console.error('Failed to persist worktree activity timestamp:', err)
-      void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId))
+      refreshWorktreeOwner(get(), worktreeId)
     })
   },
 
@@ -3825,11 +3852,11 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
         updates
       ).catch((err) => {
         if (isRuntimeSelectorNotFoundError(err)) {
-          void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId))
+          refreshWorktreeOwner(get(), worktreeId)
           return
         }
         console.error('Failed to persist worktree activation state:', err)
-        void get().fetchWorktrees(getRepoIdFromWorktreeId(worktreeId))
+        refreshWorktreeOwner(get(), worktreeId)
       })
     }
   },

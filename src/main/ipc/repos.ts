@@ -1883,8 +1883,12 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
     }
   )
 
-  ipcMain.handle('repos:remove', async (_event, args: { repoId: string }) => {
-    store.removeProject(args.repoId)
+  ipcMain.handle('repos:remove', async (_event, args: { repoId: string; hostId?: string }) => {
+    const hostId = args.hostId ? normalizeExecutionHostId(args.hostId) : undefined
+    if (args.hostId && !hostId) {
+      throw new Error(`Invalid host ID: ${args.hostId}`)
+    }
+    store.removeProject(args.repoId, hostId ?? undefined)
     invalidateAuthorizedRootsCache()
     notifyReposChanged(mainWindow)
   })
@@ -1895,6 +1899,7 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
       _event,
       args: {
         repoId: string
+        hostId?: string
         updates: Partial<
           Pick<
             Repo,
@@ -2008,7 +2013,11 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
           updates.sourceControlAi = normalizedSourceControlAi
         }
       }
-      const updated = store.updateRepo(args.repoId, updates)
+      const hostId = args.hostId ? normalizeExecutionHostId(args.hostId) : undefined
+      if (args.hostId && !hostId) {
+        throw new Error(`Invalid host ID: ${args.hostId}`)
+      }
+      const updated = store.updateRepo(args.repoId, updates, hostId ?? undefined)
       if (updated) {
         if ('worktreeBasePath' in updates) {
           void prepareLocalWorktreeRootForRepo(store, updated)

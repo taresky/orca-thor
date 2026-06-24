@@ -598,7 +598,10 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       }),
     [eligibleRepos, projectHostSetups, projects, repoId, workspaceHostScope]
   )
-  const selectedRepo = eligibleRepos.find((repo) => repo.id === repoId)
+  const selectedRepo =
+    selectedWorkspaceTarget.status === 'ready'
+      ? selectedWorkspaceTarget.target.repo
+      : eligibleRepos.find((repo) => repo.id === repoId)
   const selectedRepoAgentLaunchPlatform = useMemo(() => {
     if (!selectedRepo) {
       return CLIENT_PLATFORM
@@ -3113,7 +3116,10 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         undefined,
         undefined,
         undefined,
-        submitCompareBaseRef
+        submitCompareBaseRef,
+        selectedWorkspaceTarget.status === 'ready'
+          ? { ownerHostId: selectedWorkspaceTarget.target.hostId }
+          : undefined
       )
       const worktree = result.worktree
 
@@ -3220,6 +3226,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     selectedRepoAgentLaunchPlatform,
     selectedRepoIsGit,
     selectedRepoRequiresConnection,
+    selectedWorkspaceTarget,
     showProjectRequiredError,
     settings?.agentCmdOverrides,
     settings?.agentDefaultArgs,

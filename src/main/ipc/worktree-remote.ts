@@ -864,7 +864,7 @@ function isPushTargetRemoteCreatedByKnownWorktree(
 
 export async function cleanupUnusedWorktreePushTargetRemote(
   repoPath: string,
-  removedWorktreeId: string,
+  removedWorktreeId: string | readonly string[],
   target: GitPushTarget | undefined,
   store: WorktreePushTargetStore,
   gitOptions: { wslDistro?: string } = {}
@@ -1003,7 +1003,7 @@ async function prepareWorktreePushTargetSsh(
 export async function cleanupUnusedWorktreePushTargetRemoteSsh(
   provider: SshGitProvider,
   repoPath: string,
-  removedWorktreeId: string,
+  removedWorktreeId: string | readonly string[],
   target: GitPushTarget | undefined,
   store: WorktreePushTargetStore
 ): Promise<void> {
@@ -1017,7 +1017,7 @@ export async function cleanupUnusedWorktreePushTargetRemoteSsh(
     )
   } catch (error) {
     console.warn(
-      `[worktrees] Failed to clean up remote fork PR remote for ${removedWorktreeId}`,
+      `[worktrees] Failed to clean up remote fork PR remote for ${String(removedWorktreeId)}`,
       error
     )
   }

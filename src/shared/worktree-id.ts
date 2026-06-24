@@ -1,10 +1,11 @@
 import { WORKTREE_ID_SEPARATOR } from './pty-session-id-format'
-import {
-  getRepoExecutionHostId,
-  normalizeExecutionHostId,
-  type ExecutionHostId
-} from './execution-host'
+import { getRepoExecutionHostId, type ExecutionHostId } from './execution-host'
 import type { Repo } from './types'
+import {
+  WORKTREE_KEY_SCHEME,
+  formatWorktreeKey,
+  parseStrictWorktreeKey
+} from './worktree-key-format'
 
 export { WORKTREE_ID_SEPARATOR } from './pty-session-id-format'
 
@@ -25,24 +26,9 @@ export type ParsedAnyWorktreeId =
   | ({ format: 'legacy' } & ParsedWorktreeId)
 
 export const FOLDER_WORKSPACE_INSTANCE_SEPARATOR = '::workspace:'
-const WORKTREE_KEY_SCHEME = 'orca-worktree://'
-const WORKTREE_KEY_PREFIX = `${WORKTREE_KEY_SCHEME}v1?`
 const FOLDER_WORKSPACE_INSTANCE_SUFFIX = new RegExp(
   `${FOLDER_WORKSPACE_INSTANCE_SEPARATOR.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[0-9a-f-]{36}$`
 )
-
-function encodeKeyPart(value: string): string {
-  return encodeURIComponent(value)
-}
-
-function decodeStrictKeyPart(value: string): string | null {
-  try {
-    const decoded = decodeURIComponent(value)
-    return decoded.length > 0 ? decoded : null
-  } catch {
-    return null
-  }
-}
 
 export function makeLegacyWorktreeId(repoId: string, path: string): string {
   return `${repoId}${WORKTREE_ID_SEPARATOR}${path}`
@@ -53,11 +39,7 @@ export function makeWorktreeKey(input: {
   repoId: string
   path: string
 }): string {
-  return `${WORKTREE_KEY_PREFIX}${[
-    `hostId=${encodeKeyPart(input.hostId)}`,
-    `repoId=${encodeKeyPart(input.repoId)}`,
-    `path=${encodeKeyPart(input.path)}`
-  ].join('&')}`
+  return formatWorktreeKey(input)
 }
 
 export function makeRepoWorktreeKey(
@@ -87,42 +69,7 @@ export function isRepoWorktreeIdAlias(
 }
 
 export function parseWorktreeKey(worktreeId: string): ParsedCanonicalWorktreeKey | null {
-  if (!worktreeId.startsWith(WORKTREE_KEY_PREFIX)) {
-    return null
-  }
-  const query = worktreeId.slice(WORKTREE_KEY_PREFIX.length)
-  const parts = query.split('&')
-  if (parts.length !== 3) {
-    return null
-  }
-  const expectedKeys = ['hostId', 'repoId', 'path'] as const
-  const values: Partial<Record<(typeof expectedKeys)[number], string>> = {}
-  for (const [index, part] of parts.entries()) {
-    const separatorIndex = part.indexOf('=')
-    if (separatorIndex <= 0) {
-      return null
-    }
-    const key = part.slice(0, separatorIndex)
-    if (key !== expectedKeys[index]) {
-      return null
-    }
-    const decoded = decodeStrictKeyPart(part.slice(separatorIndex + 1))
-    if (decoded === null) {
-      return null
-    }
-    values[key] = decoded
-  }
-  const rawHostId = values.hostId
-  const rawRepoId = values.repoId
-  const rawPath = values.path
-  if (!rawHostId || !rawRepoId || !rawPath) {
-    return null
-  }
-  const hostId = normalizeExecutionHostId(rawHostId)
-  if (!hostId) {
-    return null
-  }
-  return { hostId, repoId: rawRepoId, worktreePath: rawPath }
+  return parseStrictWorktreeKey(worktreeId)
 }
 
 export function parseAnyWorktreeId(worktreeId: string): ParsedAnyWorktreeId | null {

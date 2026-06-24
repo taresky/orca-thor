@@ -172,7 +172,7 @@ describe('repo slice same-id host mutations', () => {
 
     await store.getState().removeProject(repoId)
 
-    expect(reposRemove).toHaveBeenCalledWith({ repoId })
+    expect(reposRemove).toHaveBeenCalledWith({ repoId, hostId: 'local' })
     expect(runtimeEnvironmentCall).not.toHaveBeenCalledWith(
       expect.objectContaining({ method: 'repo.rm' })
     )

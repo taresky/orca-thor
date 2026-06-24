@@ -2867,6 +2867,26 @@ describe('Store', () => {
     expect(store.getProjectHostSetups().map((setup) => setup.id)).toEqual(['r2'])
   })
 
+  it('removeProject can remove only the requested host for same-id repos', async () => {
+    const store = await createStore()
+    const localRepo = makeRepo({ id: 'same-repo', path: '/local/repo' })
+    const sshRepo = makeRepo({ id: 'same-repo', path: '/remote/repo', connectionId: 'gpu-vm' })
+    const localWorktreeId = makeRepoWorktreeKey(localRepo, '/local/wt')
+    const sshWorktreeId = makeRepoWorktreeKey(sshRepo, '/remote/wt')
+    store.addRepo(localRepo)
+    store.addRepo(sshRepo)
+    store.setWorktreeMeta(localWorktreeId, { displayName: 'local' })
+    store.setWorktreeMeta(sshWorktreeId, { displayName: 'ssh' })
+
+    store.removeProject('same-repo', 'ssh:gpu-vm')
+
+    expect(store.getRepos()).toEqual([
+      expect.objectContaining({ id: 'same-repo', path: '/local/repo' })
+    ])
+    expect(store.getWorktreeMeta(localWorktreeId)?.displayName).toBe('local')
+    expect(store.getWorktreeMeta(sshWorktreeId)).toBeUndefined()
+  })
+
   it('removeProject deletes child and parent lineage for the repo', async () => {
     const store = await createStore()
     store.addRepo(makeRepo({ id: 'r1' }))
@@ -2911,6 +2931,27 @@ describe('Store', () => {
     expect(updated).not.toBeNull()
     expect(updated!.displayName).toBe('renamed')
     expect(store.getRepo('r1')!.displayName).toBe('renamed')
+  })
+
+  it('updateRepo can update only the requested host for same-id repos', async () => {
+    const store = await createStore()
+    store.addRepo(makeRepo({ id: 'same-repo', path: '/local/repo', displayName: 'Local' }))
+    store.addRepo(
+      makeRepo({
+        id: 'same-repo',
+        path: '/remote/repo',
+        displayName: 'Remote',
+        connectionId: 'gpu-vm'
+      })
+    )
+
+    const updated = store.updateRepo('same-repo', { displayName: 'Remote Renamed' }, 'ssh:gpu-vm')
+
+    expect(updated?.displayName).toBe('Remote Renamed')
+    expect(store.getRepos()).toEqual([
+      expect.objectContaining({ path: '/local/repo', displayName: 'Local' }),
+      expect.objectContaining({ path: '/remote/repo', displayName: 'Remote Renamed' })
+    ])
   })
 
   it('updateRepo keeps project host setup compatibility records in sync', async () => {
@@ -3264,6 +3305,32 @@ describe('Store', () => {
     expect(result).toEqual({ project: independentProject, setup: runtimeSetup })
     expect(store.getProjects()).toEqual([independentProject])
     expect(store.getProjectHostSetups()).toEqual([localSetup])
+  })
+
+  it('does not guess which same-id project host setup to delete without hostId', async () => {
+    const independentProject = makeProject({
+      id: 'cloud-project',
+      displayName: 'Cloud Project'
+    })
+    const localSetup = makeProjectHostSetup({
+      id: 'shared-setup',
+      projectId: independentProject.id,
+      hostId: 'local'
+    })
+    const runtimeSetup = makeProjectHostSetup({
+      id: 'shared-setup',
+      projectId: independentProject.id,
+      hostId: 'runtime:gpu-vm'
+    })
+    writeDataFile({
+      ...getDefaultPersistedState(testState.dir),
+      projects: [independentProject],
+      projectHostSetups: [localSetup, runtimeSetup]
+    })
+    const store = await createStore()
+
+    expect(store.deleteProjectHostSetup({ setupId: 'shared-setup' })).toBeNull()
+    expect(store.getProjectHostSetups()).toEqual([localSetup, runtimeSetup])
   })
 
   it('deletes repo-backed project host setups by removing the compatibility repo', async () => {
