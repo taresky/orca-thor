@@ -10,7 +10,7 @@ export async function exportActiveMarkdownToPdf(options: {
   fileId: string
   root: ParentNode | null
 }): Promise<void> {
-  const payload = getActiveMarkdownExportPayload(options)
+  const payload = await getActiveMarkdownExportPayload(options)
   if (!payload) {
     // Why: stale panel refs can survive a dropdown click; keep export defensive
     // even though the local Markdown menu disables unreachable states.
