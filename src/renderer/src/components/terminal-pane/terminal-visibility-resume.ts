@@ -1,5 +1,5 @@
 import type { PaneManager } from '@/lib/pane-manager/pane-manager'
-import type { ScrollState } from '@/lib/pane-manager/pane-manager-types'
+import type { ManagedPane, ScrollState } from '@/lib/pane-manager/pane-manager-types'
 import { resetAllTerminalWebglAtlases } from '@/lib/pane-manager/pane-manager-registry'
 import {
   flushTerminalOutput,
@@ -22,7 +22,9 @@ type ResumeTerminalVisibilityArgs = {
   isActive: boolean
   wasVisible: boolean
   shouldUseLightTabResume: boolean
-  captureViewportPositions: (useRememberedSnapshots: boolean) => Map<number, ScrollState>
+  captureViewportPositions: (
+    useRememberedSnapshots: boolean
+  ) => Map<ManagedPane['leafId'], ScrollState>
   withSuppressedScrollTracking: (callback: () => void) => void
 }
 
@@ -32,7 +34,9 @@ type HideTerminalVisibilityArgs = {
   wasWorktreeActive: boolean
   isWorktreeActive: boolean
   hasCompletedVisibleResume: boolean
-  captureViewportPositions: (useRememberedSnapshots: boolean) => Map<number, ScrollState>
+  captureViewportPositions: (
+    useRememberedSnapshots: boolean
+  ) => Map<ManagedPane['leafId'], ScrollState>
 }
 
 type HideTerminalVisibilityResult = {
@@ -163,13 +167,14 @@ function resumeTerminalVisibilityHeavy(manager: PaneManager, isActive: boolean):
 
 function restoreTerminalViewportPositions(
   manager: PaneManager,
-  viewportPositions: Map<number, ScrollState>
+  viewportPositions: Map<ManagedPane['leafId'], ScrollState>
 ): void {
   for (const pane of manager.getPanes()) {
-    const position = viewportPositions.get(pane.id)
+    const position = viewportPositions.get(pane.leafId)
     if (position) {
       logTerminalScrollRestore('visibility-restore', {
         before: terminalViewportForDebug(pane.terminal),
+        leafId: pane.leafId,
         paneId: pane.id,
         saved: terminalScrollStateForDebug(position),
         source: 'resumeTerminalVisibility'

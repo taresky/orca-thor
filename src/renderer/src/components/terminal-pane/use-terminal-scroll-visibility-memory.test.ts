@@ -99,7 +99,7 @@ describe('useTerminalScrollVisibilityMemory', () => {
       scrollToBottom: vi.fn()
     }
     const manager = {
-      getPanes: vi.fn(() => [{ id: 1, terminal }])
+      getPanes: vi.fn(() => [{ id: 1, leafId: 'leaf-1', terminal }])
     }
     const animationFrames: FrameRequestCallback[] = []
     globalThis.requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
@@ -131,7 +131,7 @@ describe('useTerminalScrollVisibilityMemory', () => {
       scrollToBottom: vi.fn()
     }
     const manager = {
-      getPanes: vi.fn(() => [{ id: 1, terminal }])
+      getPanes: vi.fn(() => [{ id: 1, leafId: 'leaf-1', terminal }])
     }
     const cancelAnimationFrame = vi.fn()
     globalThis.requestAnimationFrame = vi.fn(() => 7)
@@ -161,7 +161,7 @@ describe('useTerminalScrollVisibilityMemory', () => {
       })
     }
     const manager = {
-      getPanes: vi.fn(() => [{ id: 1, terminal }])
+      getPanes: vi.fn(() => [{ id: 1, leafId: 'leaf-1', terminal }])
     }
     const userScrolledState = {
       bufferType: 'normal',
@@ -195,7 +195,52 @@ describe('useTerminalScrollVisibilityMemory', () => {
     mocks.isTerminalScrollRestoreInProgress.mockReturnValueOnce(true)
     listener()
 
-    expect(visibilityMemory.captureViewportPositions(true).get(1)).toBe(userScrolledState)
+    expect(visibilityMemory.captureViewportPositions(true).get('leaf-1' as never)).toBe(
+      userScrolledState
+    )
     expect(mocks.captureScrollState).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not reuse a remembered snapshot when a pane id gets a new leaf', () => {
+    const terminal = {
+      onScroll: vi.fn(() => ({ dispose: vi.fn() }))
+    }
+    let panes = [{ id: 1, leafId: 'old-leaf', terminal }]
+    const manager = {
+      getPanes: vi.fn(() => panes)
+    }
+    const oldBottomState = {
+      bufferType: 'normal',
+      wasAtBottom: true,
+      viewportY: 100,
+      baseY: 100
+    }
+    const newLeafState = {
+      bufferType: 'normal',
+      wasAtBottom: false,
+      viewportY: 42,
+      baseY: 100
+    }
+    let currentState = oldBottomState
+    mocks.captureScrollState.mockImplementation(() => currentState)
+
+    beginHookRender()
+    const visibilityMemory = useTerminalScrollVisibilityMemory({
+      managerRef: { current: manager as never },
+      isVisibleRef: { current: true },
+      visibleResumeCompleteRef: { current: true },
+      paneCount: 1
+    })
+
+    expect(visibilityMemory.captureViewportPositions(false).get('old-leaf' as never)).toStrictEqual(
+      oldBottomState
+    )
+    panes = [{ id: 1, leafId: 'new-leaf', terminal }]
+    currentState = newLeafState
+
+    expect(visibilityMemory.captureViewportPositions(true).get('new-leaf' as never)).toStrictEqual(
+      newLeafState
+    )
+    expect(mocks.captureScrollState).toHaveBeenCalledTimes(2)
   })
 })
