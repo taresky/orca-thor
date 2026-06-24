@@ -39,10 +39,11 @@ export type MobileSourceControlStateParams = {
   origin: string
   embedded: boolean
   onRequestClose?: () => void
+  onOpenedFileDiff?: (relativePath: string) => void
 }
 
 export function useMobileSourceControlState(params: MobileSourceControlStateParams) {
-  const { hostId, worktreeId, name, origin, embedded, onRequestClose } = params
+  const { hostId, worktreeId, name, origin, embedded, onRequestClose, onOpenedFileDiff } = params
   const insets = useSafeAreaInsets()
   const { client, state: connState } = useHostClient(hostId)
   const forceReconnect = useForceReconnect()
@@ -89,6 +90,7 @@ export function useMobileSourceControlState(params: MobileSourceControlStatePara
     origin,
     embedded,
     onRequestClose,
+    onOpenedFileDiff,
     branchCompareState,
     mountedRef,
     busyActionRef,
