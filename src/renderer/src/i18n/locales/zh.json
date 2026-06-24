@@ -1102,7 +1102,8 @@
         "importHostSetup": "导入",
         "notePasteTooLarge": "笔记字段的粘贴内容过大。",
         "reuseExistingBranch": "复用分支",
-        "reuseExistingBranchHint": "检出已有分支，而不是基于它创建新分支。"
+        "reuseExistingBranchHint": "检出已有分支，而不是基于它创建新分支。",
+        "createMultiple": "Create more"
       },
       "NewWorkspaceComposerModal": {
         "fa90f739a5": "创建工作区之前选择项目、工作区名称和 Agent。"
@@ -3745,7 +3746,8 @@
           "2d74665a56": "端口",
           "65a9820bd1": "Agent 状态",
           "219ebf1961": "分支名称",
-          "automation": "Automation"
+          "automation": "Automation",
+          "folderPathIdentity": "Branch / folder path"
         },
         "SshDisconnectedDialog": {
           "ca4a7892af": "正在连接...",
@@ -3821,7 +3823,9 @@
           "021538e1d1": "SSH 已断开连接",
           "runtimeHostDisconnected": "Server disconnected",
           "runtimeHostProject": "Project on Orca server",
-          "automationCreated": "Created by automation"
+          "automationCreated": "Created by automation",
+          "branchIdentity": "Branch",
+          "branchFolderPathIdentity": "Branch or folder path"
         },
         "WorktreeCardAgents": {
           "1b0a156717": "Agents"
@@ -4300,6 +4304,9 @@
           "current": "当前",
           "searchPlaceholder": "搜索工作树...",
           "empty": "没有匹配的可用工作树。"
+        },
+        "WorktreeCardStatusSlot": {
+          "branchIdentity": "Branch"
         }
       },
       "shared": {
