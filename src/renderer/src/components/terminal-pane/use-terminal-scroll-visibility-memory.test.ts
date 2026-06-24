@@ -115,7 +115,7 @@ describe('useTerminalScrollVisibilityMemory', () => {
       paneCount: 1
     })
 
-    visibilityMemory.scheduleFollowOutputIfNeeded(1)
+    visibilityMemory.scheduleFollowOutputIfNeeded('leaf-1' as never)
     animationFrames.shift()?.(16)
     animationFrames.shift()?.(32)
 
@@ -145,7 +145,7 @@ describe('useTerminalScrollVisibilityMemory', () => {
       paneCount: 1
     })
 
-    visibilityMemory.scheduleFollowOutputIfNeeded(1)
+    visibilityMemory.scheduleFollowOutputIfNeeded('leaf-1' as never)
     runEffectCleanups()
 
     expect(cancelAnimationFrame).toHaveBeenCalledWith(7)
@@ -242,5 +242,85 @@ describe('useTerminalScrollVisibilityMemory', () => {
       newLeafState
     )
     expect(mocks.captureScrollState).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not apply pending follow-output to a reused pane id with a different leaf', () => {
+    const oldTerminal = {
+      onScroll: vi.fn(() => ({ dispose: vi.fn() })),
+      scrollToBottom: vi.fn()
+    }
+    const newTerminal = {
+      onScroll: vi.fn(() => ({ dispose: vi.fn() })),
+      scrollToBottom: vi.fn()
+    }
+    let panes = [{ id: 1, leafId: 'old-leaf', terminal: oldTerminal }]
+    const manager = {
+      getPanes: vi.fn(() => panes)
+    }
+    const animationFrames: FrameRequestCallback[] = []
+    globalThis.requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+      animationFrames.push(callback)
+      return animationFrames.length
+    })
+
+    beginHookRender()
+    const visibilityMemory = useTerminalScrollVisibilityMemory({
+      managerRef: { current: manager as never },
+      isVisibleRef: { current: true },
+      visibleResumeCompleteRef: { current: true },
+      paneCount: 1
+    })
+
+    visibilityMemory.scheduleFollowOutputIfNeeded('old-leaf' as never)
+    panes = [{ id: 1, leafId: 'new-leaf', terminal: newTerminal }]
+    animationFrames.shift()?.(16)
+    animationFrames.shift()?.(32)
+
+    expect(oldTerminal.scrollToBottom).not.toHaveBeenCalled()
+    expect(newTerminal.scrollToBottom).not.toHaveBeenCalled()
+    expect(mocks.flushTerminalOutput).not.toHaveBeenCalled()
+  })
+
+  it('does not follow output when the remembered visible position was not at bottom', () => {
+    const onScrollListeners: (() => void)[] = []
+    const terminal = {
+      onScroll: vi.fn((listener: () => void) => {
+        onScrollListeners.push(listener)
+        return { dispose: vi.fn() }
+      }),
+      scrollToBottom: vi.fn()
+    }
+    const manager = {
+      getPanes: vi.fn(() => [{ id: 1, leafId: 'leaf-1', terminal }])
+    }
+    const animationFrames: FrameRequestCallback[] = []
+    globalThis.requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+      animationFrames.push(callback)
+      return animationFrames.length
+    })
+    mocks.captureScrollState.mockReturnValue({
+      bufferType: 'normal',
+      wasAtBottom: false,
+      viewportY: 42,
+      baseY: 100
+    })
+
+    beginHookRender()
+    const visibilityMemory = useTerminalScrollVisibilityMemory({
+      managerRef: { current: manager as never },
+      isVisibleRef: { current: true },
+      visibleResumeCompleteRef: { current: true },
+      paneCount: 1
+    })
+    onScrollListeners[0]?.()
+
+    visibilityMemory.scheduleFollowOutputIfNeeded('leaf-1' as never)
+    animationFrames.shift()?.(16)
+    animationFrames.shift()?.(32)
+
+    expect(mocks.flushTerminalOutput).toHaveBeenCalledWith(terminal, {
+      maxChars: 256 * 1024
+    })
+    expect(terminal.scrollToBottom).not.toHaveBeenCalled()
   })
 })
