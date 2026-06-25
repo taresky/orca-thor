@@ -727,7 +727,7 @@ export function useTerminalPaneLifecycle({
           if (e.type === 'keydown') {
             if (e.key === 'PageUp' || e.key === 'Home') {
               markTerminalPinnedViewport(pane.terminal)
-              syncTerminalScrollIntentSoon(pane.terminal)
+              syncTerminalScrollIntentSoon(pane.terminal, { preservePinnedAtBottom: true })
             } else if (e.key === 'PageDown' || e.key === 'End') {
               syncTerminalScrollIntentSoon(pane.terminal)
             }

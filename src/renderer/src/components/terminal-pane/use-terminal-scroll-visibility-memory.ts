@@ -6,7 +6,10 @@ import {
   captureScrollState,
   getTerminalOutputEpoch
 } from '@/lib/pane-manager/pane-scroll'
-import { markTerminalFollowOutput } from '@/lib/pane-manager/terminal-scroll-intent'
+import {
+  getTerminalScrollIntentKind,
+  markTerminalFollowOutput
+} from '@/lib/pane-manager/terminal-scroll-intent'
 import type { PaneManager } from '@/lib/pane-manager/pane-manager'
 import type { ScrollState } from '@/lib/pane-manager/pane-manager-types'
 
@@ -117,11 +120,13 @@ export function useTerminalScrollVisibilityMemory({
       const currentEpoch = getTerminalOutputEpoch(pane.terminal)
       const hasNewOutput = previous ? currentEpoch > previous.outputEpoch : currentEpoch > 0
       if (hasNewOutput) {
-        cancelDeferredScrollRestore(pane.terminal)
-        markTerminalFollowOutput(pane.terminal)
-        pane.terminal.scrollToBottom()
+        if (getTerminalScrollIntentKind(pane.terminal) === 'followOutput') {
+          cancelDeferredScrollRestore(pane.terminal)
+          markTerminalFollowOutput(pane.terminal)
+          pane.terminal.scrollToBottom()
+          didScroll = true
+        }
         rememberVisibleScrollSnapshot(pane.id, pane.terminal)
-        didScroll = true
       }
       pending.delete(pane.id)
     }

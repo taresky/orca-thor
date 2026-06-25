@@ -52,7 +52,11 @@ export function openTerminal(pane: ManagedPaneInternal): void {
   attachTerminalMouseWheelMultiplier(terminal, {
     getTuiMouseWheelMultiplier: terminalTuiScrollSensitivity
   })
-  pane.terminalScrollIntentDisposable = attachTerminalScrollIntentTracking(terminal, xtermContainer)
+  pane.terminalScrollIntentDisposable = attachTerminalScrollIntentTracking(
+    terminal,
+    xtermContainer,
+    pane.leafId
+  )
 
   // Activate Orca's Unicode 11 width shim *before* any caller-driven write. CJK / emoji /
   // ZWJ codepoints get baked into the buffer at the active unicode version on
