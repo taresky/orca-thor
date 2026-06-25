@@ -639,72 +639,82 @@ export class GitHandler {
   }
 
   private async fetchRemoteTrackingRef(params: Record<string, unknown>) {
+    this.gitDiffReadDedupe.clear()
     const worktreePath = params.worktreePath as string
     const remote = params.remote
     const branch = params.branch
     const ref = params.ref
-    if (typeof remote !== 'string' || typeof branch !== 'string' || typeof ref !== 'string') {
-      throw new Error('Invalid remote-tracking fetch request.')
-    }
-    if (remote.startsWith('-') || branch.startsWith('-')) {
-      throw new Error('Remote-tracking fetch inputs must not start with "-".')
-    }
-    if (ref !== `refs/remotes/${remote}/${branch}`) {
-      throw new Error('Remote-tracking ref does not match the requested remote and branch.')
-    }
-
     try {
-      const { stdout } = await this.git(['remote'], worktreePath)
-      const remotes = stdout
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-      if (!remotes.includes(remote)) {
-        throw new Error(`Remote "${remote}" is not configured.`)
+      if (typeof remote !== 'string' || typeof branch !== 'string' || typeof ref !== 'string') {
+        throw new Error('Invalid remote-tracking fetch request.')
       }
-      await this.git(['check-ref-format', `refs/heads/${branch}`], worktreePath)
-      await this.git(['check-ref-format', ref], worktreePath)
-      await this.git(['fetch', '--no-tags', remote, `+refs/heads/${branch}:${ref}`], worktreePath)
-    } catch (error) {
-      // Why: create-worktree needs a write-capable fetch, but generic git.exec
-      // intentionally rejects fetch. This narrow RPC keeps the relay allowlist
-      // tight while preserving the same safe error normalization as git.fetch.
-      throw new Error(normalizeGitErrorMessage(error, 'fetch'))
+      if (remote.startsWith('-') || branch.startsWith('-')) {
+        throw new Error('Remote-tracking fetch inputs must not start with "-".')
+      }
+      if (ref !== `refs/remotes/${remote}/${branch}`) {
+        throw new Error('Remote-tracking ref does not match the requested remote and branch.')
+      }
+
+      try {
+        const { stdout } = await this.git(['remote'], worktreePath)
+        const remotes = stdout
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+        if (!remotes.includes(remote)) {
+          throw new Error(`Remote "${remote}" is not configured.`)
+        }
+        await this.git(['check-ref-format', `refs/heads/${branch}`], worktreePath)
+        await this.git(['check-ref-format', ref], worktreePath)
+        await this.git(['fetch', '--no-tags', remote, `+refs/heads/${branch}:${ref}`], worktreePath)
+      } catch (error) {
+        // Why: create-worktree needs a write-capable fetch, but generic git.exec
+        // intentionally rejects fetch. This narrow RPC keeps the relay allowlist
+        // tight while preserving the same safe error normalization as git.fetch.
+        throw new Error(normalizeGitErrorMessage(error, 'fetch'))
+      }
+    } finally {
+      this.gitDiffReadDedupe.clear()
     }
   }
 
   private async fetchGitLabMergeRequestHead(params: Record<string, unknown>) {
+    this.gitDiffReadDedupe.clear()
     const worktreePath = params.worktreePath as string
     const remote = params.remote
     const mrIid = params.mrIid
-    if (typeof remote !== 'string') {
-      throw new Error('Invalid GitLab merge request fetch request.')
-    }
-    if (typeof mrIid !== 'number' || !Number.isSafeInteger(mrIid) || mrIid <= 0) {
-      throw new Error('Invalid GitLab merge request fetch request.')
-    }
-    const mergeRequestIid = mrIid
-    if (remote.startsWith('-')) {
-      throw new Error('GitLab merge request fetch remote must not start with "-".')
-    }
-
     try {
-      const { stdout } = await this.git(['remote'], worktreePath)
-      const remotes = stdout
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-      if (!remotes.includes(remote)) {
-        throw new Error(`Remote "${remote}" is not configured.`)
+      if (typeof remote !== 'string') {
+        throw new Error('Invalid GitLab merge request fetch request.')
       }
-      // Why: GitLab MR heads are not refs/heads/*, so the remote-tracking
-      // fetch RPC cannot represent fork MRs. Keep this write path MR-only.
-      await this.git(
-        ['fetch', '--no-tags', remote, `refs/merge-requests/${mergeRequestIid}/head`],
-        worktreePath
-      )
-    } catch (error) {
-      throw new Error(normalizeGitErrorMessage(error, 'fetch'))
+      if (typeof mrIid !== 'number' || !Number.isSafeInteger(mrIid) || mrIid <= 0) {
+        throw new Error('Invalid GitLab merge request fetch request.')
+      }
+      const mergeRequestIid = mrIid
+      if (remote.startsWith('-')) {
+        throw new Error('GitLab merge request fetch remote must not start with "-".')
+      }
+
+      try {
+        const { stdout } = await this.git(['remote'], worktreePath)
+        const remotes = stdout
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+        if (!remotes.includes(remote)) {
+          throw new Error(`Remote "${remote}" is not configured.`)
+        }
+        // Why: GitLab MR heads are not refs/heads/*, so the remote-tracking
+        // fetch RPC cannot represent fork MRs. Keep this write path MR-only.
+        await this.git(
+          ['fetch', '--no-tags', remote, `refs/merge-requests/${mergeRequestIid}/head`],
+          worktreePath
+        )
+      } catch (error) {
+        throw new Error(normalizeGitErrorMessage(error, 'fetch'))
+      }
+    } finally {
+      this.gitDiffReadDedupe.clear()
     }
   }
 

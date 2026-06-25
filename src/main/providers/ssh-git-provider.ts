@@ -64,6 +64,15 @@ export class SshGitProvider implements IGitProvider {
   private connectionId: string
   private mux: SshChannelMultiplexer
   private nonInteractiveExecQueues = new Map<string, NonInteractiveExecQueueEntry[]>()
+
+  private async runWithDiffDedupeClear<T>(run: () => Promise<T>): Promise<T> {
+    this.gitDiffReadDedupe.clear()
+    try {
+      return await run()
+    } finally {
+      this.gitDiffReadDedupe.clear()
+    }
+  }
   private loggedWorktreeIsCleanFallback = false
 
   constructor(
@@ -120,10 +129,13 @@ export class SshGitProvider implements IGitProvider {
     worktreePath: string,
     message: string
   ): Promise<{ success: boolean; error?: string }> {
-    return (await this.mux.request('git.commit', {
-      worktreePath,
-      message
-    })) as { success: boolean; error?: string }
+    return this.runWithDiffDedupeClear(
+      async () =>
+        (await this.mux.request('git.commit', {
+          worktreePath,
+          message
+        })) as { success: boolean; error?: string }
+    )
   }
 
   async getStagedCommitContext(worktreePath: string): Promise<CommitMessageDraftContext | null> {
@@ -398,15 +410,21 @@ export class SshGitProvider implements IGitProvider {
   }
 
   async abortMerge(worktreePath: string): Promise<void> {
-    await this.mux.request('git.abortMerge', { worktreePath })
+    await this.runWithDiffDedupeClear(async () => {
+      await this.mux.request('git.abortMerge', { worktreePath })
+    })
   }
 
   async abortRebase(worktreePath: string): Promise<void> {
-    await this.mux.request('git.abortRebase', { worktreePath })
+    await this.runWithDiffDedupeClear(async () => {
+      await this.mux.request('git.abortRebase', { worktreePath })
+    })
   }
 
   async checkoutBranch(worktreePath: string, branch: string): Promise<void> {
-    await this.mux.request('git.checkout', { worktreePath, branch })
+    await this.runWithDiffDedupeClear(async () => {
+      await this.mux.request('git.checkout', { worktreePath, branch })
+    })
   }
 
   async listLocalBranches(
@@ -448,31 +466,41 @@ export class SshGitProvider implements IGitProvider {
     pushTarget?: GitPushTarget,
     options: { forceWithLease?: boolean } = {}
   ): Promise<void> {
-    await this.mux.request('git.push', {
-      worktreePath,
-      publish,
-      pushTarget,
-      ...(options.forceWithLease === true ? { forceWithLease: true } : {})
+    await this.runWithDiffDedupeClear(async () => {
+      await this.mux.request('git.push', {
+        worktreePath,
+        publish,
+        pushTarget,
+        ...(options.forceWithLease === true ? { forceWithLease: true } : {})
+      })
     })
   }
 
   async pullBranch(worktreePath: string, pushTarget?: GitPushTarget): Promise<void> {
-    await this.mux.request('git.pull', { worktreePath, ...(pushTarget ? { pushTarget } : {}) })
+    await this.runWithDiffDedupeClear(async () => {
+      await this.mux.request('git.pull', { worktreePath, ...(pushTarget ? { pushTarget } : {}) })
+    })
   }
 
   async fastForwardBranch(worktreePath: string, pushTarget?: GitPushTarget): Promise<void> {
-    await this.mux.request('git.fastForward', {
-      worktreePath,
-      ...(pushTarget ? { pushTarget } : {})
+    await this.runWithDiffDedupeClear(async () => {
+      await this.mux.request('git.fastForward', {
+        worktreePath,
+        ...(pushTarget ? { pushTarget } : {})
+      })
     })
   }
 
   async rebaseFromBase(worktreePath: string, baseRef: string): Promise<void> {
-    await this.mux.request('git.rebaseFromBase', { worktreePath, baseRef })
+    await this.runWithDiffDedupeClear(async () => {
+      await this.mux.request('git.rebaseFromBase', { worktreePath, baseRef })
+    })
   }
 
   async fetchRemote(worktreePath: string, pushTarget?: GitPushTarget): Promise<void> {
-    await this.mux.request('git.fetch', { worktreePath, ...(pushTarget ? { pushTarget } : {}) })
+    await this.runWithDiffDedupeClear(async () => {
+      await this.mux.request('git.fetch', { worktreePath, ...(pushTarget ? { pushTarget } : {}) })
+    })
   }
 
   async syncForkDefaultBranch(
@@ -491,11 +519,13 @@ export class SshGitProvider implements IGitProvider {
     branch: string,
     ref: string
   ): Promise<void> {
-    await this.mux.request('git.fetchRemoteTrackingRef', {
-      worktreePath,
-      remote,
-      branch,
-      ref
+    await this.runWithDiffDedupeClear(async () => {
+      await this.mux.request('git.fetchRemoteTrackingRef', {
+        worktreePath,
+        remote,
+        branch,
+        ref
+      })
     })
   }
 
@@ -504,10 +534,12 @@ export class SshGitProvider implements IGitProvider {
     remote: string,
     mrIid: number
   ): Promise<void> {
-    await this.mux.request('git.fetchGitLabMergeRequestHead', {
-      worktreePath,
-      remote,
-      mrIid
+    await this.runWithDiffDedupeClear(async () => {
+      await this.mux.request('git.fetchGitLabMergeRequestHead', {
+        worktreePath,
+        remote,
+        mrIid
+      })
     })
   }
 

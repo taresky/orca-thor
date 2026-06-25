@@ -969,6 +969,54 @@ describe('GitHandler', () => {
       expect(gitSpy).toHaveBeenCalledWith(['add', '--', 'src/file.ts'], tmpDir)
     })
 
+    it('clears pending git.diff reads when a narrow ref fetch runs', async () => {
+      const firstBlob = deferredRelayBuffer('left\n')
+      const secondBlob = deferredRelayBuffer('fresh-left\n')
+      const pendingBuffers = [firstBlob, secondBlob]
+      const gitBufferSpy = vi
+        .spyOn(handler as unknown as GitBufferSpyTarget, 'gitBuffer')
+        .mockImplementation(async () => pendingBuffers.shift()!.promise)
+      const gitSpy = vi
+        .spyOn(handler as unknown as GitSpyTarget, 'git')
+        .mockImplementation(async (args: string[]) => {
+          if (args[0] === 'remote') {
+            return { stdout: 'origin\n', stderr: '' }
+          }
+          return { stdout: '', stderr: '' }
+        })
+
+      const first = dispatcher.callRequest('git.diff', {
+        worktreePath: tmpDir,
+        filePath: 'src/file.ts',
+        staged: false
+      })
+      await waitForSpyCalls(gitBufferSpy, 1)
+
+      await dispatcher.callRequest('git.fetchRemoteTrackingRef', {
+        worktreePath: tmpDir,
+        remote: 'origin',
+        branch: 'main',
+        ref: 'refs/remotes/origin/main'
+      })
+
+      const second = dispatcher.callRequest('git.diff', {
+        worktreePath: tmpDir,
+        filePath: 'src/file.ts',
+        staged: false
+      })
+      await waitForSpyCalls(gitBufferSpy, 2)
+
+      firstBlob.resolve()
+      secondBlob.resolve()
+      await Promise.all([first, second])
+
+      expect(gitBufferSpy).toHaveBeenCalledTimes(2)
+      expect(gitSpy).toHaveBeenCalledWith(
+        ['fetch', '--no-tags', 'origin', '+refs/heads/main:refs/remotes/origin/main'],
+        tmpDir
+      )
+    })
+
     it('coalesces concurrent identical git.branchDiff reads while in flight', async () => {
       const gitSpy = vi
         .spyOn(handler as unknown as GitSpyTarget, 'git')

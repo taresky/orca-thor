@@ -968,6 +968,42 @@ describe('SshGitProvider', () => {
     expect(mux.request).toHaveBeenCalledTimes(3)
   })
 
+  it('clears pending branch diff RPCs when a ref-moving provider operation runs', async () => {
+    const diff = {
+      kind: 'text',
+      originalContent: 'old',
+      modifiedContent: 'new',
+      originalIsBinary: false,
+      modifiedIsBinary: false
+    }
+    const pendingDiff = deferredValue([diff])
+    mux.request.mockReturnValueOnce(pendingDiff.promise)
+
+    const first = provider.getBranchDiff('/home/user/repo', 'origin/main', {
+      includePatch: true,
+      filePath: 'src/file.ts'
+    })
+    await waitForRequestCount(mux.request, 1)
+
+    mux.request.mockResolvedValueOnce(undefined)
+    await provider.fetchRemoteTrackingRef(
+      '/home/user/repo',
+      'origin',
+      'main',
+      'refs/remotes/origin/main'
+    )
+
+    mux.request.mockResolvedValueOnce([diff])
+    const second = provider.getBranchDiff('/home/user/repo', 'origin/main', {
+      includePatch: true,
+      filePath: 'src/file.ts'
+    })
+
+    pendingDiff.resolve()
+    await expect(Promise.all([first, second])).resolves.toEqual([[diff], [diff]])
+    expect(mux.request).toHaveBeenCalledTimes(3)
+  })
+
   it('coalesces logically identical branch and commit diff RPC args regardless of property order', async () => {
     const diff = {
       kind: 'text',
