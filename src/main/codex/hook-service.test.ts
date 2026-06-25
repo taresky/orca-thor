@@ -76,7 +76,10 @@ function escapeTomlBasicString(value: string): string {
 }
 
 function hookTrustHeader(key: string): string {
-  return `[hooks.state."${escapeTomlBasicString(canonicalizeHookTrustKeyForTest(key))}"]`
+  const canonicalKey = canonicalizeHookTrustKeyForTest(key)
+  return /^[A-Za-z]:[\\/]|^\\\\/.test(canonicalKey) && !canonicalKey.includes("'")
+    ? `[hooks.state.'${canonicalKey}']`
+    : `[hooks.state."${escapeTomlBasicString(canonicalKey)}"]`
 }
 
 function canonicalizeHookTrustKeyForTest(key: string): string {
@@ -88,12 +91,24 @@ function canonicalizeHookTrustKeyForTest(key: string): string {
   }
   const sourcePath = key.slice(0, thirdLast)
   try {
-    // Why: mirrors getCodexCanonicalTrustPath separator normalization so test
-    // expectations match the forward-slash keys Orca writes on Windows.
-    return `${realpathSync.native(sourcePath).replace(/\\/g, '/')}${key.slice(thirdLast)}`
+    // Why: mirrors getCodexCanonicalTrustPath so test expectations match the
+    // native raw-backslash keys Codex writes after hook approval on Windows.
+    return `${realpathSync.native(sourcePath)}${key.slice(thirdLast)}`
   } catch {
-    return key.replace(/\\/g, '/')
+    return /^[A-Za-z]:[\\/]|^\\\\/.test(sourcePath)
+      ? `${sourcePath.replace(/\//g, '\\')}${key.slice(thirdLast)}`
+      : key
   }
+}
+
+function markHookTrustDisabled(toml: string, header: string): string {
+  const headerIndex = toml.indexOf(header)
+  expect(headerIndex).not.toBe(-1)
+  const nextHeaderIndex = toml.indexOf('\n[', headerIndex + header.length)
+  const blockEnd = nextHeaderIndex === -1 ? toml.length : nextHeaderIndex
+  const block = toml.slice(headerIndex, blockEnd)
+  expect(block).toContain('enabled = true')
+  return `${toml.slice(0, headerIndex)}${block.replace('enabled = true', 'enabled = false')}${toml.slice(blockEnd)}`
 }
 
 describe('CodexHookService', () => {
@@ -533,27 +548,25 @@ describe('CodexHookService', () => {
       'utf-8'
     )
     const disabledPostCompactHeader = hookTrustHeader(`${systemHooksPath}:post_compact:0:0`)
+    const systemToml = upsertHookTrustEntriesInContent('model = "system-model"\n', [
+      {
+        sourcePath: systemHooksPath,
+        eventLabel: 'pre_compact',
+        groupIndex: 0,
+        handlerIndex: 0,
+        command: 'pre-compact-user'
+      },
+      {
+        sourcePath: systemHooksPath,
+        eventLabel: 'post_compact',
+        groupIndex: 0,
+        handlerIndex: 0,
+        command: 'post-compact-disabled'
+      }
+    ])
     writeFileSync(
       join(systemCodexHome, 'config.toml'),
-      upsertHookTrustEntriesInContent('model = "system-model"\n', [
-        {
-          sourcePath: systemHooksPath,
-          eventLabel: 'pre_compact',
-          groupIndex: 0,
-          handlerIndex: 0,
-          command: 'pre-compact-user'
-        },
-        {
-          sourcePath: systemHooksPath,
-          eventLabel: 'post_compact',
-          groupIndex: 0,
-          handlerIndex: 0,
-          command: 'post-compact-disabled'
-        }
-      ]).replace(
-        `${disabledPostCompactHeader}\nenabled = true`,
-        `${disabledPostCompactHeader}\nenabled = false`
-      ),
+      markHookTrustDisabled(systemToml, disabledPostCompactHeader),
       'utf-8'
     )
 
@@ -669,17 +682,18 @@ describe('CodexHookService', () => {
       'utf-8'
     )
     const disabledStopHeader = hookTrustHeader(`${systemHooksPath}:stop:0:0`)
+    const systemToml = upsertHookTrustEntriesInContent('model = "system-model"\n', [
+      {
+        sourcePath: systemHooksPath,
+        eventLabel: 'stop',
+        groupIndex: 0,
+        handlerIndex: 0,
+        command: 'user-stop-hook'
+      }
+    ])
     writeFileSync(
       join(systemCodexHome, 'config.toml'),
-      upsertHookTrustEntriesInContent('model = "system-model"\n', [
-        {
-          sourcePath: systemHooksPath,
-          eventLabel: 'stop',
-          groupIndex: 0,
-          handlerIndex: 0,
-          command: 'user-stop-hook'
-        }
-      ]).replace(`${disabledStopHeader}\nenabled = true`, `${disabledStopHeader}\nenabled = false`),
+      markHookTrustDisabled(systemToml, disabledStopHeader),
       'utf-8'
     )
 
@@ -1176,6 +1190,41 @@ describe('CodexHookService', () => {
     expect(trustConfig).toContain(':permission_request:0:0')
     expect(trustConfig).not.toContain('model = "runtime-model"')
   })
+
+  it.skipIf(process.platform !== 'win32')(
+    'treats legacy forward-slash runtime trust keys as installed before canonicalizing on reinstall',
+    () => {
+      const service = new CodexHookService()
+      expect(service.install().state).toBe('installed')
+
+      const managedCodexHome = join(userDataDir, 'codex-runtime-home', 'home')
+      const managedHooksPath = join(managedCodexHome, 'hooks.json')
+      const runtimeTomlPath = join(managedCodexHome, 'config.toml')
+      const canonicalSessionStartHeader = hookTrustHeader(`${managedHooksPath}:session_start:0:0`)
+      const legacySessionStartHeader = `[hooks.state."${escapeTomlBasicString(
+        `${realpathSync.native(managedHooksPath).replace(/\\/g, '/')}:session_start:0:0`
+      )}"]`
+      const installedToml = readFileSync(runtimeTomlPath, 'utf-8')
+      expect(installedToml).toContain(canonicalSessionStartHeader)
+
+      writeFileSync(
+        runtimeTomlPath,
+        installedToml.replace(canonicalSessionStartHeader, legacySessionStartHeader),
+        'utf-8'
+      )
+
+      const legacyToml = readFileSync(runtimeTomlPath, 'utf-8')
+      expect(legacyToml).toContain(legacySessionStartHeader)
+      expect(service.getStatus().state).toBe('installed')
+
+      expect(service.install().state).toBe('installed')
+
+      const repairedToml = readFileSync(runtimeTomlPath, 'utf-8')
+      expect(repairedToml).not.toContain(legacySessionStartHeader)
+      expect(repairedToml).toContain(canonicalSessionStartHeader)
+      expect(service.getStatus().state).toBe('installed')
+    }
+  )
 
   it('repairs duplicate managed SessionStart trust tables on restart install', () => {
     const systemCodexHome = join(tmpHome, '.codex')

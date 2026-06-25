@@ -464,6 +464,28 @@ function escapeRegex(value: string): string {
   return value.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+function buildHookTrustHeaderKeyPattern(key: string): string {
+  const keyVariants = [key]
+  const parsed = parseTrustKey(key)
+  if (parsed && /^[A-Za-z]:[\\/]|^\\\\/.test(parsed.sourcePath)) {
+    const suffix = `:${parsed.eventLabel}:${parsed.groupIndex}:${parsed.handlerIndex}`
+    keyVariants.push(
+      `${parsed.sourcePath.replace(/\\/g, '/')}${suffix}`,
+      `${parsed.sourcePath.replace(/\//g, '\\')}${suffix}`
+    )
+  }
+  const alternatives = [...new Set(keyVariants)].flatMap((variant) => {
+    const quoted = [`"${escapeRegex(escapeTomlString(variant))}"`]
+    if (!variant.includes("'")) {
+      // Why: tolerate raw-backslash literal keys left by Codex/manual approval
+      // while Orca repairs mirrored runtime trust across both Windows variants.
+      quoted.push(`'${escapeRegex(variant)}'`)
+    }
+    return quoted
+  })
+  return `(?:${alternatives.join('|')})`
+}
+
 function applyMirroredRuntimeUserHookTrustStates(
   tomlPath: string,
   entries: readonly MirroredRuntimeUserHookTrustEntry[]
@@ -475,9 +497,10 @@ function applyMirroredRuntimeUserHookTrustStates(
   const existing = readFileSync(tomlPath, 'utf-8')
   let updated = existing
   for (const { entry, enabled } of entries) {
-    const escapedKey = escapeRegex(escapeTomlString(computeTrustKey(entry)))
+    const headerKeyPattern = buildHookTrustHeaderKeyPattern(computeTrustKey(entry))
     const pattern = new RegExp(
-      `(\\[hooks\\.state\\."${escapedKey}"\\]\\r?\\n[ \\t]*enabled[ \\t]*=[ \\t]*)(true|false)`
+      `(\\[hooks\\.state\\.${headerKeyPattern}\\]\\r?\\n[ \\t]*enabled[ \\t]*=[ \\t]*)(true|false)`,
+      'g'
     )
     updated = updated.replace(pattern, `$1${enabled}`)
   }
