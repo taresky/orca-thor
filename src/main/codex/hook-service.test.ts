@@ -111,6 +111,16 @@ function markHookTrustDisabled(toml: string, header: string): string {
   return `${toml.slice(0, headerIndex)}${block.replace('enabled = true', 'enabled = false')}${toml.slice(blockEnd)}`
 }
 
+function localManagedCodexEvents(): string[] {
+  return process.platform === 'win32'
+    ? ['PermissionRequest', 'PostToolUse', 'PreToolUse']
+    : ['PermissionRequest', 'PostToolUse', 'PreToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit']
+}
+
+function localHasManagedCodexLifecycleHooks(): boolean {
+  return process.platform !== 'win32'
+}
+
 describe('CodexHookService', () => {
   it('installs PermissionRequest with trust so Codex approval prompts reach Orca', () => {
     const systemCodexHome = join(tmpHome, '.codex')
@@ -130,16 +140,7 @@ describe('CodexHookService', () => {
       hooks: Record<string, { hooks?: { command?: string }[] }[]>
     }
 
-    expect(Object.keys(hooksConfig.hooks).sort()).toEqual(
-      [
-        'PermissionRequest',
-        'PostToolUse',
-        'PreToolUse',
-        'SessionStart',
-        'Stop',
-        'UserPromptSubmit'
-      ].sort()
-    )
+    expect(Object.keys(hooksConfig.hooks).sort()).toEqual(localManagedCodexEvents())
     expect(
       isCodexManagedCommand(hooksConfig.hooks.PermissionRequest?.[0]?.hooks?.[0]?.command)
     ).toBe(true)
@@ -198,7 +199,7 @@ describe('CodexHookService', () => {
           readFileSync(join(managedCodexHome, 'hooks.json'), 'utf-8')
         ) as { hooks: Record<string, { hooks?: { command?: string }[] }[]> }
 
-        for (const eventName of ['SessionStart', 'UserPromptSubmit', 'Stop']) {
+        for (const eventName of localManagedCodexEvents()) {
           const command = hooksConfig.hooks[eventName]?.[0]?.hooks?.[0]?.command
           expect(command).toMatch(
             /^powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand \S+$/
@@ -259,12 +260,12 @@ describe('CodexHookService', () => {
         )
       ).toBe(true)
       expect(
-        devHooks.hooks.Stop?.some((definition) =>
+        devHooks.hooks.PreToolUse?.some((definition) =>
           isCodexManagedCommand(definition.hooks?.[0]?.command)
         )
       ).toBe(true)
       expect(
-        prodHooks.hooks.Stop?.some((definition) =>
+        prodHooks.hooks.PreToolUse?.some((definition) =>
           isCodexManagedCommand(definition.hooks?.[0]?.command)
         )
       ).toBe(true)
@@ -334,13 +335,18 @@ describe('CodexHookService', () => {
         { matcher?: string; hooks?: { command?: string; statusMessage?: string }[] }[]
       >
     }
-    expect(runtimeHooks.hooks.Stop?.[1]?.matcher).toBe('*')
-    expect(runtimeHooks.hooks.Stop?.[1]?.hooks?.[0]?.command).toBe('user-hook')
-    expect(runtimeHooks.hooks.Stop?.[1]?.hooks?.[0]?.statusMessage).toBe('Running user hook')
+    const userStopIndex = localHasManagedCodexLifecycleHooks() ? 1 : 0
+    expect(runtimeHooks.hooks.Stop?.[userStopIndex]?.matcher).toBe('*')
+    expect(runtimeHooks.hooks.Stop?.[userStopIndex]?.hooks?.[0]?.command).toBe('user-hook')
+    expect(runtimeHooks.hooks.Stop?.[userStopIndex]?.hooks?.[0]?.statusMessage).toBe(
+      'Running user hook'
+    )
 
     const runtimeToml = readFileSync(join(managedCodexHome, 'config.toml'), 'utf-8')
-    expect(runtimeToml).toContain(hookTrustHeader(`${managedHooksPath}:stop:0:0`))
-    expect(runtimeToml).toContain(hookTrustHeader(`${managedHooksPath}:stop:1:0`))
+    expect(runtimeToml).toContain(hookTrustHeader(`${managedHooksPath}:stop:${userStopIndex}:0`))
+    if (localHasManagedCodexLifecycleHooks()) {
+      expect(runtimeToml).toContain(hookTrustHeader(`${managedHooksPath}:stop:0:0`))
+    }
     expect(runtimeToml).not.toContain(hookTrustHeader(`${systemHooksPath}:stop:0:0`))
   })
 
@@ -440,7 +446,9 @@ describe('CodexHookService', () => {
     const runtimeToml = readFileSync(join(managedCodexHome, 'config.toml'), 'utf-8')
     expect(runtimeToml).toContain(hookTrustHeader(`${managedHooksPath}:stop:0:0`))
     expect(runtimeToml).toContain(hookTrustHeader(`${managedHooksPath}:stop:1:0`))
-    expect(runtimeToml).toContain(hookTrustHeader(`${managedHooksPath}:stop:2:0`))
+    if (localHasManagedCodexLifecycleHooks()) {
+      expect(runtimeToml).toContain(hookTrustHeader(`${managedHooksPath}:stop:2:0`))
+    }
     expect(runtimeToml).not.toContain(hookTrustHeader(`${systemHooksPath}:stop:0:0`))
     expect(runtimeToml).not.toContain(hookTrustHeader(`${systemHooksPath}:stop:1:0`))
   })
@@ -515,7 +523,9 @@ describe('CodexHookService', () => {
       ) ?? []
 
     expect(stopCommands).toContain(userCommand)
-    expect(stopCommands.some((command) => isCodexManagedCommand(command))).toBe(true)
+    expect(stopCommands.some((command) => isCodexManagedCommand(command))).toBe(
+      localHasManagedCodexLifecycleHooks()
+    )
     expect(runtimeHooks.hooks.PreCompact).toBeUndefined()
     for (const command of pluginCommands) {
       expect(runtimeHooksText).not.toContain(command)
@@ -523,7 +533,9 @@ describe('CodexHookService', () => {
 
     const runtimeToml = readFileSync(join(managedCodexHome, 'config.toml'), 'utf-8')
     expect(runtimeToml).toContain(hookTrustHeader(`${managedHooksPath}:stop:0:0`))
-    expect(runtimeToml).toContain(hookTrustHeader(`${managedHooksPath}:stop:1:0`))
+    if (localHasManagedCodexLifecycleHooks()) {
+      expect(runtimeToml).toContain(hookTrustHeader(`${managedHooksPath}:stop:1:0`))
+    }
     for (const command of pluginCommands) {
       expect(runtimeToml).not.toContain(command)
     }
@@ -621,7 +633,10 @@ describe('CodexHookService', () => {
 
     const managedCodexHome = join(userDataDir, 'codex-runtime-home', 'home')
     const managedHooksPath = join(managedCodexHome, 'hooks.json')
-    const runtimeUserTrustHeader = hookTrustHeader(`${managedHooksPath}:stop:1:0`)
+    const runtimeUserStopIndex = localHasManagedCodexLifecycleHooks() ? 1 : 0
+    const runtimeUserTrustHeader = hookTrustHeader(
+      `${managedHooksPath}:stop:${runtimeUserStopIndex}:0`
+    )
     expect(readFileSync(join(managedCodexHome, 'config.toml'), 'utf-8')).toContain(
       runtimeUserTrustHeader
     )
@@ -631,7 +646,11 @@ describe('CodexHookService', () => {
 
     const runtimeToml = readFileSync(join(managedCodexHome, 'config.toml'), 'utf-8')
     expect(runtimeToml).not.toContain(runtimeUserTrustHeader)
-    expect(runtimeToml).toContain(hookTrustHeader(`${managedHooksPath}:stop:0:0`))
+    if (localHasManagedCodexLifecycleHooks()) {
+      expect(runtimeToml).toContain(hookTrustHeader(`${managedHooksPath}:stop:0:0`))
+    } else {
+      expect(runtimeToml).not.toContain(':stop:0:0')
+    }
   })
 
   it('refreshes mirrored system user hooks when the system hooks file changes', () => {
@@ -1079,7 +1098,9 @@ describe('CodexHookService', () => {
         (definition) => definition.hooks?.map((hook) => hook.command ?? '') ?? []
       ) ?? []
     expect(stopCommands).toContain(userCommand)
-    expect(stopCommands.some((command) => isCodexManagedCommand(command))).toBe(true)
+    expect(stopCommands.some((command) => isCodexManagedCommand(command))).toBe(
+      localHasManagedCodexLifecycleHooks()
+    )
     expect(
       isCodexManagedCommand(runtimeHooks.hooks.PermissionRequest?.[0]?.hooks?.[0]?.command)
     ).toBe(true)
@@ -1200,33 +1221,35 @@ describe('CodexHookService', () => {
       const managedCodexHome = join(userDataDir, 'codex-runtime-home', 'home')
       const managedHooksPath = join(managedCodexHome, 'hooks.json')
       const runtimeTomlPath = join(managedCodexHome, 'config.toml')
-      const canonicalSessionStartHeader = hookTrustHeader(`${managedHooksPath}:session_start:0:0`)
-      const legacySessionStartHeader = `[hooks.state."${escapeTomlBasicString(
-        `${realpathSync.native(managedHooksPath).replace(/\\/g, '/')}:session_start:0:0`
+      const canonicalPermissionHeader = hookTrustHeader(
+        `${managedHooksPath}:permission_request:0:0`
+      )
+      const legacyPermissionHeader = `[hooks.state."${escapeTomlBasicString(
+        `${realpathSync.native(managedHooksPath).replace(/\\/g, '/')}:permission_request:0:0`
       )}"]`
       const installedToml = readFileSync(runtimeTomlPath, 'utf-8')
-      expect(installedToml).toContain(canonicalSessionStartHeader)
+      expect(installedToml).toContain(canonicalPermissionHeader)
 
       writeFileSync(
         runtimeTomlPath,
-        installedToml.replace(canonicalSessionStartHeader, legacySessionStartHeader),
+        installedToml.replace(canonicalPermissionHeader, legacyPermissionHeader),
         'utf-8'
       )
 
       const legacyToml = readFileSync(runtimeTomlPath, 'utf-8')
-      expect(legacyToml).toContain(legacySessionStartHeader)
+      expect(legacyToml).toContain(legacyPermissionHeader)
       expect(service.getStatus().state).toBe('installed')
 
       expect(service.install().state).toBe('installed')
 
       const repairedToml = readFileSync(runtimeTomlPath, 'utf-8')
-      expect(repairedToml).not.toContain(legacySessionStartHeader)
-      expect(repairedToml).toContain(canonicalSessionStartHeader)
+      expect(repairedToml).not.toContain(legacyPermissionHeader)
+      expect(repairedToml).toContain(canonicalPermissionHeader)
       expect(service.getStatus().state).toBe('installed')
     }
   )
 
-  it('repairs duplicate managed SessionStart trust tables on restart install', () => {
+  it('repairs duplicate managed PermissionRequest trust tables on restart install', () => {
     const systemCodexHome = join(tmpHome, '.codex')
     mkdirSync(systemCodexHome, { recursive: true })
     writeFileSync(join(systemCodexHome, 'config.toml'), 'model = "system-model"\n', 'utf-8')
@@ -1237,21 +1260,24 @@ describe('CodexHookService', () => {
     const managedCodexHome = join(userDataDir, 'codex-runtime-home', 'home')
     const managedHooksPath = join(managedCodexHome, 'hooks.json')
     const runtimeTomlPath = join(managedCodexHome, 'config.toml')
-    const sessionStartHeader = hookTrustHeader(`${managedHooksPath}:session_start:0:0`)
+    const permissionRequestHeader = hookTrustHeader(`${managedHooksPath}:permission_request:0:0`)
     const installedToml = readFileSync(runtimeTomlPath, 'utf-8')
-    const sessionStartIndex = installedToml.indexOf(sessionStartHeader)
-    expect(sessionStartIndex).not.toBe(-1)
+    const permissionRequestIndex = installedToml.indexOf(permissionRequestHeader)
+    expect(permissionRequestIndex).not.toBe(-1)
     const nextHeaderIndex = installedToml.indexOf(
       '\n[',
-      sessionStartIndex + sessionStartHeader.length
+      permissionRequestIndex + permissionRequestHeader.length
     )
-    const sessionStartBlock = installedToml
-      .slice(sessionStartIndex, nextHeaderIndex === -1 ? installedToml.length : nextHeaderIndex)
+    const permissionRequestBlock = installedToml
+      .slice(
+        permissionRequestIndex,
+        nextHeaderIndex === -1 ? installedToml.length : nextHeaderIndex
+      )
       .trimEnd()
-    const staleDisabledBlock = sessionStartBlock
+    const staleDisabledBlock = permissionRequestBlock
       .replace('enabled = true', 'enabled = false')
       .replace(/trusted_hash = "[^"]+"/, 'trusted_hash = "sha256:STALE_DISABLED"')
-    const staleEnabledBlock = sessionStartBlock.replace(
+    const staleEnabledBlock = permissionRequestBlock.replace(
       /trusted_hash = "[^"]+"/,
       'trusted_hash = "sha256:STALE_ENABLED"'
     )
@@ -1259,20 +1285,20 @@ describe('CodexHookService', () => {
       runtimeTomlPath,
       `${installedToml.slice(
         0,
-        sessionStartIndex
+        permissionRequestIndex
       )}${staleDisabledBlock}\n\n${staleEnabledBlock}${installedToml.slice(
         nextHeaderIndex === -1 ? installedToml.length : nextHeaderIndex
       )}`,
       'utf-8'
     )
-    expect(readFileSync(runtimeTomlPath, 'utf-8').split(sessionStartHeader)).toHaveLength(3)
+    expect(readFileSync(runtimeTomlPath, 'utf-8').split(permissionRequestHeader)).toHaveLength(3)
 
     // Why: preserving `enabled = false` is the repair contract; status can be
     // partial because the user-disabled managed hook remains disabled.
     expect(['installed', 'partial']).toContain(service.install().state)
 
     const repairedToml = readFileSync(runtimeTomlPath, 'utf-8')
-    expect(repairedToml.split(sessionStartHeader)).toHaveLength(2)
+    expect(repairedToml.split(permissionRequestHeader)).toHaveLength(2)
     expect(repairedToml).toContain('enabled = false')
     expect(repairedToml).not.toContain('STALE_DISABLED')
     expect(repairedToml).not.toContain('STALE_ENABLED')
