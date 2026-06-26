@@ -3,10 +3,10 @@
  * completion bookkeeping, and focus restoration. */
 import { useEffect } from 'react'
 import { launchAgentBackgroundSession } from '@/lib/launch-agent-background-session'
-import { launchSetupBackgroundSession } from '@/lib/launch-setup-background-session'
 import { submitPromptToAgentTab } from '@/lib/agent-paste-draft'
 import { findReusableAutomationSession } from '@/lib/automation-session-reuse'
 import { observeExistingAutomationSession } from '@/lib/automation-session-observer'
+import { launchWorktreeBackgroundTerminals } from '@/lib/launch-worktree-background-terminals'
 import { useAppStore } from '@/store'
 import type {
   AutomationDispatchResult,
@@ -183,7 +183,7 @@ export function useAutomationDispatchEvents(): void {
                     runRepoId,
                     buildAutomationWorkspaceName(run.title, run.scheduledFor),
                     automation.baseBranch ?? undefined,
-                    'inherit',
+                    automation.setupDecision ?? 'skip',
                     undefined,
                     'unknown',
                     run.title,
@@ -236,6 +236,17 @@ export function useAutomationDispatchEvents(): void {
           }
           dispatchWorkspaceId = worktree.id
           dispatchWorkspaceDisplayName = worktree.displayName
+          if (createResult?.setup || createResult?.defaultTabs) {
+            void launchWorktreeBackgroundTerminals({
+              worktreeId: worktree.id,
+              setup: createResult.setup,
+              defaultTabs: createResult.defaultTabs
+            }).catch((error) => {
+              // Why: setup/defaultTabs match normal worktree creation: they are
+              // best-effort terminal work and must not block the automation agent.
+              console.warn('[automations] Failed to launch workspace setup/default tabs:', error)
+            })
+          }
 
           const outputSnapshotBuffer = createAutomationRunOutputSnapshotBuffer()
           let latestAssistantMessage: string | null = null
@@ -412,10 +423,6 @@ export function useAutomationDispatchEvents(): void {
               }
             }
           }
-          await launchSetupBackgroundSession({
-            worktreeId: worktree.id,
-            setup: createResult?.setup
-          })
           const result = await launchAgentBackgroundSession({
             agent: automation.agentId,
             worktreeId: worktree.id,

@@ -352,6 +352,13 @@
             }
           }
         },
+        "worktree": {
+          "background": {
+            "terminals": {
+              "setupTitle": "Setup"
+            }
+          }
+        },
         "work": {
           "item": {
             "direct": {
@@ -362,13 +369,6 @@
               "agent": {
                 "ceeeb509b5": "Agent 启动时间太长。工作区已准备就绪 - 当 Agent 空闲时粘贴 {{value0}}。"
               }
-            }
-          }
-        },
-        "setup": {
-          "background": {
-            "session": {
-              "setupTitle": "设置"
             }
           }
         }
@@ -11569,6 +11569,9 @@
           "chooseHost": "Choose automation host",
           "adding": "Adding project…",
           "addProject": "Add project"
+        },
+        "AutomationSetupDecisionField": {
+          "5a7863909c": "为每个新工作区运行设置"
         }
       },
       "agent": {

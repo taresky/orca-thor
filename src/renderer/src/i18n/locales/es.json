@@ -352,6 +352,13 @@
             }
           }
         },
+        "worktree": {
+          "background": {
+            "terminals": {
+              "setupTitle": "Setup"
+            }
+          }
+        },
         "work": {
           "item": {
             "direct": {
@@ -362,13 +369,6 @@
               "agent": {
                 "ceeeb509b5": "El Agent tardó demasiado en comenzar. El espacio de trabajo está listo: pegue {{value0}} cuando el Agent esté inactivo."
               }
-            }
-          }
-        },
-        "setup": {
-          "background": {
-            "session": {
-              "setupTitle": "Configuración"
             }
           }
         }
@@ -11569,6 +11569,9 @@
           "chooseHost": "Choose automation host",
           "adding": "Adding project…",
           "addProject": "Add project"
+        },
+        "AutomationSetupDecisionField": {
+          "5a7863909c": "Ejecutar la configuración para cada espacio de trabajo nuevo"
         }
       },
       "agent": {

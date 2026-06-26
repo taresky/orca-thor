@@ -352,6 +352,13 @@
             }
           }
         },
+        "worktree": {
+          "background": {
+            "terminals": {
+              "setupTitle": "Setup"
+            }
+          }
+        },
         "work": {
           "item": {
             "direct": {
@@ -362,13 +369,6 @@
               "agent": {
                 "ceeeb509b5": "Agent の起動に時間がかかりすぎました。ワークスペースの準備ができました。Agent がアイドル状態のときに {{value0}} を貼り付けます。"
               }
-            }
-          }
-        },
-        "setup": {
-          "background": {
-            "session": {
-              "setupTitle": "セットアップ"
             }
           }
         }
@@ -11569,6 +11569,9 @@
           "chooseHost": "Choose automation host",
           "adding": "Adding project…",
           "addProject": "Add project"
+        },
+        "AutomationSetupDecisionField": {
+          "5a7863909c": "新しいワークスペースごとにセットアップを実行"
         }
       },
       "agent": {

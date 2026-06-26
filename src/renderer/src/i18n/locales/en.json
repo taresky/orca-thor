@@ -352,6 +352,13 @@
             }
           }
         },
+        "worktree": {
+          "background": {
+            "terminals": {
+              "setupTitle": "Setup"
+            }
+          }
+        },
         "work": {
           "item": {
             "direct": {
@@ -362,13 +369,6 @@
               "agent": {
                 "ceeeb509b5": "Agent took too long to start. The workspace is ready — paste the {{value0}} when the agent is idle."
               }
-            }
-          }
-        },
-        "setup": {
-          "background": {
-            "session": {
-              "setupTitle": "Setup"
             }
           }
         }
@@ -11569,6 +11569,9 @@
           "chooseHost": "Choose automation host",
           "adding": "Adding project…",
           "addProject": "Add project"
+        },
+        "AutomationSetupDecisionField": {
+          "5a7863909c": "Run setup for each new workspace"
         }
       },
       "agent": {
