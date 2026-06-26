@@ -211,7 +211,7 @@ async function addSetupSplit(args: {
       args.tab.primary,
       { leafId: setupLeafId, ptyId: setupPtyId },
       args.direction,
-      'Setup'
+      SETUP_TAB_TITLE
     )
   )
   registerBackgroundPaneBuffer(args.tab.tabId, setupLeafId, setupPtyId)

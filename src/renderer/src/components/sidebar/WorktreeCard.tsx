@@ -3,6 +3,7 @@ import React, { useEffect, useCallback, useState } from 'react'
 import { useAppStore } from '@/store'
 import { getHostedReviewCacheKey } from '@/store/slices/hosted-review'
 import { issueCacheKey as getIssueCacheKey } from '@/store/slices/github'
+import { getGitHubPRCacheKey } from '@/store/slices/github-cache-key'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
@@ -23,11 +24,13 @@ import WorktreeContextMenu from './WorktreeContextMenu'
 import { SshDisconnectedDialog } from './SshDisconnectedDialog'
 import { AutoRenameFailedDialog } from './AutoRenameFailedDialog'
 import WorktreeCardAgents from './WorktreeCardAgents'
+import { useWorktreeAgentRows } from './useWorktreeAgentRows'
 import { WorktreeCardStatusSlot } from './WorktreeCardStatusSlot'
 import { cn } from '@/lib/utils'
 import { activateWorktreeFromSidebar } from '@/lib/sidebar-worktree-activation'
 import { isFolderRepo } from '../../../../shared/repo-kind'
 import type { HostedReviewInfo } from '../../../../shared/hosted-review'
+import { hostedReviewInfoFromGitHubPRInfo } from '../../../../shared/hosted-review-github'
 import type {
   GitHubWorkItem,
   Worktree,
@@ -75,6 +78,7 @@ import { translate } from '@/i18n/i18n'
 import { recordRendererCrashBreadcrumb } from '@/lib/crash-diagnostics'
 import { folderWorkspaceKey, parseWorkspaceKey } from '../../../../shared/workspace-scope'
 import { parseExecutionHostId } from '../../../../shared/execution-host'
+import { DEFAULT_AGENT_ACTIVITY_DISPLAY_MODE } from '../../../../shared/constants'
 
 type WorktreeRenameRequest = {
   worktreeId: string
@@ -231,6 +235,8 @@ const WorktreeCard = React.memo(function WorktreeCard({
   const fetchIssue = useAppStore((s) => s.fetchIssue)
   const fetchLinearIssue = useAppStore((s) => s.fetchLinearIssue)
   const cardProps = useAppStore((s) => s.worktreeCardProperties)
+  const agentActivityDisplayMode =
+    useAppStore((s) => s.agentActivityDisplayMode) ?? DEFAULT_AGENT_ACTIVITY_DISPLAY_MODE
   const projectGroups = useAppStore((s) => s.projectGroups)
   const newCardStyle = settings?.experimentalNewWorktreeCardStyle === true
   const compactCards = !newCardStyle && settings?.compactWorktreeCards === true
@@ -394,6 +400,17 @@ const WorktreeCard = React.memo(function WorktreeCard({
           repo.executionHostId
         )
       : ''
+  const prCacheKey =
+    repo && branch
+      ? getGitHubPRCacheKey(
+          repo.path,
+          repo.id,
+          branch,
+          settings,
+          repo.connectionId,
+          repo.executionHostId
+        )
+      : ''
   const issueCacheKey =
     repo && worktree.linkedIssue
       ? getIssueCacheKey(
@@ -413,6 +430,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
   const hostedReviewEntry = useAppStore((s) =>
     hostedReviewCacheKey ? s.hostedReviewCache[hostedReviewCacheKey] : undefined
   )
+  const prCacheEntry = useAppStore((s) => (prCacheKey ? s.prCache?.[prCacheKey] : undefined))
   const issueEntry = useAppStore((s) => (issueCacheKey ? s.issueCache[issueCacheKey] : undefined))
   const linearIssueEntry = useAppStore((s) =>
     linearIssueCacheKey ? s.linearIssueCache[linearIssueCacheKey] : undefined
@@ -423,19 +441,48 @@ const WorktreeCard = React.memo(function WorktreeCard({
 
   const hostedReview: HostedReviewInfo | null | undefined =
     hostedReviewEntry !== undefined ? hostedReviewEntry.data : undefined
+  const linkedGitHubPR = worktree.linkedPR ?? null
   const linkedGitLabMR = worktree.linkedGitLabMR ?? null
   const linkedBitbucketPR = worktree.linkedBitbucketPR ?? null
   const linkedAzureDevOpsPR = worktree.linkedAzureDevOpsPR ?? null
   const linkedGiteaPR = worktree.linkedGiteaPR ?? null
+  const hasNonGitHubLinkedReview =
+    linkedGitLabMR !== null ||
+    linkedBitbucketPR !== null ||
+    linkedAzureDevOpsPR !== null ||
+    linkedGiteaPR !== null
+  const hasLinkedReview =
+    linkedGitHubPR !== null ||
+    linkedGitLabMR !== null ||
+    linkedBitbucketPR !== null ||
+    linkedAzureDevOpsPR !== null ||
+    linkedGiteaPR !== null
+  // Why: ChecksPanel can discover a branch PR before hosted-review metadata
+  // warms, and transient older hosted-review misses can race with that cache.
+  // Newer hosted-review misses still win so stale PR cache cannot resurrect.
+  const cachedBranchPR = prCacheEntry?.data
+  const cachedBranchPRFetchedAt = prCacheEntry?.fetchedAt
+  const useCachedBranchReview =
+    cachedBranchPR !== undefined &&
+    cachedBranchPR !== null &&
+    !hasNonGitHubLinkedReview &&
+    (hostedReview === undefined ||
+      (hostedReview === null &&
+        cachedBranchPRFetchedAt !== undefined &&
+        cachedBranchPRFetchedAt > (hostedReviewEntry?.fetchedAt ?? 0)))
+  const cachedBranchReview = useCachedBranchReview
+    ? hostedReviewInfoFromGitHubPRInfo(cachedBranchPR)
+    : hostedReview
   const prDisplay = getWorktreeCardPrDisplay(
-    hostedReview,
-    worktree.linkedPR,
+    cachedBranchReview,
+    linkedGitHubPR,
     linkedGitLabMR,
     linkedBitbucketPR,
     linkedAzureDevOpsPR,
     linkedGiteaPR,
     {
-      reviewHintKey: hostedReviewEntry?.linkedReviewHintKey
+      reviewHintKey:
+        useCachedBranchReview && !hasLinkedReview ? '' : hostedReviewEntry?.linkedReviewHintKey
     }
   )
   const issue: IssueInfo | null | undefined = worktree.linkedIssue
@@ -959,6 +1006,16 @@ const WorktreeCard = React.memo(function WorktreeCard({
   const metaReview = showPR ? hoverReview : null
   const metaAutomationProvenance = showAutomation ? worktree.automationProvenance : null
   const metaComment = showComment ? hoverComment : null
+  const showInlineAgentList = cardProps.includes('inline-agents') && (newCardStyle || !compactCards)
+  const compactInlineAgentRows = useWorktreeAgentRows(
+    worktree.id,
+    showInlineAgentList && agentActivityDisplayMode === 'compact'
+  )
+  const compactInlineAgentRowsVisible =
+    showInlineAgentList &&
+    agentActivityDisplayMode === 'compact' &&
+    compactInlineAgentRows.length > 0
+  const showAggregateCacheTimer = !compactCards && !compactInlineAgentRowsVisible
   const handleOpenGitHubIssueInOrca = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
@@ -1051,8 +1108,10 @@ const WorktreeCard = React.memo(function WorktreeCard({
     automationProvenance: metaAutomationProvenance
   })
   const hasPorts = showPorts && workspacePorts.length > 0
-  const cacheStartedAt = usePromptCacheCountdownStartedAt(worktree.id)
-  const cacheTtlMs = useAppStore((s) => s.settings?.promptCacheTtlMs ?? 0)
+  const cacheStartedAt = usePromptCacheCountdownStartedAt(worktree.id, showAggregateCacheTimer)
+  const cacheTtlMs = useAppStore((s) =>
+    showAggregateCacheTimer ? (s.settings?.promptCacheTtlMs ?? 0) : 0
+  )
   // Why: pinned trees mix repos in one section; a leading repo icon keeps the
   // list scannable, so it shows regardless of groupBy's hideRepoBadge.
   const showPinnedRepoIcon = inPinnedSection && !!repo
@@ -1118,7 +1177,6 @@ const WorktreeCard = React.memo(function WorktreeCard({
       ? trimmedVisibleCardTitle
       : undefined
   const hasHoverIdentity = Boolean(hoverWorkspaceTitle || hoverBranchName)
-  const showInlineAgentList = cardProps.includes('inline-agents') && (newCardStyle || !compactCards)
   const hasHoverDetails =
     newCardStyle &&
     (hasWorktreeCardDetails({
@@ -1626,6 +1684,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
         {showInlineAgentList && (
           <WorktreeCardAgents
             worktreeId={worktree.id}
+            agents={agentActivityDisplayMode === 'compact' ? compactInlineAgentRows : undefined}
             className={hasMetaRow || remoteBranchConflict ? 'mt-0' : '-mt-1'}
           />
         )}
