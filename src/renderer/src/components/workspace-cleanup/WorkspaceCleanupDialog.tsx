@@ -27,7 +27,6 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Progress } from '@/components/ui/progress'
 import RepoMultiCombobox from '@/components/ui/repo-multi-combobox'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -48,6 +47,7 @@ import {
   type WorkspaceCleanupBlocker,
   type WorkspaceCleanupCandidate,
   type WorkspaceCleanupScanError,
+  type WorkspaceCleanupScanProgress,
   type WorkspaceCleanupTier
 } from '../../../../shared/workspace-cleanup'
 import {
@@ -192,6 +192,7 @@ export default function WorkspaceCleanupDialog(): React.JSX.Element {
   const openModal = useAppStore((s) => s.openModal)
   const closeModal = useAppStore((s) => s.closeModal)
   const scan = useAppStore((s) => s.workspaceCleanupScan)
+  const scanProgress = useAppStore((s) => s.workspaceCleanupProgress)
   const loading = useAppStore((s) => s.workspaceCleanupLoading)
   const error = useAppStore((s) => s.workspaceCleanupError)
   const repos = useAppStore((s) => s.repos)
@@ -407,7 +408,7 @@ export default function WorkspaceCleanupDialog(): React.JSX.Element {
   const protectedCount = groups.protected.length
   const inactiveCount = filteredCandidates.length
   const hasAnyCandidates = candidates.length > 0
-  const initialLoading = loading && !scan
+  const initialLoading = loading && !hasAnyCandidates
   const activeBaseRows =
     resolvedActiveView === 'hidden' ? hiddenCandidates : groups[resolvedActiveView]
   const activeRows = useMemo(
@@ -670,7 +671,9 @@ export default function WorkspaceCleanupDialog(): React.JSX.Element {
                       'Scanning worktrees and git state, then combining open tab, terminal, live agent, and remote availability signals before suggesting deletions.'
                     )}
                   </div>
-                  <ScanProgress value={35} className="mt-2" />
+                  <div className="mt-1 text-xs font-medium text-muted-foreground">
+                    {formatWorkspaceCleanupProgress(scanProgress)}
+                  </div>
                 </div>
               </div>
             ) : hasAnyCandidates ? (
@@ -721,7 +724,7 @@ export default function WorkspaceCleanupDialog(): React.JSX.Element {
                     <StatusPill>
                       {translate(
                         'auto.components.workspace.cleanup.WorkspaceCleanupDialog.946e8b0eb1',
-                        'Refreshing'
+                        'Scanning'
                       )}
                     </StatusPill>
                   ) : null}
@@ -754,18 +757,20 @@ export default function WorkspaceCleanupDialog(): React.JSX.Element {
               </div>
             ) : null}
 
-            {loading && scan ? (
+            {loading && scan && hasAnyCandidates ? (
               <div className="border-b border-border bg-muted/25 px-5 py-2">
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Loader2 className="size-3.5 shrink-0 animate-spin" />
                   <span>
                     {translate(
                       'auto.components.workspace.cleanup.WorkspaceCleanupDialog.c4dc32d56c',
-                      'Refreshing inactive workspaces. You can leave this modal; the last result stays visible.'
+                      'Scanning inactive workspaces. New rows appear here as they finish.'
                     )}
                   </span>
+                  <span className="font-medium text-foreground">
+                    {formatWorkspaceCleanupProgress(scanProgress)}
+                  </span>
                 </div>
-                <ScanProgress value={70} className="mt-2" />
               </div>
             ) : null}
 
@@ -999,22 +1004,6 @@ function StatusPill({
     >
       {children}
     </span>
-  )
-}
-
-function ScanProgress({
-  value,
-  className
-}: {
-  value: number
-  className?: string
-}): React.JSX.Element {
-  return (
-    <Progress
-      value={value}
-      aria-label="Workspace cleanup scan progress"
-      className={cn('h-1 bg-muted', className)}
-    />
   )
 }
 
@@ -1761,6 +1750,25 @@ function formatWorkspaceCleanupReadyToastDescription(
   const inactiveNoun = inactiveCount === 1 ? 'workspace' : 'workspaces'
   const suggestedNoun = suggestedCount === 1 ? 'suggestion' : 'suggestions'
   return `${inactiveCount} inactive ${inactiveNoun} found, with ${suggestedCount} cleanup ${suggestedNoun}.`
+}
+
+function formatWorkspaceCleanupProgress(progress: WorkspaceCleanupScanProgress | null): string {
+  if (!progress || progress.totalWorktreeCount === 0) {
+    return translate(
+      'auto.components.workspace.cleanup.WorkspaceCleanupDialog.4cc5b73efe',
+      'Finding inactive workspaces...'
+    )
+  }
+  const noun = progress.totalWorktreeCount === 1 ? 'workspace' : 'workspaces'
+  return translate(
+    'auto.components.workspace.cleanup.WorkspaceCleanupDialog.5bf2e88480',
+    '{{value0}}/{{value1}} {{value2}} scanned',
+    {
+      value0: progress.scannedWorktreeCount,
+      value1: progress.totalWorktreeCount,
+      value2: noun
+    }
+  )
 }
 
 function SkeletonRows(): React.JSX.Element {

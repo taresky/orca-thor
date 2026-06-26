@@ -171,6 +171,49 @@ describe('workspace cleanup scan', () => {
     })
   })
 
+  it('reports cleanup scan progress as inactive workspaces are checked', async () => {
+    listRepoWorktreesMock.mockResolvedValue([
+      {
+        path: '/repo-feature-a',
+        head: 'abc123',
+        branch: 'refs/heads/feature-a',
+        isBare: false,
+        isMainWorktree: false
+      },
+      {
+        path: '/repo-feature-b',
+        head: 'def456',
+        branch: 'refs/heads/feature-b',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+    const progress: unknown[] = []
+
+    const result = await scanWorkspaceCleanup(
+      makeStore(),
+      { scanId: 'scan-1' },
+      { onProgress: (event) => progress.push(event) }
+    )
+
+    expect(result.candidates).toHaveLength(2)
+    expect(progress[0]).toMatchObject({
+      scanId: 'scan-1',
+      scannedWorktreeCount: 0,
+      totalWorktreeCount: 2,
+      candidates: []
+    })
+    expect(progress.at(-1)).toMatchObject({
+      scanId: 'scan-1',
+      scannedWorktreeCount: 2,
+      totalWorktreeCount: 2,
+      candidates: expect.arrayContaining([
+        expect.objectContaining({ worktreeId: 'repo-1::/repo-feature-a' }),
+        expect.objectContaining({ worktreeId: 'repo-1::/repo-feature-b' })
+      ])
+    })
+  })
+
   it('keeps raw scan errors out of renderer-facing results', async () => {
     listRepoWorktreesMock.mockRejectedValue(new Error('fatal: path /Users/alice/private failed'))
 

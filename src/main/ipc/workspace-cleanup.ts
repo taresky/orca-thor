@@ -36,6 +36,7 @@ import {
   type WorkspaceCleanupReason,
   type WorkspaceCleanupScanError,
   type WorkspaceCleanupScanArgs,
+  type WorkspaceCleanupScanProgress,
   type WorkspaceCleanupScanResult
 } from '../../shared/workspace-cleanup'
 
@@ -55,6 +56,16 @@ type WorkspaceCleanupHandlerDeps = {
   getLocalPtyProvider?: () => IPtyProvider
 }
 
+type WorkspaceCleanupScanOptions = {
+  onProgress?: (progress: WorkspaceCleanupScanProgress) => void
+}
+
+type WorkspaceCleanupScanRepoProgress = {
+  onWorktreesDiscovered?: (count: number) => void
+  onCandidateScanned?: (candidate: WorkspaceCleanupCandidate) => void
+  onErrors?: (errors: WorkspaceCleanupScanError[]) => void
+}
+
 export function registerWorkspaceCleanupHandlers(
   store: Store,
   deps: WorkspaceCleanupHandlerDeps = {}
@@ -66,8 +77,12 @@ export function registerWorkspaceCleanupHandlers(
 
   ipcMain.handle(
     'workspaceCleanup:scan',
-    (_event, args?: WorkspaceCleanupScanArgs): Promise<WorkspaceCleanupScanResult> =>
-      scanWorkspaceCleanup(store, args ?? {})
+    (event, args?: WorkspaceCleanupScanArgs): Promise<WorkspaceCleanupScanResult> =>
+      scanWorkspaceCleanup(store, args ?? {}, {
+        onProgress: args?.scanId
+          ? (progress) => event.sender.send('workspaceCleanup:scanProgress', progress)
+          : undefined
+      })
   )
 
   ipcMain.handle('workspaceCleanup:dismiss', (_event, args: WorkspaceCleanupDismissArgs) => {
@@ -192,7 +207,8 @@ function isPathWithin(candidatePath: string, parentPath: string): boolean {
 
 export async function scanWorkspaceCleanup(
   store: Store,
-  args: WorkspaceCleanupScanArgs = {}
+  args: WorkspaceCleanupScanArgs = {},
+  options: WorkspaceCleanupScanOptions = {}
 ): Promise<WorkspaceCleanupScanResult> {
   const scannedAt = Date.now()
   const parsedTarget = args.worktreeId ? splitWorktreeId(args.worktreeId) : null
@@ -204,6 +220,23 @@ export async function scanWorkspaceCleanup(
     : store.getRepos()
   const errors: WorkspaceCleanupScanResult['errors'] = []
   const candidates: WorkspaceCleanupCandidate[] = []
+  const progressCandidates: WorkspaceCleanupCandidate[] = []
+  const progressErrors: WorkspaceCleanupScanError[] = []
+  let totalWorktreeCount = 0
+  let scannedWorktreeCount = 0
+  const emitProgress = (): void => {
+    if (!args.scanId) {
+      return
+    }
+    options.onProgress?.({
+      scanId: args.scanId,
+      scannedAt,
+      totalWorktreeCount,
+      scannedWorktreeCount,
+      candidates: [...progressCandidates],
+      errors: [...progressErrors]
+    })
+  }
 
   for (const repo of repos) {
     const result = await scanRepoWorkspaces({
@@ -211,7 +244,20 @@ export async function scanWorkspaceCleanup(
       repo,
       scannedAt,
       targetWorktreeId: args.worktreeId,
-      skipGitWorktreeIds: new Set(args.skipGitWorktreeIds ?? [])
+      skipGitWorktreeIds: new Set(args.skipGitWorktreeIds ?? []),
+      onWorktreesDiscovered: (count) => {
+        totalWorktreeCount += count
+        emitProgress()
+      },
+      onCandidateScanned: (candidate) => {
+        progressCandidates.push(candidate)
+        scannedWorktreeCount += 1
+        emitProgress()
+      },
+      onErrors: (repoErrors) => {
+        appendListItems(progressErrors, repoErrors)
+        emitProgress()
+      }
     })
     appendListItems(candidates, result.candidates)
     appendListItems(errors, result.errors)
@@ -220,14 +266,25 @@ export async function scanWorkspaceCleanup(
   return { scannedAt, candidates, errors }
 }
 
-async function scanRepoWorkspaces(args: {
-  store: Store
-  repo: Repo
-  scannedAt: number
-  targetWorktreeId?: string
-  skipGitWorktreeIds: Set<string>
-}): Promise<WorkspaceCleanupScanResult> {
-  const { store, repo, scannedAt, targetWorktreeId, skipGitWorktreeIds } = args
+async function scanRepoWorkspaces(
+  args: {
+    store: Store
+    repo: Repo
+    scannedAt: number
+    targetWorktreeId?: string
+    skipGitWorktreeIds: Set<string>
+  } & WorkspaceCleanupScanRepoProgress
+): Promise<WorkspaceCleanupScanResult> {
+  const {
+    store,
+    repo,
+    scannedAt,
+    targetWorktreeId,
+    skipGitWorktreeIds,
+    onWorktreesDiscovered,
+    onCandidateScanned,
+    onErrors
+  } = args
   const errors: WorkspaceCleanupScanResult['errors'] = []
   let provider: IGitProvider | null = null
   let gitWorktrees: GitWorktreeInfo[] = []
@@ -241,11 +298,16 @@ async function scanRepoWorkspaces(args: {
       if (!provider) {
         // Why: cleanup should reflect only workspaces Orca can currently
         // inspect. Disconnected SSH repos are skipped in broad scans.
+        const candidates = targetWorktreeId
+          ? synthesizeDisconnectedSshCandidates(store, repo, scannedAt, targetWorktreeId)
+          : []
+        onWorktreesDiscovered?.(candidates.length)
+        for (const candidate of candidates) {
+          onCandidateScanned?.(candidate)
+        }
         return {
           scannedAt,
-          candidates: targetWorktreeId
-            ? synthesizeDisconnectedSshCandidates(store, repo, scannedAt, targetWorktreeId)
-            : [],
+          candidates,
           errors: []
         }
       }
@@ -269,6 +331,7 @@ async function scanRepoWorkspaces(args: {
       return { scannedAt, candidates: [], errors: [] }
     }
     errors.push(createScanError(repo, toSafeRepoScanError(error)))
+    onErrors?.(errors)
     return { scannedAt, candidates: [], errors }
   }
 
@@ -289,18 +352,26 @@ async function scanRepoWorkspaces(args: {
       )
     })
 
-  const candidates = await mapWithConcurrency(worktrees, WORKTREE_SCAN_CONCURRENCY, (worktree) =>
-    buildCandidate({
-      repo,
-      worktree,
-      scannedAt,
-      provider,
-      skipGit: skipGitWorktreeIds.has(worktree.id),
-      forceGitCheck: Boolean(targetWorktreeId)
-    }).catch((error) => {
-      console.error('Workspace cleanup candidate scan failed', error)
-      return buildCandidateFromError(repo, worktree, scannedAt, toErrorMessage(error))
-    })
+  onWorktreesDiscovered?.(worktrees.length)
+
+  const candidates = await mapWithConcurrency(
+    worktrees,
+    WORKTREE_SCAN_CONCURRENCY,
+    async (worktree) => {
+      const candidate = await buildCandidate({
+        repo,
+        worktree,
+        scannedAt,
+        provider,
+        skipGit: skipGitWorktreeIds.has(worktree.id),
+        forceGitCheck: Boolean(targetWorktreeId)
+      }).catch((error) => {
+        console.error('Workspace cleanup candidate scan failed', error)
+        return buildCandidateFromError(repo, worktree, scannedAt, toErrorMessage(error))
+      })
+      onCandidateScanned?.(candidate)
+      return candidate
+    }
   )
 
   return { scannedAt, candidates, errors }

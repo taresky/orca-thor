@@ -18,6 +18,7 @@ import {
   type WorkspaceCleanupCandidate,
   type WorkspaceCleanupDismissal,
   type WorkspaceCleanupScanArgs,
+  type WorkspaceCleanupScanProgress,
   type WorkspaceCleanupScanResult
 } from '../../../../shared/workspace-cleanup'
 import { detectAgentStatusFromTitle, isExplicitAgentStatusFresh } from '@/lib/agent-status'
@@ -42,6 +43,7 @@ type WorkspaceCleanupViewedCandidate = {
 
 export type WorkspaceCleanupSlice = {
   workspaceCleanupScan: WorkspaceCleanupScanResult | null
+  workspaceCleanupProgress: WorkspaceCleanupScanProgress | null
   workspaceCleanupLoading: boolean
   workspaceCleanupError: string | null
   workspaceCleanupDismissals: Record<string, WorkspaceCleanupDismissal>
@@ -105,6 +107,7 @@ export const createWorkspaceCleanupSlice: StateCreator<AppState, [], [], Workspa
   get
 ) => ({
   workspaceCleanupScan: null,
+  workspaceCleanupProgress: null,
   workspaceCleanupLoading: false,
   workspaceCleanupError: null,
   workspaceCleanupDismissals: {},
@@ -135,14 +138,31 @@ export const createWorkspaceCleanupSlice: StateCreator<AppState, [], [], Workspa
       return inFlightWorkspaceCleanupScan.promise
     }
 
-    set({ workspaceCleanupLoading: true, workspaceCleanupError: null })
+    set({
+      workspaceCleanupLoading: true,
+      workspaceCleanupProgress: null,
+      workspaceCleanupError: null
+    })
     const scanToken = ++latestWorkspaceCleanupScanToken
     const promise = (async () => {
-      const scan = await window.api.workspaceCleanup.scan(scanArgs)
+      const scan = await window.api.workspaceCleanup.scan(scanArgs, (progress) => {
+        void applyWorkspaceCleanupProgress(progress, scanToken, get, set)
+      })
       const enriched = await enrichWorkspaceCleanupCandidates(scan.candidates, get())
       const result = { ...scan, candidates: enriched }
       if (scanToken === latestWorkspaceCleanupScanToken) {
-        set({ workspaceCleanupScan: result, workspaceCleanupLoading: false })
+        set({
+          workspaceCleanupScan: result,
+          workspaceCleanupProgress: {
+            scanId: get().workspaceCleanupProgress?.scanId ?? '',
+            scannedAt: result.scannedAt,
+            scannedWorktreeCount: result.candidates.length,
+            totalWorktreeCount: result.candidates.length,
+            candidates: result.candidates,
+            errors: result.errors
+          },
+          workspaceCleanupLoading: false
+        })
       }
       return result
     })()
@@ -283,6 +303,29 @@ export const createWorkspaceCleanupSlice: StateCreator<AppState, [], [], Workspa
 function getWorkspaceCleanupScanKey(args: WorkspaceCleanupScanArgs): string {
   return JSON.stringify({
     skipGitWorktreeIds: [...new Set(args.skipGitWorktreeIds ?? [])].sort()
+  })
+}
+
+async function applyWorkspaceCleanupProgress(
+  progress: WorkspaceCleanupScanProgress,
+  scanToken: number,
+  getState: () => AppState,
+  setState: (
+    partial: Partial<AppState> | ((state: AppState) => Partial<AppState>),
+    replace?: false
+  ) => void
+): Promise<void> {
+  const enriched = await enrichWorkspaceCleanupCandidates(progress.candidates, getState())
+  if (scanToken !== latestWorkspaceCleanupScanToken) {
+    return
+  }
+  setState({
+    workspaceCleanupScan: {
+      scannedAt: progress.scannedAt,
+      candidates: enriched,
+      errors: progress.errors
+    },
+    workspaceCleanupProgress: { ...progress, candidates: enriched }
   })
 }
 

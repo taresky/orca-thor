@@ -74,6 +74,7 @@ export type WorkspaceCleanupCandidate = {
 export type WorkspaceCleanupScanArgs = {
   worktreeId?: string
   skipGitWorktreeIds?: string[]
+  scanId?: string
 }
 
 export type WorkspaceCleanupLocalProcessArgs = {
@@ -92,6 +93,12 @@ export type WorkspaceCleanupScanResult = {
   scannedAt: number
   candidates: WorkspaceCleanupCandidate[]
   errors: WorkspaceCleanupScanError[]
+}
+
+export type WorkspaceCleanupScanProgress = WorkspaceCleanupScanResult & {
+  scanId: string
+  scannedWorktreeCount: number
+  totalWorktreeCount: number
 }
 
 export type WorkspaceCleanupLocalProcessResult = {
