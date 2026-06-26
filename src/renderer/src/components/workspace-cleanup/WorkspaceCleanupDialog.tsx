@@ -7,7 +7,6 @@ import {
   Check,
   EyeOff,
   Loader2,
-  Minus,
   RefreshCcw,
   Search,
   SlidersHorizontal,
@@ -52,8 +51,7 @@ import {
   type WorkspaceCleanupBlocker,
   type WorkspaceCleanupCandidate,
   type WorkspaceCleanupScanError,
-  type WorkspaceCleanupScanProgress,
-  type WorkspaceCleanupTier
+  type WorkspaceCleanupScanProgress
 } from '../../../../shared/workspace-cleanup'
 import {
   filterWorkspaceCleanupCandidates,
@@ -76,12 +74,6 @@ import {
   type WorkspaceCleanupViewCounts
 } from './workspace-cleanup-view-selection'
 import { translate } from '@/i18n/i18n'
-
-const TIER_LABELS: Record<WorkspaceCleanupTier, string> = {
-  ready: 'Suggested cleanup',
-  review: 'Needs a closer look',
-  protected: 'Not suggested for cleanup'
-}
 
 const DEFAULT_FILTERS: WorkspaceCleanupFilters = {
   query: '',
@@ -376,9 +368,6 @@ export default function WorkspaceCleanupDialog(): React.JSX.Element {
     }),
     [visibleCandidates]
   )
-  const hiddenByKeepCount = filteredCandidates.filter((candidate) =>
-    candidate.blockers.includes('dismissed')
-  ).length
   const cleanupViewCounts = useMemo<WorkspaceCleanupViewCounts>(
     () => ({
       ready: groups.ready.length,
@@ -440,23 +429,6 @@ export default function WorkspaceCleanupDialog(): React.JSX.Element {
           candidate != null && canQueueWorkspaceCleanupCandidate(candidate)
       )
   }, [activeRows, selectedIds])
-  const activeQueueableRows = useMemo(
-    () => activeRows.filter(canQueueWorkspaceCleanupCandidate),
-    [activeRows]
-  )
-  const activeQueueableSelected = useMemo(
-    () => activeQueueableRows.filter((candidate) => selectedIds.has(candidate.worktreeId)).length,
-    [activeQueueableRows, selectedIds]
-  )
-  const allActiveQueueableSelected =
-    activeQueueableRows.length > 0 && activeQueueableSelected === activeQueueableRows.length
-  const someActiveQueueableSelected = activeQueueableSelected > 0
-  const activeSelectionState = allActiveQueueableSelected
-    ? 'checked'
-    : someActiveQueueableSelected
-      ? 'mixed'
-      : 'unchecked'
-
   useEffect(() => {
     if (!open || confirming) {
       return
@@ -481,25 +453,6 @@ export default function WorkspaceCleanupDialog(): React.JSX.Element {
   const refresh = useCallback(() => {
     startWorkspaceCleanupScan({ notifyWhenReady: true })
   }, [startWorkspaceCleanupScan])
-
-  const toggleActiveSelection = useCallback(() => {
-    if (activeQueueableRows.length === 0) {
-      return
-    }
-    setSelectedIds((current) => {
-      const next = new Set(current)
-      if (allActiveQueueableSelected) {
-        for (const candidate of activeQueueableRows) {
-          next.delete(candidate.worktreeId)
-        }
-      } else {
-        for (const candidate of activeQueueableRows) {
-          next.add(candidate.worktreeId)
-        }
-      }
-      return next
-    })
-  }, [activeQueueableRows, allActiveQueueableSelected])
 
   const ignoreCandidate = useCallback(
     (candidate: WorkspaceCleanupCandidate) => {
@@ -750,77 +703,18 @@ export default function WorkspaceCleanupDialog(): React.JSX.Element {
                 onViewChange={setActiveView}
               />
               <div className="flex min-h-0 min-w-0 flex-col border-t border-border md:border-l md:border-t-0">
-                <div className="flex min-h-10 items-center justify-between gap-3 border-b border-border px-3 py-2">
-                  <div className="flex min-w-0 items-center gap-2">
-                    {resolvedActiveView !== 'hidden' && activeQueueableRows.length > 0 ? (
-                      <button
-                        type="button"
-                        role="checkbox"
-                        aria-checked={
-                          activeSelectionState === 'mixed' ? 'mixed' : allActiveQueueableSelected
-                        }
-                        aria-label={
-                          allActiveQueueableSelected
-                            ? translate(
-                                'auto.components.workspace.cleanup.WorkspaceCleanupDialog.73690b0031',
-                                'Unselect all in {{value0}}',
-                                { value0: TIER_LABELS[resolvedActiveView] }
-                              )
-                            : translate(
-                                'auto.components.workspace.cleanup.WorkspaceCleanupDialog.06cf78521e',
-                                'Select all in {{value0}}',
-                                { value0: TIER_LABELS[resolvedActiveView] }
-                              )
-                        }
-                        onClick={toggleActiveSelection}
-                        className="flex size-4 shrink-0 items-center justify-center rounded border border-border bg-background text-primary hover:bg-accent"
-                      >
-                        {activeSelectionState === 'checked' ? (
-                          <Check className="size-3" strokeWidth={3} />
-                        ) : activeSelectionState === 'mixed' ? (
-                          <Minus className="size-3" strokeWidth={3} />
-                        ) : null}
-                      </button>
-                    ) : null}
-                    <div className="min-w-0 truncate text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
-                      {resolvedActiveView === 'hidden'
-                        ? translate(
-                            'auto.components.workspace.cleanup.WorkspaceCleanupDialog.0c6672f5e3',
-                            'Ignored cleanup suggestions'
-                          )
-                        : TIER_LABELS[resolvedActiveView]}
-                    </div>
-                  </div>
-                  {resolvedActiveView === 'hidden' && hiddenByKeepCount > 0 ? (
-                    <Button
-                      variant="link"
-                      size="xs"
-                      className="h-auto shrink-0 px-0 text-xs"
-                      onClick={() => void resetDismissals()}
-                    >
-                      {translate(
-                        'auto.components.workspace.cleanup.WorkspaceCleanupDialog.aaee139eab',
-                        'Restore ignored suggestions'
-                      )}
-                    </Button>
-                  ) : (
-                    <div className="shrink-0 text-xs text-muted-foreground">
-                      {translate(
-                        'auto.components.workspace.cleanup.WorkspaceCleanupDialog.592fbab446',
-                        'Sorted by {{value0}}',
-                        { value0: formatWorkspaceCleanupSortLabel(sortKey, sortDirection) }
-                      )}
-                    </div>
-                  )}
-                </div>
                 {filteredCandidates.length > 0 ? (
                   <WorkspaceCleanupFilterToolbar
                     filters={filters}
+                    showRestoreIgnored={
+                      resolvedActiveView === 'hidden' && hiddenCandidates.length > 0
+                    }
                     sortKey={sortKey}
                     sortDirection={sortDirection}
                     onFiltersChange={setFilters}
                     onSortKeyChange={setSortKey}
                     onSortDirectionChange={setSortDirection}
+                    onRestoreIgnored={() => void resetDismissals()}
                   />
                 ) : null}
                 <ScrollArea className="min-h-0 flex-1">
@@ -967,18 +861,22 @@ function StatusPill({
 
 function WorkspaceCleanupFilterToolbar({
   filters,
+  showRestoreIgnored,
   sortKey,
   sortDirection,
   onFiltersChange,
   onSortKeyChange,
-  onSortDirectionChange
+  onSortDirectionChange,
+  onRestoreIgnored
 }: {
   filters: WorkspaceCleanupFilters
+  showRestoreIgnored: boolean
   sortKey: WorkspaceCleanupSortKey
   sortDirection: WorkspaceCleanupSortDirection
   onFiltersChange: (filters: WorkspaceCleanupFilters) => void
   onSortKeyChange: (sortKey: WorkspaceCleanupSortKey) => void
   onSortDirectionChange: (direction: WorkspaceCleanupSortDirection) => void
+  onRestoreIgnored: () => void
 }): React.JSX.Element {
   const updateFilter = <K extends keyof WorkspaceCleanupFilters>(
     key: K,
@@ -1121,6 +1019,17 @@ function WorkspaceCleanupFilterToolbar({
             ]}
             onChange={onSortDirectionChange}
           />
+          {showRestoreIgnored ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={onRestoreIgnored}>
+                {translate(
+                  'auto.components.workspace.cleanup.WorkspaceCleanupDialog.aaee139eab',
+                  'Restore ignored suggestions'
+                )}
+              </DropdownMenuItem>
+            </>
+          ) : null}
           {hasHiddenControls ? (
             <>
               <DropdownMenuSeparator />
@@ -1765,25 +1674,6 @@ function getDefaultSelectedWorkspaceCleanupIds(
       .filter((candidate) => candidate.selectedByDefault)
       .map((candidate) => candidate.worktreeId)
   )
-}
-
-function formatWorkspaceCleanupSortLabel(
-  sortKey: WorkspaceCleanupSortKey,
-  sortDirection: WorkspaceCleanupSortDirection
-): string {
-  const direction = sortDirection === 'asc' ? 'ascending' : 'descending'
-  switch (sortKey) {
-    case 'activity':
-      return sortDirection === 'asc' ? 'oldest activity' : 'newest activity'
-    case 'name':
-      return `name ${direction}`
-    case 'repo':
-      return `repo ${direction}`
-    case 'review':
-      return `review ${direction}`
-    case 'git':
-      return `git ${direction}`
-  }
 }
 
 function formatWorkspaceCleanupReadyToastDescription(
