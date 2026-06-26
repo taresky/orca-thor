@@ -233,41 +233,33 @@ export const createWorkspaceCleanupSlice: StateCreator<AppState, [], [], Workspa
       WORKSPACE_CLEANUP_PREFLIGHT_CONCURRENCY,
       (worktreeId) => preflightWorkspaceCleanupCandidate(worktreeId, get)
     )
-    const candidatesByRepo = new Map<string, WorkspaceCleanupCandidate[]>()
+    const candidatesToRemove: WorkspaceCleanupCandidate[] = []
 
     for (const preflight of preflights) {
       if (!preflight.ok) {
         failures.push(preflight.failure)
         continue
       }
-      const existing = candidatesByRepo.get(preflight.candidate.repoId)
-      if (existing) {
-        existing.push(preflight.candidate)
-      } else {
-        candidatesByRepo.set(preflight.candidate.repoId, [preflight.candidate])
-      }
+      candidatesToRemove.push(preflight.candidate)
     }
 
-    await Promise.all(
-      [...candidatesByRepo.values()].map(async (repoCandidates) => {
-        const sortedCandidates = [...repoCandidates].sort((a, b) => b.path.length - a.path.length)
-        for (const candidate of sortedCandidates) {
-          const result = await get().removeWorktree(
-            candidate.worktreeId,
-            shouldForceWorkspaceCleanupRemoval(candidate)
-          )
-          if (result.ok) {
-            removedIds.push(candidate.worktreeId)
-          } else {
-            failures.push({
-              worktreeId: candidate.worktreeId,
-              displayName: candidate.displayName,
-              message: result.error
-            })
-          }
-        }
-      })
-    )
+    // Why: nested workspaces can belong to different repos; parent removal must
+    // not race child cleanup hooks, PTY teardown, or metadata deletion.
+    for (const candidate of [...candidatesToRemove].sort((a, b) => b.path.length - a.path.length)) {
+      const result = await get().removeWorktree(
+        candidate.worktreeId,
+        shouldForceWorkspaceCleanupRemoval(candidate)
+      )
+      if (result.ok) {
+        removedIds.push(candidate.worktreeId)
+      } else {
+        failures.push({
+          worktreeId: candidate.worktreeId,
+          displayName: candidate.displayName,
+          message: result.error
+        })
+      }
+    }
 
     if (removedIds.length > 0) {
       const removedIdSet = new Set(removedIds)
@@ -490,7 +482,7 @@ async function preflightWorkspaceCleanupCandidate(
         displayName: candidate.displayName,
         message: candidate.blockers.length
           ? candidate.blockers.join(', ')
-          : 'Workspace is no longer safe to remove.'
+          : 'Workspace needs another look before removal.'
       }
     }
   }

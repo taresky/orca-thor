@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Progress } from '@/components/ui/progress'
 import RepoMultiCombobox from '@/components/ui/repo-multi-combobox'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -182,6 +183,7 @@ function formatScanErrorReason(message: string | undefined): string {
 
 export default function WorkspaceCleanupDialog(): React.JSX.Element {
   const activeModal = useAppStore((s) => s.activeModal)
+  const openModal = useAppStore((s) => s.openModal)
   const closeModal = useAppStore((s) => s.closeModal)
   const scan = useAppStore((s) => s.workspaceCleanupScan)
   const loading = useAppStore((s) => s.workspaceCleanupLoading)
@@ -213,9 +215,45 @@ export default function WorkspaceCleanupDialog(): React.JSX.Element {
   const [sortDirection, setSortDirection] = useState<WorkspaceCleanupSortDirection>('asc')
   const selectedDefaultsScanAtRef = useRef<number | null>(null)
   const autoScanAttemptedForOpenRef = useRef(false)
+  const latestReadyToastScanAtRef = useRef<number | null>(null)
   const wasOpenRef = useRef(false)
   const eligibleRepos = useMemo(() => repos.filter((repo) => isGitRepoKind(repo)), [repos])
   const eligibleRepoIds = useMemo(() => eligibleRepos.map((repo) => repo.id), [eligibleRepos])
+
+  const startWorkspaceCleanupScan = useCallback(
+    (options: { notifyWhenReady?: boolean } = {}) => {
+      setRowFailures({})
+      void scanWorkspaceCleanup()
+        .then((result) => {
+          if (!options.notifyWhenReady) {
+            return
+          }
+          if (latestReadyToastScanAtRef.current === result.scannedAt) {
+            return
+          }
+          latestReadyToastScanAtRef.current = result.scannedAt
+          const suggestedCount = result.candidates.filter(
+            (candidate) => candidate.selectedByDefault
+          ).length
+          toast.success('Inactive workspace scan ready', {
+            description: formatWorkspaceCleanupReadyToastDescription(
+              result.candidates.length,
+              suggestedCount
+            ),
+            action: {
+              label: 'Review',
+              onClick: () => openModal('workspace-cleanup')
+            }
+          })
+        })
+        .catch((err: unknown) => {
+          toast.error('Workspace cleanup scan failed', {
+            description: err instanceof Error ? err.message : String(err)
+          })
+        })
+    },
+    [openModal, scanWorkspaceCleanup]
+  )
 
   useEffect(() => {
     if (!open) {
@@ -238,13 +276,9 @@ export default function WorkspaceCleanupDialog(): React.JSX.Element {
     }
     if (!loading && !autoScanAttemptedForOpenRef.current) {
       autoScanAttemptedForOpenRef.current = true
-      void scanWorkspaceCleanup().catch((err: unknown) => {
-        toast.error('Workspace cleanup scan failed', {
-          description: err instanceof Error ? err.message : String(err)
-        })
-      })
+      startWorkspaceCleanupScan({ notifyWhenReady: true })
     }
-  }, [loading, open, scan, scanWorkspaceCleanup])
+  }, [loading, open, scan, startWorkspaceCleanupScan])
 
   useEffect(() => {
     if (!open) {
@@ -425,13 +459,8 @@ export default function WorkspaceCleanupDialog(): React.JSX.Element {
   )
 
   const refresh = useCallback(() => {
-    setRowFailures({})
-    void scanWorkspaceCleanup().catch((err: unknown) => {
-      toast.error('Workspace cleanup scan failed', {
-        description: err instanceof Error ? err.message : String(err)
-      })
-    })
-  }, [scanWorkspaceCleanup])
+    startWorkspaceCleanupScan({ notifyWhenReady: true })
+  }, [startWorkspaceCleanupScan])
 
   const toggleActiveSelection = useCallback(() => {
     if (activeQueueableRows.length === 0) {
@@ -563,12 +592,13 @@ export default function WorkspaceCleanupDialog(): React.JSX.Element {
                 <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-muted-foreground" />
                 <div className="min-w-0">
                   <div className="text-xs font-medium text-foreground">
-                    Checking workspace safety
+                    Checking inactive workspaces
                   </div>
                   <div className="mt-0.5 text-xs text-muted-foreground">
                     Scanning worktrees and git state, then combining open tab, terminal, live agent,
                     and remote availability signals before suggesting deletions.
                   </div>
+                  <ScanProgress value={35} className="mt-2" />
                 </div>
               </div>
             ) : hasAnyCandidates ? (
@@ -579,10 +609,10 @@ export default function WorkspaceCleanupDialog(): React.JSX.Element {
                   </div>
                   <StatusPill>{inactiveCount} inactive</StatusPill>
                   {readyCount > 0 ? (
-                    <StatusPill tone="ready">{readyCount} safe to remove</StatusPill>
+                    <StatusPill tone="ready">{readyCount} suggested</StatusPill>
                   ) : null}
                   {groups.review.length > 0 ? (
-                    <StatusPill tone="review">{groups.review.length} need review</StatusPill>
+                    <StatusPill tone="review">{groups.review.length} need a look</StatusPill>
                   ) : null}
                   {protectedCount > 0 ? (
                     <StatusPill>{protectedCount} not suggested</StatusPill>
@@ -615,12 +645,15 @@ export default function WorkspaceCleanupDialog(): React.JSX.Element {
             ) : null}
 
             {loading && scan ? (
-              <div className="flex items-center gap-2 border-b border-border bg-muted/25 px-5 py-2 text-xs text-muted-foreground">
-                <Loader2 className="size-3.5 shrink-0 animate-spin" />
-                <span>
-                  Refreshing inactive workspaces. You can leave this modal; the last result stays
-                  visible.
-                </span>
+              <div className="border-b border-border bg-muted/25 px-5 py-2">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="size-3.5 shrink-0 animate-spin" />
+                  <span>
+                    Refreshing inactive workspaces. You can leave this modal; the last result stays
+                    visible.
+                  </span>
+                </div>
+                <ScanProgress value={70} className="mt-2" />
               </div>
             ) : null}
 
@@ -817,6 +850,22 @@ function StatusPill({
   )
 }
 
+function ScanProgress({
+  value,
+  className
+}: {
+  value: number
+  className?: string
+}): React.JSX.Element {
+  return (
+    <Progress
+      value={value}
+      aria-label="Workspace cleanup scan progress"
+      className={cn('h-1 bg-muted', className)}
+    />
+  )
+}
+
 function WorkspaceCleanupFilterToolbar({
   filters,
   sortKey,
@@ -850,6 +899,9 @@ function WorkspaceCleanupFilterToolbar({
           className="h-8 pl-8 text-xs"
         />
       </div>
+      <span className="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
+        Filter
+      </span>
       <FilterSelect<WorkspaceCleanupTimeFilter>
         value={filters.time}
         options={[
@@ -891,6 +943,9 @@ function WorkspaceCleanupFilterToolbar({
         ]}
         onChange={(value) => updateFilter('context', value)}
       />
+      <span className="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
+        Sort
+      </span>
       <FilterSelect<WorkspaceCleanupSortKey>
         value={sortKey}
         options={[
@@ -1420,6 +1475,18 @@ function formatWorkspaceCleanupSortLabel(
     case 'git':
       return `git ${direction}`
   }
+}
+
+function formatWorkspaceCleanupReadyToastDescription(
+  inactiveCount: number,
+  suggestedCount: number
+): string {
+  if (inactiveCount === 0) {
+    return 'No inactive workspaces found.'
+  }
+  const inactiveNoun = inactiveCount === 1 ? 'workspace' : 'workspaces'
+  const suggestedNoun = suggestedCount === 1 ? 'suggestion' : 'suggestions'
+  return `${inactiveCount} inactive ${inactiveNoun} found, with ${suggestedCount} cleanup ${suggestedNoun}.`
 }
 
 function SkeletonRows(): React.JSX.Element {

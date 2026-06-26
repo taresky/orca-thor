@@ -217,12 +217,12 @@ describe('workspace cleanup viewed rows', () => {
     expect(store.getState().workspaceCleanupScan?.scannedAt).toBe(NOW)
   })
 
-  it('preflights cleanup removals concurrently and deletes each repo deepest first', async () => {
+  it('preflights cleanup removals concurrently and deletes nested workspaces globally deepest first', async () => {
     let activePreflights = 0
     let maxActivePreflights = 0
     let activeDeletes = 0
     let maxActiveDeletes = 0
-    const deleteOrderByRepo = new Map<string, string[]>()
+    const deleteOrder: string[] = []
     const candidates = [
       makeCandidate({
         worktreeId: 'repo-a::/repo/parent',
@@ -231,14 +231,14 @@ describe('workspace cleanup viewed rows', () => {
         displayName: 'parent'
       }),
       makeCandidate({
-        worktreeId: 'repo-a::/repo/parent/child',
-        repoId: 'repo-a',
+        worktreeId: 'repo-b::/repo/parent/child',
+        repoId: 'repo-b',
         path: '/repo/parent/child',
         displayName: 'child'
       }),
       makeCandidate({
-        worktreeId: 'repo-b::/other',
-        repoId: 'repo-b',
+        worktreeId: 'repo-c::/other',
+        repoId: 'repo-c',
         path: '/other',
         displayName: 'other',
         git: { clean: null, upstreamAhead: null, upstreamBehind: null, checkedAt: null },
@@ -260,10 +260,7 @@ describe('workspace cleanup viewed rows', () => {
     installWorkspaceCleanupApi(scan)
 
     const removeWorktree = vi.fn(async (worktreeId: string) => {
-      const candidate = candidateById.get(worktreeId)!
-      const repoOrder = deleteOrderByRepo.get(candidate.repoId) ?? []
-      repoOrder.push(worktreeId)
-      deleteOrderByRepo.set(candidate.repoId, repoOrder)
+      deleteOrder.push(worktreeId)
       activeDeletes += 1
       maxActiveDeletes = Math.max(maxActiveDeletes, activeDeletes)
       await new Promise((resolve) => setTimeout(resolve, 5))
@@ -285,12 +282,13 @@ describe('workspace cleanup viewed rows', () => {
     })
 
     expect(maxActivePreflights).toBeGreaterThan(1)
-    expect(maxActiveDeletes).toBeGreaterThan(1)
-    expect(deleteOrderByRepo.get('repo-a')).toEqual([
-      'repo-a::/repo/parent/child',
-      'repo-a::/repo/parent'
+    expect(maxActiveDeletes).toBe(1)
+    expect(deleteOrder).toEqual([
+      'repo-b::/repo/parent/child',
+      'repo-a::/repo/parent',
+      'repo-c::/other'
     ])
-    expect(removeWorktree).toHaveBeenCalledWith('repo-b::/other', true)
+    expect(removeWorktree).toHaveBeenCalledWith('repo-c::/other', true)
     expect(store.getState().workspaceCleanupScan?.candidates).toEqual([])
   })
 
