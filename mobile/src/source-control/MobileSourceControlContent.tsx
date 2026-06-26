@@ -41,9 +41,9 @@ export function MobileSourceControlContent({ state, hostId, worktreeId, name }: 
     unstagedCount,
     branchLabel,
     syncLabel,
+    primaryAction,
     stageAll,
     unstageAll,
-    commit,
     generateCommitMessage,
     cancelGenerateCommitMessage,
     abortConflictOperation,
@@ -224,7 +224,7 @@ export function MobileSourceControlContent({ state, hostId, worktreeId, name }: 
               placeholderTextColor={colors.textMuted}
               editable={busyAction === null && openingPath === null && openingBranchPath === null}
               returnKeyType="done"
-              onSubmitEditing={() => void commit()}
+              onSubmitEditing={primaryAction.onPress}
             />
           )}
           <Pressable
@@ -254,16 +254,18 @@ export function MobileSourceControlContent({ state, hostId, worktreeId, name }: 
           <Pressable
             style={({ pressed }) => [
               styles.commitButton,
-              (!commitMessage.trim() || stagedCount === 0 || ioBusy) && styles.commitButtonDisabled,
+              primaryAction.disabled && styles.commitButtonDisabled,
               pressed && styles.commitButtonPressed
             ]}
-            onPress={() => void commit()}
-            disabled={!commitMessage.trim() || stagedCount === 0 || ioBusy}
+            onPress={primaryAction.onPress}
+            disabled={primaryAction.disabled}
+            accessibilityLabel={primaryAction.accessibilityLabel}
+            accessibilityHint={primaryAction.accessibilityHint}
           >
-            {busyAction === 'commit' ? (
+            {primaryAction.loading ? (
               <ActivityIndicator size="small" color={colors.bgBase} />
             ) : (
-              <Text style={styles.commitButtonText}>Commit</Text>
+              <Text style={styles.commitButtonText}>{primaryAction.label}</Text>
             )}
           </Pressable>
         </View>

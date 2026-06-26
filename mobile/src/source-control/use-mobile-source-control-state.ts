@@ -7,6 +7,7 @@ import type { MobilePrPrefill } from './mobile-pr-create'
 import { useMobileGitRequests } from './use-mobile-git-requests'
 import { useMobileSourceControlLoaders } from './use-mobile-source-control-loaders'
 import { useMobileSourceControlOpeners } from './use-mobile-source-control-openers'
+import { buildMobileSourceControlPrimaryAction } from './mobile-source-control-primary-action'
 import { useMobileSourceControlRunners } from './use-mobile-source-control-runners'
 import type { RuntimeGitLocalBranches } from '../../../src/shared/runtime-types'
 import {
@@ -157,6 +158,10 @@ export function useMobileSourceControlState(params: MobileSourceControlStatePara
   const unstageablePaths = useMemo(() => getUnstageablePaths(entries), [entries])
   const stagedCount = useMemo(() => countStagedEntries(entries), [entries])
   const unstagedCount = useMemo(() => countUnstagedEntries(entries), [entries])
+  const hasUnresolvedConflicts = useMemo(
+    () => entries.some((entry) => entry.conflictStatus === 'unresolved'),
+    [entries]
+  )
   const branchLabel = formatBranchLabel(status?.branch, status?.head)
   const upstream = status?.upstreamStatus
   const upstreamKnown = upstream !== undefined
@@ -200,6 +205,43 @@ export function useMobileSourceControlState(params: MobileSourceControlStatePara
     setPrPrefill,
     setShowPrSheet
   })
+  const primaryAction = useMemo(
+    () =>
+      buildMobileSourceControlPrimaryAction({
+        status,
+        hasUnresolvedConflicts,
+        stageablePaths,
+        stagedCount,
+        unstagedCount,
+        commitMessage,
+        busyAction,
+        openingPath,
+        openingBranchPath,
+        branchCompareResult,
+        handlers: {
+          commit: runners.commit,
+          stageAll: runners.stageAll,
+          runActionSheetGitSequence: runners.runActionSheetGitSequence,
+          runActionSheetGitSync: runners.runActionSheetGitSync
+        }
+      }),
+    [
+      branchCompareResult,
+      busyAction,
+      commitMessage,
+      hasUnresolvedConflicts,
+      openingBranchPath,
+      openingPath,
+      runners.commit,
+      runners.runActionSheetGitSequence,
+      runners.runActionSheetGitSync,
+      runners.stageAll,
+      stageablePaths,
+      stagedCount,
+      status,
+      unstagedCount
+    ]
+  )
 
   return {
     client,
@@ -253,6 +295,7 @@ export function useMobileSourceControlState(params: MobileSourceControlStatePara
     upstream,
     upstreamKnown,
     syncLabel,
+    primaryAction,
     // actions
     loadStatus,
     openFile,
