@@ -173,14 +173,20 @@ export function AgentSkillSetupPanel({
             const nextCommand = activeCommand
             setTerminalOpening(true)
             void (async () => {
+              let shouldOpenTerminal = false
               try {
                 await onBeforeOpenTerminal?.()
                 await refreshPreInstallNotice()
+                shouldOpenTerminal = true
+              } catch {
+                shouldOpenTerminal = false
               } finally {
                 if (mountedRef.current) {
                   setTerminalOpening(false)
-                  setTerminalCommand(nextCommand)
-                  setTerminalOpen(true)
+                  if (shouldOpenTerminal) {
+                    setTerminalCommand(nextCommand)
+                    setTerminalOpen(true)
+                  }
                 }
               }
             })()
