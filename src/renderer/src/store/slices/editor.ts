@@ -288,6 +288,7 @@ const MAX_RECENT_CLOSED_EDITOR_TABS = 10
 
 type EditorOpenTargetOptions = {
   targetGroupId?: string
+  displayWorktreeId?: string
   preview?: boolean
   runtimeEnvironmentId?: string | null
   forceContentReload?: boolean
@@ -437,6 +438,7 @@ export type EditorSlice = {
     options?: {
       preview?: boolean
       targetGroupId?: string
+      displayWorktreeId?: string
       recordReplacedPreview?: boolean
       suppressActiveRuntimeFallback?: boolean
       forceContentReload?: boolean
@@ -504,7 +506,8 @@ export type EditorSlice = {
     worktreePath: string,
     alternate?: CombinedDiffAlternate,
     areaFilter?: string,
-    entriesSnapshot?: GitStatusEntry[]
+    entriesSnapshot?: GitStatusEntry[],
+    options?: Pick<EditorOpenTargetOptions, 'displayWorktreeId' | 'targetGroupId'>
   ) => void
   openConflictFile: (
     worktreeId: string,
@@ -524,7 +527,8 @@ export type EditorSlice = {
     worktreeId: string,
     worktreePath: string,
     entries: ConflictReviewEntry[],
-    source: ConflictReviewState['source']
+    source: ConflictReviewState['source'],
+    options?: Pick<EditorOpenTargetOptions, 'displayWorktreeId' | 'targetGroupId'>
   ) => void
   openCheckRunDetails: (
     worktreeId: string,
@@ -543,7 +547,8 @@ export type EditorSlice = {
     worktreeId: string,
     worktreePath: string,
     compare: GitBranchCompareSummary,
-    alternate?: CombinedDiffAlternate
+    alternate?: CombinedDiffAlternate,
+    options?: Pick<EditorOpenTargetOptions, 'displayWorktreeId' | 'targetGroupId'>
   ) => void
   openCommitAllDiffs: (
     worktreeId: string,
@@ -551,7 +556,8 @@ export type EditorSlice = {
     compare: GitCommitCompareSummary,
     entries: GitBranchChangeEntry[],
     subject?: string,
-    message?: string
+    message?: string,
+    options?: Pick<EditorOpenTargetOptions, 'displayWorktreeId' | 'targetGroupId'>
   ) => void
 
   // Cursor line tracking per file
@@ -875,6 +881,13 @@ function resolveEditorOpenTargetGroupId(
     (group) => group.id !== activeGroup.id && getMostRecentEditorTabForGroup(group, tabsById)
   )
   return recentEditorGroup?.id ?? activeGroup.id
+}
+
+function resolveEditorDisplayWorktreeId(
+  sourceWorktreeId: string,
+  options: Pick<EditorOpenTargetOptions, 'displayWorktreeId'> | undefined
+): string {
+  return options?.displayWorktreeId ?? sourceWorktreeId
 }
 
 function buildEditorActiveResult(
@@ -1492,7 +1505,7 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
     }),
 
   openFile: (file, options) => {
-    let editorItemWorktreeId = file.worktreeId
+    let editorItemWorktreeId = resolveEditorDisplayWorktreeId(file.worktreeId, options)
     let editorItemFileId = file.filePath
     let editorItemLabel = file.relativePath
     let editorItemContentType: 'editor' | 'diff' | 'conflict-review' | 'check-details' =
@@ -1506,6 +1519,7 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
     let editorItemTargetGroupId = options?.targetGroupId
     set((s) => {
       const worktreeId = file.worktreeId
+      const displayWorktreeId = resolveEditorDisplayWorktreeId(worktreeId, options)
       const runtimeEnvironmentId =
         file.runtimeEnvironmentId === null
           ? null
@@ -1534,9 +1548,9 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
       // scoped to that group. Opening as preview in group B must not evict a
       // preview tab belonging to group A (split tab groups).
       const targetGroupId =
-        resolveEditorOpenTargetGroupId(s, worktreeId, options?.targetGroupId) ?? undefined
+        resolveEditorOpenTargetGroupId(s, displayWorktreeId, options?.targetGroupId) ?? undefined
       editorItemTargetGroupId = targetGroupId
-      const activeResult = buildEditorActiveResult(s, worktreeId, id)
+      const activeResult = buildEditorActiveResult(s, displayWorktreeId, id)
 
       if (existing) {
         // If opening as non-preview, also pin the existing tab
@@ -1603,7 +1617,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
       // prior behavior.
       let newFiles = s.openFiles
       if (isPreview) {
-        const replaceablePreviewId = getReplaceablePreviewFileId(s, worktreeId, targetGroupId)
+        const replaceablePreviewId = getReplaceablePreviewFileId(
+          s,
+          displayWorktreeId,
+          targetGroupId
+        )
         const existingPreviewIdx = s.openFiles.findIndex((f) => f.id === replaceablePreviewId)
         if (existingPreviewIdx !== -1) {
           const replacedPreview = s.openFiles[existingPreviewIdx]
@@ -1667,12 +1685,14 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
               : f
           )
           // Swap the old preview ID for the new one in the stored tab bar order
-          const prevOrder = s.tabBarOrderByWorktree?.[worktreeId]
+          const prevOrder = s.tabBarOrderByWorktree?.[displayWorktreeId]
           const previewTabBarUpdate = prevOrder
             ? {
                 tabBarOrderByWorktree: {
                   ...s.tabBarOrderByWorktree,
-                  [worktreeId]: prevOrder.map((eid) => (eid === replacedPreview.id ? id : eid))
+                  [displayWorktreeId]: prevOrder.map((eid) =>
+                    eid === replacedPreview.id ? id : eid
+                  )
                 }
               }
             : {}
@@ -1689,10 +1709,10 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
               mirroredFromRuntimeSession: _rmirrored,
               ...snap
             } = replacedPreview
-            const stack = s.recentlyClosedEditorTabsByWorktree[worktreeId] ?? []
+            const stack = s.recentlyClosedEditorTabsByWorktree[displayWorktreeId] ?? []
             nextRecentlyClosed = {
               ...s.recentlyClosedEditorTabsByWorktree,
-              [worktreeId]: [snap as ClosedEditorTabSnapshot, ...stack].slice(
+              [displayWorktreeId]: [snap as ClosedEditorTabSnapshot, ...stack].slice(
                 0,
                 MAX_RECENT_CLOSED_EDITOR_TABS
               )
@@ -1718,12 +1738,12 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
       // order doesn't contain the new file.
       const tabBarUpdate: Record<string, unknown> = {}
       if (s.tabBarOrderByWorktree) {
-        const currentOrder = s.tabBarOrderByWorktree[worktreeId] ?? []
-        const terminalIds = (s.tabsByWorktree?.[worktreeId] ?? []).map((t) => t.id)
+        const currentOrder = s.tabBarOrderByWorktree[displayWorktreeId] ?? []
+        const terminalIds = (s.tabsByWorktree?.[displayWorktreeId] ?? []).map((t) => t.id)
         const editorFileIds = s.openFiles
           .filter((f) => f.worktreeId === worktreeId)
           .map((f) => f.id)
-        const browserIds = (s.browserTabsByWorktree?.[worktreeId] ?? []).map((t) => t.id)
+        const browserIds = (s.browserTabsByWorktree?.[displayWorktreeId] ?? []).map((t) => t.id)
         const allExisting = new Set([...terminalIds, ...editorFileIds, ...browserIds])
         const base = currentOrder.filter((eid) => allExisting.has(eid))
         const inBase = new Set(base)
@@ -1734,7 +1754,10 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
           }
         }
         base.push(id)
-        tabBarUpdate.tabBarOrderByWorktree = { ...s.tabBarOrderByWorktree, [worktreeId]: base }
+        tabBarUpdate.tabBarOrderByWorktree = {
+          ...s.tabBarOrderByWorktree,
+          [displayWorktreeId]: base
+        }
       }
 
       return {
@@ -2414,6 +2437,7 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
   openDiff: (worktreeId, filePath, relativePath, language, staged, options) => {
     const isPreview = options?.preview ?? false
     const runtimeEnvironmentId = options?.runtimeEnvironmentId
+    const displayWorktreeId = resolveEditorDisplayWorktreeId(worktreeId, options)
     let editorItemTargetGroupId = options?.targetGroupId
     let editorItemFileId = ''
     set((s) => {
@@ -2421,7 +2445,7 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
       const id = buildDiffEditorFileId(worktreeId, diffSource, relativePath, runtimeEnvironmentId)
       editorItemFileId = id
       const targetGroupId =
-        resolveEditorOpenTargetGroupId(s, worktreeId, options?.targetGroupId) ?? undefined
+        resolveEditorOpenTargetGroupId(s, displayWorktreeId, options?.targetGroupId) ?? undefined
       editorItemTargetGroupId = targetGroupId
       const existing = s.openFiles.find((f) => f.id === id)
       if (existing) {
@@ -2440,8 +2464,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
           openFiles: s.openFiles.map((f) => (f.id === id ? reopenedDiff : f)),
           activeFileId: id,
           activeTabType: 'editor',
-          activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [worktreeId]: id },
-          activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [worktreeId]: 'editor' }
+          activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [displayWorktreeId]: id },
+          activeTabTypeByWorktree: {
+            ...s.activeTabTypeByWorktree,
+            [displayWorktreeId]: 'editor'
+          }
         }
       }
       const newFile: OpenFile = {
@@ -2460,7 +2487,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
         runtimeEnvironmentId: options?.runtimeEnvironmentId
       }
       if (isPreview) {
-        const replaceablePreviewId = getReplaceablePreviewFileId(s, worktreeId, targetGroupId)
+        const replaceablePreviewId = getReplaceablePreviewFileId(
+          s,
+          displayWorktreeId,
+          targetGroupId
+        )
         const replaceablePreviewIndex = s.openFiles.findIndex(
           (file) => file.id === replaceablePreviewId
         )
@@ -2472,8 +2503,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
             ...removeEditorStateForReplacedPreview(s, s.openFiles[replaceablePreviewIndex].id, id),
             activeFileId: id,
             activeTabType: 'editor',
-            activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [worktreeId]: id },
-            activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [worktreeId]: 'editor' }
+            activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [displayWorktreeId]: id },
+            activeTabTypeByWorktree: {
+              ...s.activeTabTypeByWorktree,
+              [displayWorktreeId]: 'editor'
+            }
           }
         }
       }
@@ -2481,14 +2515,14 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
         openFiles: [...s.openFiles, newFile],
         activeFileId: id,
         activeTabType: 'editor',
-        activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [worktreeId]: id },
-        activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [worktreeId]: 'editor' }
+        activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [displayWorktreeId]: id },
+        activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [displayWorktreeId]: 'editor' }
       }
     })
     void openWorkspaceEditorItem(
       get(),
       editorItemFileId,
-      worktreeId,
+      displayWorktreeId,
       relativePath,
       'diff',
       isPreview,
@@ -2500,10 +2534,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
     const branchCompare = toBranchCompareSnapshot(compare)
     const id = `${worktreeId}::diff::branch::${compare.baseRef}::${branchCompare.compareVersion}::${entry.path}`
     const isPreview = options?.preview ?? false
+    const displayWorktreeId = resolveEditorDisplayWorktreeId(worktreeId, options)
     let editorItemTargetGroupId = options?.targetGroupId
     set((s) => {
       const targetGroupId =
-        resolveEditorOpenTargetGroupId(s, worktreeId, options?.targetGroupId) ?? undefined
+        resolveEditorOpenTargetGroupId(s, displayWorktreeId, options?.targetGroupId) ?? undefined
       editorItemTargetGroupId = targetGroupId
       const existing = s.openFiles.find((f) => f.id === id)
       if (existing) {
@@ -2523,8 +2558,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
           openFiles: s.openFiles.map((f) => (f.id === id ? reopenedDiff : f)),
           activeFileId: id,
           activeTabType: 'editor',
-          activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [worktreeId]: id },
-          activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [worktreeId]: 'editor' }
+          activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [displayWorktreeId]: id },
+          activeTabTypeByWorktree: {
+            ...s.activeTabTypeByWorktree,
+            [displayWorktreeId]: 'editor'
+          }
         }
       }
       const newFile: OpenFile = {
@@ -2544,7 +2582,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
         isPreview: isPreview || undefined
       }
       if (isPreview) {
-        const replaceablePreviewId = getReplaceablePreviewFileId(s, worktreeId, targetGroupId)
+        const replaceablePreviewId = getReplaceablePreviewFileId(
+          s,
+          displayWorktreeId,
+          targetGroupId
+        )
         const replaceablePreviewIndex = s.openFiles.findIndex(
           (file) => file.id === replaceablePreviewId
         )
@@ -2556,8 +2598,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
             ...removeEditorStateForReplacedPreview(s, s.openFiles[replaceablePreviewIndex].id, id),
             activeFileId: id,
             activeTabType: 'editor',
-            activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [worktreeId]: id },
-            activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [worktreeId]: 'editor' }
+            activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [displayWorktreeId]: id },
+            activeTabTypeByWorktree: {
+              ...s.activeTabTypeByWorktree,
+              [displayWorktreeId]: 'editor'
+            }
           }
         }
       }
@@ -2565,14 +2610,14 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
         openFiles: [...s.openFiles, newFile],
         activeFileId: id,
         activeTabType: 'editor',
-        activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [worktreeId]: id },
-        activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [worktreeId]: 'editor' }
+        activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [displayWorktreeId]: id },
+        activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [displayWorktreeId]: 'editor' }
       }
     })
     void openWorkspaceEditorItem(
       get(),
       id,
-      worktreeId,
+      displayWorktreeId,
       entry.path,
       'diff',
       isPreview,
@@ -2584,10 +2629,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
     const commitCompare = toCommitCompareSnapshot(compare)
     const id = `${worktreeId}::diff::commit::${commitCompare.compareVersion}::${entry.path}`
     const isPreview = options?.preview ?? false
+    const displayWorktreeId = resolveEditorDisplayWorktreeId(worktreeId, options)
     let editorItemTargetGroupId = options?.targetGroupId
     set((s) => {
       const targetGroupId =
-        resolveEditorOpenTargetGroupId(s, worktreeId, options?.targetGroupId) ?? undefined
+        resolveEditorOpenTargetGroupId(s, displayWorktreeId, options?.targetGroupId) ?? undefined
       editorItemTargetGroupId = targetGroupId
       const existing = s.openFiles.find((f) => f.id === id)
       if (existing) {
@@ -2607,8 +2653,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
           openFiles: s.openFiles.map((f) => (f.id === id ? reopenedDiff : f)),
           activeFileId: id,
           activeTabType: 'editor',
-          activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [worktreeId]: id },
-          activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [worktreeId]: 'editor' }
+          activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [displayWorktreeId]: id },
+          activeTabTypeByWorktree: {
+            ...s.activeTabTypeByWorktree,
+            [displayWorktreeId]: 'editor'
+          }
         }
       }
       const newFile: OpenFile = {
@@ -2628,7 +2677,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
         isPreview: isPreview || undefined
       }
       if (isPreview) {
-        const replaceablePreviewId = getReplaceablePreviewFileId(s, worktreeId, targetGroupId)
+        const replaceablePreviewId = getReplaceablePreviewFileId(
+          s,
+          displayWorktreeId,
+          targetGroupId
+        )
         const replaceablePreviewIndex = s.openFiles.findIndex(
           (file) => file.id === replaceablePreviewId
         )
@@ -2640,8 +2693,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
             ...removeEditorStateForReplacedPreview(s, s.openFiles[replaceablePreviewIndex].id, id),
             activeFileId: id,
             activeTabType: 'editor',
-            activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [worktreeId]: id },
-            activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [worktreeId]: 'editor' }
+            activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [displayWorktreeId]: id },
+            activeTabTypeByWorktree: {
+              ...s.activeTabTypeByWorktree,
+              [displayWorktreeId]: 'editor'
+            }
           }
         }
       }
@@ -2649,14 +2705,14 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
         openFiles: [...s.openFiles, newFile],
         activeFileId: id,
         activeTabType: 'editor',
-        activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [worktreeId]: id },
-        activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [worktreeId]: 'editor' }
+        activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [displayWorktreeId]: id },
+        activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [displayWorktreeId]: 'editor' }
       }
     })
     void openWorkspaceEditorItem(
       get(),
       id,
-      worktreeId,
+      displayWorktreeId,
       entry.path,
       'diff',
       isPreview,
@@ -2664,7 +2720,7 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
     )
   },
 
-  openAllDiffs: (worktreeId, worktreePath, alternate, areaFilter, entriesSnapshot) => {
+  openAllDiffs: (worktreeId, worktreePath, alternate, areaFilter, entriesSnapshot, options) => {
     const id = areaFilter
       ? `${worktreeId}::all-diffs::uncommitted::${areaFilter}`
       : `${worktreeId}::all-diffs::uncommitted`
@@ -2673,7 +2729,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
           areaFilter
         ] ?? 'All Changes')
       : 'All Changes'
+    const displayWorktreeId = resolveEditorDisplayWorktreeId(worktreeId, options)
+    let editorItemTargetGroupId = options?.targetGroupId
     set((s) => {
+      editorItemTargetGroupId =
+        resolveEditorOpenTargetGroupId(s, displayWorktreeId, options?.targetGroupId) ?? undefined
       const branchSummary = s.gitBranchCompareSummaryByWorktree[worktreeId]
       const branchCompare =
         !areaFilter &&
@@ -2727,8 +2787,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
           ),
           activeFileId: id,
           activeTabType: 'editor',
-          activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [worktreeId]: id },
-          activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [worktreeId]: 'editor' }
+          activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [displayWorktreeId]: id },
+          activeTabTypeByWorktree: {
+            ...s.activeTabTypeByWorktree,
+            [displayWorktreeId]: 'editor'
+          }
         }
       }
       const newFile: OpenFile = {
@@ -2753,22 +2816,31 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
         openFiles: [...s.openFiles, newFile],
         activeFileId: id,
         activeTabType: 'editor',
-        activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [worktreeId]: id },
-        activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [worktreeId]: 'editor' }
+        activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [displayWorktreeId]: id },
+        activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [displayWorktreeId]: 'editor' }
       }
     })
-    void openWorkspaceEditorItem(get(), id, worktreeId, label, 'diff')
+    void openWorkspaceEditorItem(
+      get(),
+      id,
+      displayWorktreeId,
+      label,
+      'diff',
+      undefined,
+      editorItemTargetGroupId
+    )
   },
 
   openConflictFile: (worktreeId, worktreePath, entry, language, options) => {
     const absolutePath = joinPath(worktreePath, entry.path)
     const isPreview = options?.preview ?? false
+    const displayWorktreeId = resolveEditorDisplayWorktreeId(worktreeId, options)
     let editorItemTargetGroupId = options?.targetGroupId
     set((s) => {
       const id = absolutePath
       const conflict = toOpenConflictMetadata(entry)
       const targetGroupId =
-        resolveEditorOpenTargetGroupId(s, worktreeId, options?.targetGroupId) ?? undefined
+        resolveEditorOpenTargetGroupId(s, displayWorktreeId, options?.targetGroupId) ?? undefined
       editorItemTargetGroupId = targetGroupId
       const existing = s.openFiles.find((f) => f.id === id)
       const nextTracked =
@@ -2804,8 +2876,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
           ),
           activeFileId: id,
           activeTabType: 'editor',
-          activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [worktreeId]: id },
-          activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [worktreeId]: 'editor' },
+          activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [displayWorktreeId]: id },
+          activeTabTypeByWorktree: {
+            ...s.activeTabTypeByWorktree,
+            [displayWorktreeId]: 'editor'
+          },
           trackedConflictPathsByWorktree:
             nextTracked === s.trackedConflictPathsByWorktree[worktreeId]
               ? s.trackedConflictPathsByWorktree
@@ -2826,7 +2901,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
       }
 
       if (isPreview) {
-        const replaceablePreviewId = getReplaceablePreviewFileId(s, worktreeId, targetGroupId)
+        const replaceablePreviewId = getReplaceablePreviewFileId(
+          s,
+          displayWorktreeId,
+          targetGroupId
+        )
         const replaceablePreviewIndex = s.openFiles.findIndex(
           (file) => file.id === replaceablePreviewId
         )
@@ -2838,8 +2917,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
             ...removeEditorStateForReplacedPreview(s, s.openFiles[replaceablePreviewIndex].id, id),
             activeFileId: id,
             activeTabType: 'editor',
-            activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [worktreeId]: id },
-            activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [worktreeId]: 'editor' },
+            activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [displayWorktreeId]: id },
+            activeTabTypeByWorktree: {
+              ...s.activeTabTypeByWorktree,
+              [displayWorktreeId]: 'editor'
+            },
             trackedConflictPathsByWorktree:
               nextTracked === s.trackedConflictPathsByWorktree[worktreeId]
                 ? s.trackedConflictPathsByWorktree
@@ -2852,8 +2934,8 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
         openFiles: [...s.openFiles, newFile],
         activeFileId: id,
         activeTabType: 'editor',
-        activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [worktreeId]: id },
-        activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [worktreeId]: 'editor' },
+        activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [displayWorktreeId]: id },
+        activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [displayWorktreeId]: 'editor' },
         trackedConflictPathsByWorktree:
           nextTracked === s.trackedConflictPathsByWorktree[worktreeId]
             ? s.trackedConflictPathsByWorktree
@@ -2863,7 +2945,7 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
     void openWorkspaceEditorItem(
       get(),
       absolutePath,
-      worktreeId,
+      displayWorktreeId,
       entry.path,
       'editor',
       isPreview,
@@ -2974,9 +3056,13 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
   // status. The tab renders from a stored snapshot (entries + timestamp), not
   // from live status on every paint, so the list is stable even if the live
   // unresolved set changes between polls.
-  openConflictReview: (worktreeId, worktreePath, entries, source) => {
+  openConflictReview: (worktreeId, worktreePath, entries, source, options) => {
     const id = `${worktreeId}::conflict-review`
+    const displayWorktreeId = resolveEditorDisplayWorktreeId(worktreeId, options)
+    let editorItemTargetGroupId = options?.targetGroupId
     set((s) => {
+      editorItemTargetGroupId =
+        resolveEditorOpenTargetGroupId(s, displayWorktreeId, options?.targetGroupId) ?? undefined
       const conflictReview: ConflictReviewState = {
         source,
         snapshotTimestamp: Date.now(),
@@ -3002,8 +3088,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
           ),
           activeFileId: id,
           activeTabType: 'editor',
-          activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [worktreeId]: id },
-          activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [worktreeId]: 'editor' }
+          activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [displayWorktreeId]: id },
+          activeTabTypeByWorktree: {
+            ...s.activeTabTypeByWorktree,
+            [displayWorktreeId]: 'editor'
+          }
         }
       }
 
@@ -3022,11 +3111,19 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
         openFiles: [...s.openFiles, newFile],
         activeFileId: id,
         activeTabType: 'editor',
-        activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [worktreeId]: id },
-        activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [worktreeId]: 'editor' }
+        activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [displayWorktreeId]: id },
+        activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [displayWorktreeId]: 'editor' }
       }
     })
-    void openWorkspaceEditorItem(get(), id, worktreeId, 'Conflict Review', 'conflict-review')
+    void openWorkspaceEditorItem(
+      get(),
+      id,
+      displayWorktreeId,
+      'Conflict Review',
+      'conflict-review',
+      undefined,
+      editorItemTargetGroupId
+    )
   },
 
   // Why: the checks sidebar only has room for inline summaries; full logs and
@@ -3175,10 +3272,14 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
     }
   },
 
-  openBranchAllDiffs: (worktreeId, worktreePath, compare, alternate) => {
+  openBranchAllDiffs: (worktreeId, worktreePath, compare, alternate, options) => {
     const branchCompare = toBranchCompareSnapshot(compare)
     const id = `${worktreeId}::all-diffs::branch::${compare.baseRef}::${branchCompare.compareVersion}`
+    const displayWorktreeId = resolveEditorDisplayWorktreeId(worktreeId, options)
+    let editorItemTargetGroupId = options?.targetGroupId
     set((s) => {
+      editorItemTargetGroupId =
+        resolveEditorOpenTargetGroupId(s, displayWorktreeId, options?.targetGroupId) ?? undefined
       const branchEntriesSnapshot = s.gitBranchChangesByWorktree[worktreeId] ?? []
       const existing = s.openFiles.find((f) => f.id === id)
       if (existing) {
@@ -3198,8 +3299,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
           ),
           activeFileId: id,
           activeTabType: 'editor',
-          activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [worktreeId]: id },
-          activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [worktreeId]: 'editor' }
+          activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [displayWorktreeId]: id },
+          activeTabTypeByWorktree: {
+            ...s.activeTabTypeByWorktree,
+            [displayWorktreeId]: 'editor'
+          }
         }
       }
       const newFile: OpenFile = {
@@ -3222,26 +3326,32 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
         openFiles: [...s.openFiles, newFile],
         activeFileId: id,
         activeTabType: 'editor',
-        activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [worktreeId]: id },
-        activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [worktreeId]: 'editor' }
+        activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [displayWorktreeId]: id },
+        activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [displayWorktreeId]: 'editor' }
       }
     })
     void openWorkspaceEditorItem(
       get(),
       id,
-      worktreeId,
+      displayWorktreeId,
       `Branch Changes (${compare.baseRef})`,
-      'diff'
+      'diff',
+      undefined,
+      editorItemTargetGroupId
     )
   },
 
-  openCommitAllDiffs: (worktreeId, worktreePath, compare, entries, subject, message) => {
+  openCommitAllDiffs: (worktreeId, worktreePath, compare, entries, subject, message, options) => {
     const commitCompare = toCommitCompareSnapshot(compare, subject, message)
     const id = `${worktreeId}::all-diffs::commit::${commitCompare.commitOid}`
     const label = subject
       ? `Commit ${commitCompare.compareRef}: ${subject}`
       : `Commit ${commitCompare.compareRef}`
+    const displayWorktreeId = resolveEditorDisplayWorktreeId(worktreeId, options)
+    let editorItemTargetGroupId = options?.targetGroupId
     set((s) => {
+      editorItemTargetGroupId =
+        resolveEditorOpenTargetGroupId(s, displayWorktreeId, options?.targetGroupId) ?? undefined
       const existing = s.openFiles.find((f) => f.id === id)
       if (existing) {
         return {
@@ -3260,8 +3370,11 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
           ),
           activeFileId: id,
           activeTabType: 'editor',
-          activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [worktreeId]: id },
-          activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [worktreeId]: 'editor' }
+          activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [displayWorktreeId]: id },
+          activeTabTypeByWorktree: {
+            ...s.activeTabTypeByWorktree,
+            [displayWorktreeId]: 'editor'
+          }
         }
       }
 
@@ -3284,11 +3397,19 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
         openFiles: [...s.openFiles, newFile],
         activeFileId: id,
         activeTabType: 'editor',
-        activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [worktreeId]: id },
-        activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [worktreeId]: 'editor' }
+        activeFileIdByWorktree: { ...s.activeFileIdByWorktree, [displayWorktreeId]: id },
+        activeTabTypeByWorktree: { ...s.activeTabTypeByWorktree, [displayWorktreeId]: 'editor' }
       }
     })
-    void openWorkspaceEditorItem(get(), id, worktreeId, label, 'diff')
+    void openWorkspaceEditorItem(
+      get(),
+      id,
+      displayWorktreeId,
+      label,
+      'diff',
+      undefined,
+      editorItemTargetGroupId
+    )
   },
 
   // Cursor line tracking

@@ -616,7 +616,7 @@ describe('SourceControl preview row opens', () => {
     )
   })
 
-  it('activates the scoped child worktree before embedded uncommitted View all opens', () => {
+  it('opens embedded uncommitted View all in the parent folder workspace', () => {
     resetState({
       activeWorktreeId: 'folder:folder-1',
       gitStatusByWorktree: {
@@ -628,20 +628,18 @@ describe('SourceControl preview row opens', () => {
 
     clickViewAllButton()
 
-    expect(mocks.calls.activateAndRevealWorktree).toHaveBeenCalledWith(mocks.activeWorktree.id, {
-      revealInSidebar: false,
-      notifyHostRuntime: false
-    })
+    expect(mocks.calls.activateAndRevealWorktree).not.toHaveBeenCalled()
     expect(mocks.calls.openAllDiffs).toHaveBeenCalledWith(
       mocks.activeWorktree.id,
       '/repo/wt',
       undefined,
       'unstaged',
-      [expect.objectContaining({ path: 'src/file.ts' })]
+      [expect.objectContaining({ path: 'src/file.ts' })],
+      { displayWorktreeId: 'folder:folder-1' }
     )
   })
 
-  it('activates the scoped child worktree before embedded branch View all opens', () => {
+  it('opens embedded branch View all in the parent folder workspace', () => {
     resetState({
       activeWorktreeId: 'folder:folder-1',
       gitBranchChangesByWorktree: { [mocks.activeWorktree.id]: [branchEntry()] },
@@ -651,18 +649,17 @@ describe('SourceControl preview row opens', () => {
 
     clickViewAllButton()
 
-    expect(mocks.calls.activateAndRevealWorktree).toHaveBeenCalledWith(mocks.activeWorktree.id, {
-      revealInSidebar: false,
-      notifyHostRuntime: false
-    })
+    expect(mocks.calls.activateAndRevealWorktree).not.toHaveBeenCalled()
     expect(mocks.calls.openBranchAllDiffs).toHaveBeenCalledWith(
       mocks.activeWorktree.id,
       '/repo/wt',
-      expect.objectContaining({ status: 'ready' })
+      expect.objectContaining({ status: 'ready' }),
+      undefined,
+      { displayWorktreeId: 'folder:folder-1' }
     )
   })
 
-  it('activates the scoped child worktree before embedded row opens', () => {
+  it('opens embedded rows in the parent folder workspace', () => {
     resetState({
       activeWorktreeId: 'folder:folder-1',
       gitStatusByWorktree: {
@@ -674,10 +671,7 @@ describe('SourceControl preview row opens', () => {
 
     clickUncommitted('src/file.ts', { ctrlKey: true })
 
-    expect(mocks.calls.activateAndRevealWorktree).toHaveBeenCalledWith(mocks.activeWorktree.id, {
-      revealInSidebar: false,
-      notifyHostRuntime: false
-    })
+    expect(mocks.calls.activateAndRevealWorktree).not.toHaveBeenCalled()
     expect(mocks.calls.createEmptySplitGroup).not.toHaveBeenCalled()
     expect(mocks.calls.openDiff).toHaveBeenCalledWith(
       mocks.activeWorktree.id,
@@ -685,7 +679,7 @@ describe('SourceControl preview row opens', () => {
       'src/file.ts',
       'typescript',
       false,
-      { targetGroupId: undefined, preview: true }
+      { targetGroupId: undefined, preview: true, displayWorktreeId: 'folder:folder-1' }
     )
   })
 })

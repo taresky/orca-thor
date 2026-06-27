@@ -199,7 +199,6 @@ import type { SourceControlAiWriteTarget } from '../../../../shared/source-contr
 import { getWorktreeGitIdentityDisplay } from '@/lib/worktree-git-identity-display'
 import { resolveSourceControlLaunchPlatform } from '@/lib/source-control-launch-platform'
 import { getLocalProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
-import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import {
   loadSessionCommitDrafts,
   saveSessionCommitDrafts
@@ -765,6 +764,9 @@ function SourceControlInner({
   const activeGroupId = useAppStore((s) =>
     !embedded && activeWorktreeId ? s.activeGroupIdByWorktree[activeWorktreeId] : undefined
   )
+  const editorDisplayWorktreeId = embedded
+    ? (globalActiveWorktreeId ?? activeWorktreeId)
+    : undefined
   const worktreeMap = useWorktreeMap()
   const rightSidebarTab = useAppStore((s) => s.rightSidebarTab)
   const activeRepo = useAppStore((s) => {
@@ -886,19 +888,17 @@ function SourceControlInner({
   const setScrollToDiffCommentId = useAppStore((s) => s.setScrollToDiffCommentId)
   const setRightSidebarOpen = useAppStore((s) => s.setRightSidebarOpen)
   const setRightSidebarTab = useAppStore((s) => s.setRightSidebarTab)
-  const activateEmbeddedWorktreeForEditorOpen = useCallback((): boolean => {
-    if (!embedded || !activeWorktreeId) {
-      return true
-    }
-    // Why: editor groups are worktree-scoped today; embedded folder sections
-    // must activate the child before opening files/diffs so tabs land visibly.
-    return (
-      activateAndRevealWorktree(activeWorktreeId, {
-        revealInSidebar: false,
-        notifyHostRuntime: false
-      }) !== false
-    )
-  }, [activeWorktreeId, embedded])
+  const getEmbeddedEditorOpenOptions = useCallback(
+    <T extends Record<string, unknown>>(options?: T): T & { displayWorktreeId?: string } => {
+      if (!embedded || !editorDisplayWorktreeId) {
+        return (options ?? {}) as T & { displayWorktreeId?: string }
+      }
+      // Why: embedded child Source Control opens child-owned files in the
+      // parent folder workspace instead of switching the visible workspace.
+      return { ...(options ?? ({} as T)), displayWorktreeId: editorDisplayWorktreeId }
+    },
+    [editorDisplayWorktreeId, embedded]
+  )
   // Why: pass activeWorktreeId directly (even when null/undefined) so the
   // slice's getDiffComments returns its stable EMPTY_COMMENTS sentinel. An
   // inline `[]` fallback would allocate a new array each store update, break
@@ -4241,9 +4241,6 @@ function SourceControlInner({
       if (!activeWorktreeId || !worktreePath) {
         return
       }
-      if (!activateEmbeddedWorktreeForEditorOpen()) {
-        return
-      }
       const targetGroupId = resolveSplitTargetGroupId(event)
       const openAsPreview = shouldOpenSourceControlRowAsPreview(event, targetGroupId)
       if (entry.conflictKind && entry.conflictStatus) {
@@ -4252,7 +4249,8 @@ function SourceControlInner({
         }
         openConflictFile(activeWorktreeId, worktreePath, entry, detectLanguage(entry.path), {
           targetGroupId,
-          preview: openAsPreview
+          preview: openAsPreview,
+          ...getEmbeddedEditorOpenOptions()
         })
         return
       }
@@ -4275,14 +4273,15 @@ function SourceControlInner({
             language,
             mode: 'edit'
           },
-          { targetGroupId, preview: openAsPreview }
+          getEmbeddedEditorOpenOptions({ targetGroupId, preview: openAsPreview })
         )
         setEditorViewMode(filePath, 'changes')
         return
       }
       openDiff(activeWorktreeId, filePath, entry.path, language, entry.area === 'staged', {
         targetGroupId,
-        preview: openAsPreview
+        preview: openAsPreview,
+        ...getEmbeddedEditorOpenOptions()
       })
     },
     [
@@ -4294,7 +4293,7 @@ function SourceControlInner({
       openDiff,
       openFile,
       setEditorViewMode,
-      activateEmbeddedWorktreeForEditorOpen
+      getEmbeddedEditorOpenOptions
     ]
   )
 
@@ -4864,9 +4863,6 @@ function SourceControlInner({
       ) {
         return
       }
-      if (!activateEmbeddedWorktreeForEditorOpen()) {
-        return
-      }
       const targetGroupId = resolveSplitTargetGroupId(event)
       openBranchDiff(
         activeWorktreeId,
@@ -4874,7 +4870,10 @@ function SourceControlInner({
         entry,
         branchSummary,
         detectLanguage(entry.path),
-        { targetGroupId, preview: shouldOpenSourceControlRowAsPreview(event, targetGroupId) }
+        getEmbeddedEditorOpenOptions({
+          targetGroupId,
+          preview: shouldOpenSourceControlRowAsPreview(event, targetGroupId)
+        })
       )
     },
     [
@@ -4883,7 +4882,7 @@ function SourceControlInner({
       openBranchDiff,
       resolveSplitTargetGroupId,
       worktreePath,
-      activateEmbeddedWorktreeForEditorOpen
+      getEmbeddedEditorOpenOptions
     ]
   )
 
@@ -4894,7 +4893,7 @@ function SourceControlInner({
       activeRepoSettings,
       resolveSplitTargetGroupId,
       getConnectionIdForWorktree: getScopedConnectionId,
-      activateWorktreeForEditorOpen: activateEmbeddedWorktreeForEditorOpen
+      getEditorOpenOptions: getEmbeddedEditorOpenOptions
     })
 
   // Why: a note's filePath is the same relative path used by GitStatusEntry /
@@ -4913,9 +4912,6 @@ function SourceControlInner({
       if (!activeWorktreeId || !worktreePath) {
         return
       }
-      if (!activateEmbeddedWorktreeForEditorOpen()) {
-        return
-      }
       const filePath = comment.filePath
       const commentId = comment.id
       // Defensively clear any dangling prior scroll request before routing
@@ -4927,13 +4923,16 @@ function SourceControlInner({
         const language = detectLanguage(filePath)
         setEditorViewMode(absPath, 'edit')
         setMarkdownViewMode(absPath, 'source')
-        openFile({
-          filePath: absPath,
-          relativePath: filePath,
-          worktreeId: activeWorktreeId,
-          language,
-          mode: 'edit'
-        })
+        openFile(
+          {
+            filePath: absPath,
+            relativePath: filePath,
+            worktreeId: activeWorktreeId,
+            language,
+            mode: 'edit'
+          },
+          getEmbeddedEditorOpenOptions()
+        )
         setPendingEditorReveal(null)
         requestSourceControlEditorRevealFrame(pendingCommentEditorRevealFrameIdsRef, () => {
           requestSourceControlEditorRevealFrame(pendingCommentEditorRevealFrameIdsRef, () => {
@@ -4977,13 +4976,16 @@ function SourceControlInner({
       // via the editor's Edit/Changes toggle.
       const absPath = joinPath(worktreePath, filePath)
       const language = detectLanguage(filePath)
-      openFile({
-        filePath: absPath,
-        relativePath: filePath,
-        worktreeId: activeWorktreeId,
-        language,
-        mode: 'edit'
-      })
+      openFile(
+        {
+          filePath: absPath,
+          relativePath: filePath,
+          worktreeId: activeWorktreeId,
+          language,
+          mode: 'edit'
+        },
+        getEmbeddedEditorOpenOptions()
+      )
       if (commentId) {
         setEditorViewMode(absPath, 'changes')
         setScrollToDiffCommentId(commentId)
@@ -5002,7 +5004,7 @@ function SourceControlInner({
       setMarkdownViewMode,
       setPendingEditorReveal,
       worktreePath,
-      activateEmbeddedWorktreeForEditorOpen
+      getEmbeddedEditorOpenOptions
     ]
   )
 
@@ -5535,14 +5537,12 @@ function SourceControlInner({
                   if (!activeWorktreeId || !worktreePath) {
                     return
                   }
-                  if (!activateEmbeddedWorktreeForEditorOpen()) {
-                    return
-                  }
                   openConflictReview(
                     activeWorktreeId,
                     worktreePath,
                     unresolvedConflictReviewEntries,
-                    'live-summary'
+                    'live-summary',
+                    getEmbeddedEditorOpenOptions()
                   )
                 }}
               />
@@ -5823,15 +5823,13 @@ function SourceControlInner({
                                 if (!activeWorktreeId || !worktreePath) {
                                   return
                                 }
-                                if (!activateEmbeddedWorktreeForEditorOpen()) {
-                                  return
-                                }
                                 if (sectionViewAction.kind === 'conflict-review') {
                                   openConflictReview(
                                     activeWorktreeId,
                                     worktreePath,
                                     sectionViewAction.entries,
-                                    'live-summary'
+                                    'live-summary',
+                                    getEmbeddedEditorOpenOptions()
                                   )
                                 } else {
                                   openAllDiffs(
@@ -5839,7 +5837,8 @@ function SourceControlInner({
                                     worktreePath,
                                     undefined,
                                     sectionViewAction.area,
-                                    sectionViewAction.entries
+                                    sectionViewAction.entries,
+                                    getEmbeddedEditorOpenOptions()
                                   )
                                 }
                               }}
@@ -5962,10 +5961,13 @@ function SourceControlInner({
                     onClick={(e) => {
                       e.stopPropagation()
                       if (activeWorktreeId && worktreePath && branchSummary) {
-                        if (!activateEmbeddedWorktreeForEditorOpen()) {
-                          return
-                        }
-                        openBranchAllDiffs(activeWorktreeId, worktreePath, branchSummary)
+                        openBranchAllDiffs(
+                          activeWorktreeId,
+                          worktreePath,
+                          branchSummary,
+                          undefined,
+                          getEmbeddedEditorOpenOptions()
+                        )
                       }
                     }}
                   >

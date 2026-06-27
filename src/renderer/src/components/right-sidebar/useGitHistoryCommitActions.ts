@@ -40,14 +40,16 @@ export function useGitHistoryCommitActions({
   activeRepoSettings,
   resolveSplitTargetGroupId,
   getConnectionIdForWorktree,
-  activateWorktreeForEditorOpen
+  getEditorOpenOptions
 }: {
   activeWorktreeId: string | null | undefined
   worktreePath: string | null
   activeRepoSettings: RuntimeGitContext['settings']
   resolveSplitTargetGroupId: (event?: SourceControlRowOpenEvent) => string | undefined
   getConnectionIdForWorktree?: (worktreeId: string | null | undefined) => string | undefined
-  activateWorktreeForEditorOpen?: () => boolean
+  getEditorOpenOptions?: <T extends Record<string, unknown>>(
+    options?: T
+  ) => T & { displayWorktreeId?: string }
 }): GitHistoryCommitActions {
   const openCommitAllDiffs = useAppStore((s) => s.openCommitAllDiffs)
   const openCommitDiff = useAppStore((s) => s.openCommitDiff)
@@ -115,16 +117,14 @@ export function useGitHistoryCommitActions({
         if (!cached) {
           return
         }
-        if (activateWorktreeForEditorOpen && !activateWorktreeForEditorOpen()) {
-          return
-        }
         openCommitAllDiffs(
           activeWorktreeId,
           worktreePath,
           cached.summary,
           cached.entries,
           item.subject,
-          item.message
+          item.message,
+          getEditorOpenOptions?.()
         )
       } catch (error) {
         toast.error(
@@ -137,13 +137,7 @@ export function useGitHistoryCommitActions({
         )
       }
     },
-    [
-      activateWorktreeForEditorOpen,
-      activeWorktreeId,
-      loadCommitFiles,
-      openCommitAllDiffs,
-      worktreePath
-    ]
+    [getEditorOpenOptions, activeWorktreeId, loadCommitFiles, openCommitAllDiffs, worktreePath]
   )
 
   const openCommitFile = useCallback(
@@ -161,10 +155,8 @@ export function useGitHistoryCommitActions({
       if (!cached) {
         return
       }
-      if (activateWorktreeForEditorOpen && !activateWorktreeForEditorOpen()) {
-        return
-      }
       const targetGroupId = resolveSplitTargetGroupId(event)
+      const preview = shouldOpenSourceControlRowAsPreview(event, targetGroupId)
       openCommitDiff(
         activeWorktreeId,
         worktreePath,
@@ -178,11 +170,11 @@ export function useGitHistoryCommitActions({
           message: item.message
         },
         detectLanguage(entry.path),
-        { targetGroupId, preview: shouldOpenSourceControlRowAsPreview(event, targetGroupId) }
+        getEditorOpenOptions?.({ targetGroupId, preview }) ?? { targetGroupId, preview }
       )
     },
     [
-      activateWorktreeForEditorOpen,
+      getEditorOpenOptions,
       activeWorktreeId,
       openCommitDiff,
       resolveSplitTargetGroupId,
