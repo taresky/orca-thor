@@ -1712,6 +1712,17 @@ describe('createGitHubSlice.fetchPRForBranch', () => {
           connectionId: 'ssh-1'
         }
       ],
+      worktreesByRepo: {
+        'repo-1': [
+          makePRRefreshWorktree({
+            id: 'wt-direct-refresh-head',
+            repoId: 'repo-1',
+            path: `${repoPath}/worktrees/direct-refresh`,
+            branch,
+            head: 'direct-head-oid'
+          })
+        ]
+      },
       prCache: {
         [`repo-1::${branch}`]: {
           data: pr,
@@ -1726,7 +1737,10 @@ describe('createGitHubSlice.fetchPRForBranch', () => {
     })
 
     await expect(
-      store.getState().fetchPRForBranch(repoPath, branch, { force: true })
+      store.getState().fetchPRForBranch(repoPath, branch, {
+        force: true,
+        worktreeId: 'wt-direct-refresh-head'
+      })
     ).resolves.toMatchObject({ number: 44 })
     expect(mockApi.gh.prForBranch).not.toHaveBeenCalled()
     expect(mockApi.gh.refreshPRNow).toHaveBeenCalledWith({
@@ -1735,6 +1749,7 @@ describe('createGitHubSlice.fetchPRForBranch', () => {
         repoPath,
         branch,
         cacheKey: `ssh:ssh-1::repo-1::${branch}`,
+        worktreeHead: 'direct-head-oid',
         connectionId: 'ssh-1'
       })
     })

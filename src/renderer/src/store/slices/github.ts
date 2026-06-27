@@ -2957,6 +2957,9 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
                 : ({ kind: 'no-pr', fetchedAt: Date.now() } as const)
             )
           : await (async () => {
+              const requestWorktree = options?.worktreeId
+                ? findWorktreeById(get(), options.worktreeId)
+                : null
               const candidate: GitHubPRRefreshCandidate = {
                 repoId: repoId ?? '',
                 repoPath,
@@ -2964,6 +2967,7 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
                 branch,
                 cacheKey,
                 worktreeId: options?.worktreeId,
+                worktreeHead: requestWorktree?.head ?? null,
                 linkedPRNumber,
                 fallbackPRNumber,
                 fallbackPRSource,

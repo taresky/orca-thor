@@ -236,7 +236,12 @@ function validateCandidate(
   if (candidate.connectionId && candidate.connectionState === 'disconnected') {
     return 'disconnected'
   }
-  if (!candidate.branch && typeof candidate.linkedPRNumber !== 'number') {
+  if (
+    !candidate.branch &&
+    typeof candidate.linkedPRNumber !== 'number' &&
+    typeof candidate.fallbackPRNumber !== 'number' &&
+    !candidate.worktreeHead
+  ) {
     return 'fresh'
   }
   return null
@@ -463,10 +468,9 @@ function isMergeabilityPendingOutcome(outcome: PRRefreshOutcome): boolean {
 }
 
 function backgroundRefreshBuckets(): ('core' | 'graphql')[] {
-  // Why: branch refreshes prefer REST but can still fall back to `gh pr list`
-  // when local head-owner metadata is unavailable. Guard both buckets until the
-  // client exposes an exact per-lookup cost plan.
-  return ['core', 'graphql']
+  // Why: branch misses can now spend core on both branch and merge-commit REST
+  // probes; keep the coarse queue budget conservative until lookup cost is exact.
+  return ['core', 'core', 'graphql']
 }
 
 function noteBackgroundStart(): void {

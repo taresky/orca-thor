@@ -3,14 +3,19 @@ request timestamps, and follow-up scheduling against shared module state. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GitHubPRRefreshCandidate, PRInfo } from '../../shared/types'
 
-const { sendMock, getAllWebContentsMock, getPRForBranchOutcomeMock, getRateLimitMock } = vi.hoisted(
-  () => ({
-    sendMock: vi.fn(),
-    getAllWebContentsMock: vi.fn(),
-    getPRForBranchOutcomeMock: vi.fn(),
-    getRateLimitMock: vi.fn()
-  })
-)
+const {
+  sendMock,
+  getAllWebContentsMock,
+  getPRForBranchOutcomeMock,
+  getRateLimitMock,
+  noteRateLimitSpendMock
+} = vi.hoisted(() => ({
+  sendMock: vi.fn(),
+  getAllWebContentsMock: vi.fn(),
+  getPRForBranchOutcomeMock: vi.fn(),
+  getRateLimitMock: vi.fn(),
+  noteRateLimitSpendMock: vi.fn()
+}))
 
 vi.mock('electron', () => ({
   webContents: {
@@ -24,7 +29,7 @@ vi.mock('./client', () => ({
 
 vi.mock('./rate-limit', () => ({
   getRateLimit: getRateLimitMock,
-  noteRateLimitSpend: vi.fn(),
+  noteRateLimitSpend: noteRateLimitSpendMock,
   rateLimitGuard: vi.fn(() => ({ blocked: false }))
 }))
 
@@ -80,6 +85,7 @@ describe('pr-refresh-coordinator', () => {
     getAllWebContentsMock.mockReset()
     getPRForBranchOutcomeMock.mockReset()
     getRateLimitMock.mockReset()
+    noteRateLimitSpendMock.mockReset()
     getAllWebContentsMock.mockReturnValue([
       {
         id: 1,
@@ -768,6 +774,38 @@ describe('pr-refresh-coordinator', () => {
       null,
       { currentHeadOid: '2222222' }
     )
+  })
+
+  it('refreshes empty-branch candidates when a worktree HEAD hint exists', async () => {
+    const { refreshPRNow } = await import('./pr-refresh-coordinator')
+    getPRForBranchOutcomeMock.mockResolvedValueOnce({
+      kind: 'no-pr',
+      fetchedAt: Date.now()
+    })
+
+    await refreshPRNow(makeCandidate({ branch: '', worktreeHead: 'abcdef1' }))
+
+    expect(getPRForBranchOutcomeMock).toHaveBeenCalledWith('/repo', '', null, null, null, {
+      currentHeadOid: 'abcdef1'
+    })
+  })
+
+  it('accounts for the extra core probe on background PR refreshes', async () => {
+    const { reportVisiblePRRefreshCandidates } = await import('./pr-refresh-coordinator')
+    getPRForBranchOutcomeMock.mockResolvedValueOnce({
+      kind: 'no-pr',
+      fetchedAt: Date.now()
+    })
+
+    reportVisiblePRRefreshCandidates([makeCandidate({ worktreeHead: 'abcdef1' })], 1, 1)
+    await vi.runOnlyPendingTimersAsync()
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    expect(noteRateLimitSpendMock.mock.calls.map(([bucket]) => bucket)).toEqual([
+      'core',
+      'core',
+      'graphql'
+    ])
   })
 
   it('preserves coalesced aliases across visible follow-up refreshes', async () => {
