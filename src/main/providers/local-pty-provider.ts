@@ -237,6 +237,15 @@ function resolveForegroundFallbackProcess(
   return shellName ?? processName ?? null
 }
 
+/** Basename of the spawned shell path, parsed for the *target* platform rather
+ *  than the host's native separator. Why: on Windows the shell path uses `\`,
+ *  but the POSIX `basename` (used when orchestrating from a non-Windows host or
+ *  CI) would not split it and would store the whole `C:\...\powershell.exe`
+ *  path as the shell name — breaking the foreground/child-process comparison. */
+function getSpawnedShellName(shellPath: string): string {
+  return process.platform === 'win32' ? pathWin32.basename(shellPath) : basename(shellPath)
+}
+
 /**
  * Disposes the native PTY handle while avoiding recycled-pid signals on POSIX.
  */
@@ -659,7 +668,7 @@ export class LocalPtyProvider implements IPtyProvider {
 
     const proc = spawnResult.process
     ptyProcesses.set(id, proc)
-    ptyShellName.set(id, basename(shellPath))
+    ptyShellName.set(id, getSpawnedShellName(shellPath))
     ptyAgentForegroundContextPaths.set(
       id,
       getAgentForegroundContextPaths({ cwd: args.cwd, worktreeId: args.worktreeId })
