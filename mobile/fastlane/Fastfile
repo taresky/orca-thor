@@ -30,18 +30,15 @@ BUNDLE_ID = "com.stably.orca.mobile"
 TESTFLIGHT_GROUPS = ["peeps"].freeze
 DEFAULT_TESTFLIGHT_CHANGELOG = "Latest Orca Mobile updates and fixes.".freeze
 
-# App Store version states in which the version "train" no longer accepts new
-# TestFlight build uploads (altool rejects with 90186 "train ... is closed").
-# Once a version has been submitted/approved/released, builds must go under a
-# higher marketing version. PROCESSING_FOR_APP_STORE / IN_REVIEW are included
-# conservatively: a build is already committed to that train.
+# App Store version states in which the version "train" is terminally closed to
+# new TestFlight build uploads (altool rejects with 90186 "train ... is
+# closed"). Only approved/released/removed states qualify: a version that is
+# merely IN_REVIEW / WAITING_FOR_REVIEW / PROCESSING_FOR_APP_STORE still accepts
+# TestFlight builds, so bumping on those would break normal beta iteration.
 CLOSED_APP_STORE_STATES = %w[
   READY_FOR_SALE
   PENDING_DEVELOPER_RELEASE
   PENDING_APPLE_RELEASE
-  PROCESSING_FOR_APP_STORE
-  IN_REVIEW
-  WAITING_FOR_REVIEW
   REPLACED_WITH_NEW_VERSION
   REMOVED_FROM_SALE
   DEVELOPER_REMOVED_FROM_SALE
@@ -91,6 +88,8 @@ end
 # Returns true when `version`'s App Store train is closed to new build uploads.
 # app_store_connect_api_key (set_spaceship_token: true, the default) has already
 # authenticated Spaceship::ConnectAPI globally, so no extra auth is needed here.
+# On any API error, degrade to "open": the upload then either succeeds or fails
+# with the same 90186 we have always seen — never worse than today's behavior.
 def version_train_closed?(version)
   app = Spaceship::ConnectAPI::App.find(BUNDLE_ID)
   return false unless app
@@ -98,6 +97,9 @@ def version_train_closed?(version)
   app
     .get_app_store_versions(filter: { versionString: version })
     .any? { |app_store_version| CLOSED_APP_STORE_STATES.include?(app_store_version.app_store_state) }
+rescue StandardError => error
+  UI.important("Could not determine App Store state for #{version} (#{error.message}); assuming open.")
+  false
 end
 
 def testflight_changelog
