@@ -240,15 +240,6 @@ export function AutomationEditorDialogFooter({
               toggleItemClassName={modeToggleItemClassName}
               onDraftChange={onDraftChange}
             />
-            <AutomationSetupDecisionField
-              createTarget={isHermesTarget ? 'hermes' : 'orca'}
-              draft={draft}
-              repos={repos}
-              projectHostSetups={projectHostSetups}
-              yamlHooks={automationYamlHooksByRepoKey[getAutomationHooksCacheKey(draft.projectId)]}
-              onDraftChange={onDraftChange}
-              onSetupDecisionTouched={onSetupDecisionTouched}
-            />
             {isHermesTarget ? null : scheduleField}
             <AutomationMissedRunGraceField
               draft={draft}
@@ -257,6 +248,18 @@ export function AutomationEditorDialogFooter({
               onDraftChange={onDraftChange}
             />
           </div>
+          {/* Why: a full-width row below the columned controls — the setup
+              switch is a per-automation preference, not a peer of the compact
+              column pickers, so it reads cleaner spanning the dialog. */}
+          <AutomationSetupDecisionField
+            createTarget={isHermesTarget ? 'hermes' : 'orca'}
+            draft={draft}
+            repos={repos}
+            projectHostSetups={projectHostSetups}
+            yamlHooks={automationYamlHooksByRepoKey[getAutomationHooksCacheKey(draft.projectId)]}
+            onDraftChange={onDraftChange}
+            onSetupDecisionTouched={onSetupDecisionTouched}
+          />
         </div>
       </div>
       <div className="mt-4 flex justify-end gap-2">
