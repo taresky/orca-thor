@@ -3242,6 +3242,15 @@ export function connectPanePty(
         // clearing on restore loses scroll-up after a hidden->visible return.
         // Mirrors the attach-time guard in pty-transport.ts.
         writeReplayData('\x1b[2J\x1b[3J\x1b[H')
+      } else {
+        // Why: skip only \x1b[3J (the scrollback wipe) for alt-screen, but
+        // still erase the visible viewport with \x1b[2J before replay. The
+        // SerializeAddon repaint is minimal — it emits non-erasing cursor
+        // moves for default-background blanks and omits fully-blank rows — and
+        // \x1b[?1049h is a no-op when xterm is already on the alt buffer, so
+        // without this erase, cells the TUI blanked while hidden keep their
+        // stale pre-hide glyphs behind the restored frame.
+        writeReplayData('\x1b[2J\x1b[H')
       }
       writeReplayData(snapshot.data)
       writeReplayData(POST_REPLAY_LIVE_SNAPSHOT_RESET)

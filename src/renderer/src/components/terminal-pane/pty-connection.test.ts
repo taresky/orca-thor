@@ -6158,12 +6158,17 @@ describe('connectPanePty', () => {
     await flushAsyncTicks(20)
 
     expect(getMainBufferSnapshot).toHaveBeenCalledWith('pty-id', { scrollbackRows: 5000 })
-    // Why: the destructive clear wipes xterm's scrollback. Alt-screen TUIs keep
-    // their history in xterm, so restoring one must NOT emit the clear.
+    // Why: \x1b[3J wipes xterm's scrollback. Alt-screen TUIs keep their history
+    // in xterm, so restoring one must NOT emit the scrollback-clearing form.
     expect(pane.terminal.write).not.toHaveBeenCalledWith(
       '\x1b[2J\x1b[3J\x1b[H',
       expect.any(Function)
     )
+    // Why: but the visible viewport must still be erased before replay.
+    // The SerializeAddon repaint is minimal (non-erasing moves for blank cells,
+    // omitted blank rows), so without \x1b[2J, cells the TUI blanked while the
+    // pane was hidden keep their stale pre-hide glyphs behind the restored frame.
+    expect(pane.terminal.write).toHaveBeenCalledWith('\x1b[2J\x1b[H', expect.any(Function))
     expect(pane.terminal.write).toHaveBeenCalledWith('altscreen-snapshot\r\n', expect.any(Function))
     disposable.dispose()
   })
