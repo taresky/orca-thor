@@ -2224,13 +2224,14 @@ export function registerPtyHandlers(
       lastTitle?: string
       seq?: number
       source?: 'headless' | 'renderer'
+      alternateScreen?: boolean
     } | null> => {
       if (!runtime || typeof args?.id !== 'string' || args.id.length === 0) {
         return null
       }
       const scrollbackRows = normalizeSnapshotScrollbackRows(args.opts?.scrollbackRows)
       try {
-        return await runtime.serializeMainTerminalBuffer(args.id, { scrollbackRows })
+        return await runtime.serializeHiddenOutputRecoveryBuffer(args.id, { scrollbackRows })
       } catch {
         return null
       }
