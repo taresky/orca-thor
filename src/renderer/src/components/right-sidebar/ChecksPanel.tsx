@@ -429,6 +429,7 @@ export default function ChecksPanel(): React.JSX.Element {
   const commentsRef = useRef<PRComment[]>([])
   const [emptyRefreshing, setEmptyRefreshing] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const refreshInFlightRef = useRef(false)
   const [conflictDetailsRefreshing, setConflictDetailsRefreshing] = useState(false)
   const createPrInFlightRef = useRef<string | null>(null)
   const [isCreatingPr, setIsCreatingPr] = useState(false)
@@ -593,6 +594,7 @@ export default function ChecksPanel(): React.JSX.Element {
     pollIntervalRef.current = 30_000
     prevChecksRef.current = ''
     conflictSummaryRefreshKeyRef.current = null
+    refreshInFlightRef.current = false
     refreshRequestKeyRef.current = null
     if (gitStatusSnapshotRetryTimerRef.current) {
       clearTimeout(gitStatusSnapshotRetryTimerRef.current)
@@ -1848,6 +1850,12 @@ export default function ChecksPanel(): React.JSX.Element {
     if (!repo || !branch) {
       return
     }
+    if (refreshInFlightRef.current) {
+      return
+    }
+    // Why: React has not disabled the button until the next render, so a rapid
+    // double-click must not start duplicate git status/upstream subprocesses.
+    refreshInFlightRef.current = true
     const initialRequestKey = checksPanelAsyncResultKey(
       prCacheKey,
       branch,
@@ -2125,6 +2133,7 @@ export default function ChecksPanel(): React.JSX.Element {
         currentRequest: isCurrentRequest()
       })
       if (isCurrentRequest()) {
+        refreshInFlightRef.current = false
         setIsRefreshing(false)
       }
     }
