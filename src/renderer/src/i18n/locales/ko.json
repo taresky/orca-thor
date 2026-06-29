@@ -2496,7 +2496,9 @@
             "couldNotReadPayload": "세션 드래그 데이터를 읽을 수 없습니다.",
             "localWorkspacesOnly": "기록에서 재개하기는 로컬 워크스페이스에서만 사용할 수 있습니다.",
             "openLocalWorkspace": "세션을 재개하기 전에 로컬 워크스페이스를 여세요.",
-            "sessionQueued": "세션이 대기열에 추가됨"
+            "sessionQueued": "세션이 대기열에 추가됨",
+            "runtimeWorkspacesUnsupported": "Resume from history is not available in runtime-hosted workspaces.",
+            "openSupportedWorkspace": "Open a local or SSH workspace before resuming a session."
           },
           "TabGroupDropOverlay": {
             "paneColumnLabel": "새 분할"
@@ -9207,7 +9209,10 @@
             "agents": "에이전트",
             "sessionsShownCompact": "{{value0}} 표시됨",
             "originalPaneUnavailable": "원래 창은 더 이상 사용할 수 없습니다.",
-            "worktreeUnavailable": "워크트리는 더 이상 사용할 수 없습니다."
+            "worktreeUnavailable": "워크트리는 더 이상 사용할 수 없습니다.",
+            "runtimeBrowseLocalHistory": "Runtime-hosted workspaces can browse local history. Resume actions are available in local and SSH workspaces.",
+            "runtimeWorkspacesUnsupported": "Resume from history is not available in runtime-hosted workspaces.",
+            "openSupportedWorkspace": "Open a local or SSH workspace before resuming a session."
           },
           "AiVaultPanelControls": {
             "scanningSessions": "세션 스캔 중",

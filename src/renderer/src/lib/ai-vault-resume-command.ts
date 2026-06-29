@@ -16,6 +16,8 @@ import type { AppState } from '@/store/types'
 import { getLocalProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
 import { CLIENT_PLATFORM } from '@/lib/new-workspace'
 import { buildAgentResumeStartupPlan } from '@/lib/tui-agent-startup'
+import { getExecutionHostIdForWorktree } from '@/lib/worktree-runtime-owner'
+import { parseExecutionHostId } from '../../../shared/execution-host'
 
 type AiVaultResumeCommandSession = Pick<AiVaultSession, 'agent' | 'sessionId' | 'cwd' | 'codexHome'>
 
@@ -28,7 +30,14 @@ export type AiVaultResumeStartup = {
 export function buildAiVaultResumeCommandForWorktree(args: {
   state: Pick<
     AppState,
-    'activeRepoId' | 'activeWorktreeId' | 'projects' | 'repos' | 'settings' | 'worktreesByRepo'
+    | 'activeRepoId'
+    | 'activeWorktreeId'
+    | 'folderWorkspaces'
+    | 'projectGroups'
+    | 'projects'
+    | 'repos'
+    | 'settings'
+    | 'worktreesByRepo'
   >
   worktreeId?: string | null
   session: AiVaultResumeCommandSession
@@ -40,7 +49,14 @@ export function buildAiVaultResumeCommandForWorktree(args: {
 export function buildAiVaultResumeStartupForWorktree(args: {
   state: Pick<
     AppState,
-    'activeRepoId' | 'activeWorktreeId' | 'projects' | 'repos' | 'settings' | 'worktreesByRepo'
+    | 'activeRepoId'
+    | 'activeWorktreeId'
+    | 'folderWorkspaces'
+    | 'projectGroups'
+    | 'projects'
+    | 'repos'
+    | 'settings'
+    | 'worktreesByRepo'
   >
   worktreeId?: string | null
   session: AiVaultResumeCommandSession
@@ -107,10 +123,23 @@ function getAiVaultResumeCodexHome(
 export function getAiVaultResumePlatform(
   state: Pick<
     AppState,
-    'activeRepoId' | 'activeWorktreeId' | 'projects' | 'repos' | 'settings' | 'worktreesByRepo'
+    | 'activeRepoId'
+    | 'activeWorktreeId'
+    | 'folderWorkspaces'
+    | 'projectGroups'
+    | 'projects'
+    | 'repos'
+    | 'settings'
+    | 'worktreesByRepo'
   >,
   worktreeId?: string | null
 ): NodeJS.Platform {
+  const targetWorktreeId = worktreeId ?? state.activeWorktreeId
+  const executionHost = parseExecutionHostId(getExecutionHostIdForWorktree(state, targetWorktreeId))
+  if (executionHost?.kind === 'ssh' || executionHost?.kind === 'runtime') {
+    return 'linux'
+  }
+
   const projectRuntime = getLocalProjectExecutionRuntimeContext(state, worktreeId, CLIENT_PLATFORM)
   if (projectRuntime?.status === 'repair-required') {
     return projectRuntime.repair.preferredRuntime.kind === 'wsl' ? 'linux' : CLIENT_PLATFORM
@@ -119,7 +148,6 @@ export function getAiVaultResumePlatform(
     return 'linux'
   }
 
-  const targetWorktreeId = worktreeId ?? state.activeWorktreeId
   const worktree = targetWorktreeId
     ? Object.values(state.worktreesByRepo ?? {})
         .flat()

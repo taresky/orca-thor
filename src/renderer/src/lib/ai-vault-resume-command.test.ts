@@ -12,16 +12,27 @@ vi.mock('@/lib/new-workspace', () => ({
 
 type RuntimePreference = { kind: 'windows-host' } | { kind: 'wsl'; distro: string }
 
+type AiVaultResumeCommandState = Pick<
+  AppState,
+  | 'activeRepoId'
+  | 'activeWorktreeId'
+  | 'folderWorkspaces'
+  | 'projectGroups'
+  | 'projects'
+  | 'repos'
+  | 'settings'
+  | 'worktreesByRepo'
+>
+
 function makeState(args: {
   worktreePath: string
   localWindowsRuntimePreference?: RuntimePreference
-}): Pick<
-  AppState,
-  'activeRepoId' | 'activeWorktreeId' | 'projects' | 'repos' | 'settings' | 'worktreesByRepo'
-> {
+}): AiVaultResumeCommandState {
   return {
     activeRepoId: 'repo-1',
     activeWorktreeId: 'repo-1::worktree-1',
+    folderWorkspaces: [],
+    projectGroups: [],
     repos: [{ id: 'repo-1', path: 'C:\\Users\\alice\\repo' }],
     projects: [
       {
@@ -46,10 +57,7 @@ function makeState(args: {
         }
       ]
     }
-  } as unknown as Pick<
-    AppState,
-    'activeRepoId' | 'activeWorktreeId' | 'projects' | 'repos' | 'settings' | 'worktreesByRepo'
-  >
+  } as unknown as AiVaultResumeCommandState
 }
 
 describe('ai vault resume command runtime', () => {
@@ -109,6 +117,25 @@ describe('ai vault resume command runtime', () => {
       worktreePath: 'C:\\Users\\alice\\repo',
       localWindowsRuntimePreference: { kind: 'wsl', distro: 'Ubuntu' }
     })
+
+    expect(getAiVaultResumePlatform(state, 'repo-1::worktree-1')).toBe('linux')
+    expect(
+      buildAiVaultResumeCommandForWorktree({
+        state,
+        worktreeId: 'repo-1::worktree-1',
+        session: {
+          agent: 'claude',
+          sessionId: 'session one',
+          cwd: '/home/alice/repo',
+          codexHome: null
+        }
+      })
+    ).toBe("cd '/home/alice/repo' && claude '--resume' 'session one'")
+  })
+
+  it('uses POSIX command wrapping for SSH-owned worktrees on Windows clients', () => {
+    const state = makeState({ worktreePath: '/home/alice/repo' })
+    state.repos = [{ id: 'repo-1', path: '/home/alice/repo', connectionId: 'ssh-1' }] as never
 
     expect(getAiVaultResumePlatform(state, 'repo-1::worktree-1')).toBe('linux')
     expect(

@@ -1,5 +1,8 @@
 import type { Repo, Worktree } from '../../../../shared/types'
-import { isLocalAiVaultResumeRepo } from '@/lib/ai-vault-resume-target'
+import {
+  getAiVaultResumeWorktreeTargetStatus,
+  isSupportedAiVaultResumeTargetStatus
+} from '@/lib/ai-vault-resume-target'
 import { translate } from '@/i18n/i18n'
 import {
   canJumpToAiVaultSessionWorktree,
@@ -45,8 +48,12 @@ export function resolveAiVaultSessionResumeState(args: {
     if (!worktree) {
       continue
     }
-    const repo = args.repos.find((candidate) => candidate.id === worktree.repoId)
-    if (!isLocalAiVaultResumeRepo(repo)) {
+    const targetStatus = getAiVaultResumeWorktreeTargetStatus({
+      worktreeId,
+      worktrees: args.worktrees,
+      repos: args.repos
+    })
+    if (!isSupportedAiVaultResumeTargetStatus(targetStatus)) {
       continue
     }
     return {
@@ -74,12 +81,12 @@ export function resolveAiVaultSessionResumeActions(args: {
       ? args.worktreeInfo.worktreeId
       : null
 
-  const sessionTargetId = resolveLocalResumeWorktreeId({
+  const sessionTargetId = resolveSupportedResumeWorktreeId({
     worktreeId: sessionWorktreeId,
     worktrees: args.worktrees,
     repos: args.repos
   })
-  const activeTargetId = resolveLocalResumeWorktreeId({
+  const activeTargetId = resolveSupportedResumeWorktreeId({
     worktreeId:
       args.activeWorktreeId && args.activeWorktreeId !== sessionWorktreeId
         ? args.activeWorktreeId
@@ -103,7 +110,7 @@ export function resolveAiVaultSessionResumeActions(args: {
   }
 }
 
-function resolveLocalResumeWorktreeId(args: {
+function resolveSupportedResumeWorktreeId(args: {
   worktreeId: string | null
   worktrees: readonly Worktree[]
   repos: readonly Repo[]
@@ -117,8 +124,12 @@ function resolveLocalResumeWorktreeId(args: {
     return null
   }
 
-  const repo = args.repos.find((candidate) => candidate.id === worktree.repoId)
-  if (!isLocalAiVaultResumeRepo(repo)) {
+  const targetStatus = getAiVaultResumeWorktreeTargetStatus({
+    worktreeId: args.worktreeId,
+    worktrees: args.worktrees,
+    repos: args.repos
+  })
+  if (!isSupportedAiVaultResumeTargetStatus(targetStatus)) {
     return null
   }
 

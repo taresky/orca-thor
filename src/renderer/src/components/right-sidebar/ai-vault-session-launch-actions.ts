@@ -8,7 +8,10 @@ import {
 import { launchAiVaultSessionInNewTab } from '@/lib/launch-ai-vault-session'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { useAppStore } from '@/store'
-import { isNonLocalAiVaultResumeRepo } from '@/lib/ai-vault-resume-target'
+import {
+  getAiVaultResumeWorktreeTargetStatus,
+  isSupportedAiVaultResumeTargetStatus
+} from '@/lib/ai-vault-resume-target'
 import type { AiVaultAgent, AiVaultSession } from '../../../../shared/ai-vault-types'
 import type { Repo, Worktree } from '../../../../shared/types'
 import { translate } from '@/i18n/i18n'
@@ -80,13 +83,22 @@ export function useAiVaultSessionLaunchActions({
         return
       }
 
-      const worktreeRepo = repos.find((repo) => repo.id === worktree.repoId)
-      if (isNonLocalAiVaultResumeRepo(worktreeRepo)) {
+      const targetStatus = getAiVaultResumeWorktreeTargetStatus({
+        worktreeId: worktree.id,
+        worktrees: allWorktrees,
+        repos
+      })
+      if (!isSupportedAiVaultResumeTargetStatus(targetStatus)) {
         toast.error(
-          translate(
-            'auto.components.right.sidebar.AiVaultPanel.localWorkspacesOnly',
-            'Resume from history is only available in local workspaces.'
-          )
+          targetStatus === 'runtime'
+            ? translate(
+                'auto.components.right.sidebar.AiVaultPanel.runtimeWorkspacesUnsupported',
+                'Resume from history is not available in runtime-hosted workspaces.'
+              )
+            : translate(
+                'auto.components.right.sidebar.AiVaultPanel.openSupportedWorkspace',
+                'Open a local or SSH workspace before resuming a session.'
+              )
         )
         return
       }
