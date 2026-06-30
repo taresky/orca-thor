@@ -221,6 +221,7 @@ type UseTerminalPaneLifecycleDeps = {
   isVisibleRef: React.RefObject<boolean>
   onPtyExitRef: React.RefObject<(ptyId: string) => void>
   onPtyErrorRef?: React.RefObject<(paneId: number, message: string) => void>
+  onPaneProcessDied?: (exitCode: number) => void
   clearTabPtyId: (tabId: string, ptyId: string) => void
   consumeSuppressedPtyExit: (ptyId: string) => boolean
   updateTabTitle: (tabId: string, title: string) => void
@@ -508,6 +509,7 @@ export function useTerminalPaneLifecycle({
   isVisibleRef,
   onPtyExitRef,
   onPtyErrorRef,
+  onPaneProcessDied,
   clearTabPtyId,
   consumeSuppressedPtyExit,
   updateTabTitle,
@@ -720,6 +722,7 @@ export function useTerminalPaneLifecycle({
       isVisibleRef,
       onPtyExitRef,
       onPtyErrorRef,
+      onPaneProcessDied,
       clearTabPtyId,
       consumeSuppressedPtyExit,
       updateTabTitle,
