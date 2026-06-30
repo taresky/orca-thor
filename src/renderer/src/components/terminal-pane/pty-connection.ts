@@ -145,7 +145,10 @@ import { isWslUncPath } from '../../../../shared/wsl-paths'
 import { TUI_AGENT_CONFIG } from '../../../../shared/tui-agent-config'
 import { createDraftPasteReadyScanner } from '../../../../shared/draft-paste-ready-scanner'
 import { sendAgentDraftPasteContent } from '@/lib/agent-draft-paste-content'
-import { beginAgentStartupDeliveryAttempt } from '@/lib/agent-startup-delayed-delivery'
+import {
+  beginAgentStartupDeliveryAttempt,
+  releaseAgentStartupDeliveryAttempt
+} from '@/lib/agent-startup-delayed-delivery'
 import { isExpectedAgentProcess } from '../../../../shared/agent-process-recognition'
 
 const pendingSpawnByPaneKey = new Map<string, Promise<string | null>>()
@@ -967,16 +970,36 @@ export function connectPanePty(
     startupDraftPrompt !== null &&
     !startupDraftAgentConfig?.draftPromptFlag &&
     !startupDraftAgentConfig?.draftPromptEnvVar
-  const ownsStartupDraftPaste =
-    startupDraftPromptNeedsPaste &&
-    launchToken !== undefined &&
-    // Why: reserve the launch before the PTY exists so delayed delivery cannot
-    // attach a late sidecar subscription and miss Codex's first composer frame.
-    beginAgentStartupDeliveryAttempt({
+  let startupDraftDeliveryClaimed = false
+  let startupDraftPasteAttempted = false
+  const claimStartupDraftPasteDelivery = (): boolean => {
+    if (!startupDraftPromptNeedsPaste || launchToken === undefined) {
+      return false
+    }
+    if (startupDraftDeliveryClaimed) {
+      return true
+    }
+    // Why: launch-bound draft paste needs a launch token; all current
+    // draftPrompt startup callers pair it with launchConfig so this can safely
+    // fence off delayed sidecar delivery before Codex's first composer frame.
+    startupDraftDeliveryClaimed = beginAgentStartupDeliveryAttempt({
       worktreeId: deps.worktreeId,
       tabId: deps.tabId,
       launchToken
     })
+    return startupDraftDeliveryClaimed
+  }
+  const releaseUnattemptedStartupDraftPasteDelivery = (): void => {
+    if (!startupDraftDeliveryClaimed || startupDraftPasteAttempted || launchToken === undefined) {
+      return
+    }
+    releaseAgentStartupDeliveryAttempt({
+      worktreeId: deps.worktreeId,
+      tabId: deps.tabId,
+      launchToken
+    })
+    startupDraftDeliveryClaimed = false
+  }
   if (paneStartup?.launchConfig) {
     useAppStore.getState().registerAgentLaunchConfig(cacheKey, paneStartup.launchConfig, {
       agentType: paneStartup.launchAgent ?? paneStartup.initialAgentStatus?.agent,
@@ -2560,6 +2583,7 @@ export function connectPanePty(
       }
       schedulePendingStartupCommandDelivery()
     }
+    const ownsStartupDraftPaste = claimStartupDraftPasteDelivery()
     const startupDraftReadyScanner = ownsStartupDraftPaste
       ? createDraftPasteReadyScanner(
           startupDraftAgentConfig?.draftPasteReadySignal ?? 'render-quiet-after-bracketed-paste'
@@ -2608,6 +2632,7 @@ export function connectPanePty(
       }
       startupDraftPasteInFlight = true
       startupDraftPasteSettled = true
+      startupDraftPasteAttempted = true
       cleanupStartupDraftPasteTimers()
       const settings = getSettingsForWorktreeRuntimeOwner(useAppStore.getState(), deps.worktreeId)
       void sendAgentDraftPasteContent(settings, ptyId, startupDraftPrompt)
@@ -2872,6 +2897,8 @@ export function connectPanePty(
             : transport.sendInput(`${command}\r`)
           if (submitted) {
             armStartupDraftReadinessObservation()
+          } else {
+            releaseUnattemptedStartupDraftPasteDelivery()
           }
           pendingStartupCommand = null
         })()
@@ -4882,6 +4909,7 @@ export function connectPanePty(
         sshShellReadyFallbackTimer = null
       }
       cleanupStartupDraftPasteTimers()
+      releaseUnattemptedStartupDraftPasteDelivery()
       clearPendingAgentTaskCompleteNotification()
       pendingTerminalBellNotification = false
       clearTerminalBellNotificationTimer()
