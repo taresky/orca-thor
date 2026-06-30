@@ -63,6 +63,10 @@ type DropHibernatedAgentPaneOptions = {
   retainedCompletionEvidence?: readonly RetainedAgentEntry[]
 }
 
+type DropAgentStatusByTabPrefixOptions = {
+  worktreeId?: string
+}
+
 type AgentLaunchConfigRegistrationMetadata = {
   agentType?: AgentType
   launchToken?: string
@@ -174,7 +178,10 @@ export type AgentStatusSlice = {
   /** Remove all entries under a tab AND suppress re-retention for each.
    *  Used on tab close — the user is tearing down the whole tab, so any
    *  remaining agent rows (live or retained) must not reappear. */
-  dropAgentStatusByTabPrefix: (tabIdPrefix: string) => void
+  dropAgentStatusByTabPrefix: (
+    tabIdPrefix: string,
+    opts?: DropAgentStatusByTabPrefixOptions
+  ) => void
 
   /** Remove one automatically hibernated completed-agent pane while preserving
    *  sibling live/retained rows in the same worktree. */
@@ -304,6 +311,29 @@ function getLeafIdFromPaneKey(paneKey: string): string | null {
   }
   const leafId = paneKey.slice(separator + 1)
   return leafId.length > 0 ? leafId : null
+}
+
+function findCompletedOrphanPaneKeysForTabClose(
+  state: AppState,
+  worktreeId: string | undefined,
+  prefix: string
+): string[] {
+  if (!worktreeId) {
+    return []
+  }
+  const openTabIds = new Set((state.tabsByWorktree[worktreeId] ?? []).map((tab) => tab.id))
+  const paneKeys: string[] = []
+  for (const [paneKey, entry] of Object.entries(state.agentStatusByPaneKey)) {
+    if (paneKey.startsWith(prefix) || entry.state !== 'done' || entry.worktreeId !== worktreeId) {
+      continue
+    }
+    const tabId = getTabIdFromPaneKey(paneKey)
+    if (!tabId || openTabIds.has(tabId)) {
+      continue
+    }
+    paneKeys.push(paneKey)
+  }
+  return paneKeys
 }
 
 function isRecentlyClosedAgentStatusTab(
@@ -1774,16 +1804,25 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
       }
     },
 
-    dropAgentStatusByTabPrefix: (tabIdPrefix) => {
+    dropAgentStatusByTabPrefix: (tabIdPrefix, opts) => {
       const prefix = `${tabIdPrefix}:`
       let hadLive = false
       set((s) => {
-        const liveKeys = Object.keys(s.agentStatusByPaneKey).filter((k) => k.startsWith(prefix))
-        const launchConfigKeys = Object.keys(s.agentLaunchConfigByPaneKey).filter((k) =>
-          k.startsWith(prefix)
+        const completedOrphanKeys = findCompletedOrphanPaneKeysForTabClose(
+          s,
+          opts?.worktreeId,
+          prefix
         )
-        const retainedKeys = Object.keys(s.retainedAgentsByPaneKey).filter((k) =>
-          k.startsWith(prefix)
+        const completedOrphanKeySet = new Set(completedOrphanKeys)
+        const liveKeys = [
+          ...Object.keys(s.agentStatusByPaneKey).filter((k) => k.startsWith(prefix)),
+          ...completedOrphanKeys
+        ]
+        const launchConfigKeys = Object.keys(s.agentLaunchConfigByPaneKey).filter(
+          (k) => k.startsWith(prefix) || completedOrphanKeySet.has(k)
+        )
+        const retainedKeys = Object.keys(s.retainedAgentsByPaneKey).filter(
+          (k) => k.startsWith(prefix) || completedOrphanKeySet.has(k)
         )
         const migrationUnsupported = pruneMigrationUnsupportedEntries(
           s.migrationUnsupportedByPtyId,
@@ -1793,7 +1832,9 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
         // regardless of live/retained presence — ack entries are owned by
         // the pane lifecycle independently of live/retained state.
         let nextAck = s.acknowledgedAgentsByPaneKey
-        const ackKeys = Object.keys(nextAck).filter((k) => k.startsWith(prefix))
+        const ackKeys = Object.keys(nextAck).filter(
+          (k) => k.startsWith(prefix) || completedOrphanKeySet.has(k)
+        )
         if (ackKeys.length > 0) {
           nextAck = { ...nextAck }
           for (const k of ackKeys) {
