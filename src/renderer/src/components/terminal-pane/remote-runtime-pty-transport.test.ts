@@ -289,7 +289,7 @@ describe('createRemoteRuntimePtyTransport', () => {
     })
 
     expect(onError).not.toHaveBeenCalled()
-    expect(onPtyExit).toHaveBeenCalledWith('remote:env-1@@terminal-stale')
+    expect(onPtyExit).toHaveBeenCalledWith('remote:env-1@@terminal-stale', 1)
     expect(transport.getPtyId()).toBeNull()
   })
 
@@ -337,7 +337,7 @@ describe('createRemoteRuntimePtyTransport', () => {
       result: { type: 'end', streamId: newStreamId }
     })
 
-    expect(onPtyExit).toHaveBeenCalledWith('remote:env-1@@terminal-new')
+    expect(onPtyExit).toHaveBeenCalledWith('remote:env-1@@terminal-new', 0)
     expect(transport.getPtyId()).toBeNull()
     expect(transport.isConnected()).toBe(false)
   })
@@ -551,12 +551,13 @@ describe('createRemoteRuntimePtyTransport', () => {
   })
 
   it('scopes ephemeral setup terminals to the floating-terminal selector (#6789)', async () => {
-    const { brandEphemeralSetupTerminalWorktreeId } = await import(
-      '../../../../shared/ephemeral-setup-terminal-worktree-id'
-    )
+    const { brandEphemeralSetupTerminalWorktreeId } =
+      await import('../../../../shared/ephemeral-setup-terminal-worktree-id')
     const { createRemoteRuntimePtyTransport } = await import('./remote-runtime-pty-transport')
     const transport = createRemoteRuntimePtyTransport('env-1', {
-      worktreeId: brandEphemeralSetupTerminalWorktreeId('feature-wall-orchestration-skill-terminal'),
+      worktreeId: brandEphemeralSetupTerminalWorktreeId(
+        'feature-wall-orchestration-skill-terminal'
+      ),
       tabId: 'tab-1',
       leafId: 'pane:1'
     })

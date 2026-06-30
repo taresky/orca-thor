@@ -1058,6 +1058,61 @@ describe('connectPanePty', () => {
     expect(manager.closePane).not.toHaveBeenCalled()
   })
 
+  it('re-arms onPaneProcessDied when a relaunched sole pane dies again', async () => {
+    // Why: the recovery overlay's Restart calls connectPanePty again on a fresh
+    // transport. If that relaunched shell also dies (e.g. the .envrc is still
+    // broken), the overlay must re-appear — each connection registers its own
+    // exit handler, so a second death must fire onPaneProcessDied again.
+    const { connectPanePty } = await import('./pty-connection')
+    const manager = createManager(1)
+    const deps = createDeps()
+
+    const firstTransport = createMockTransport('tab-pty')
+    transportFactoryQueue.push(firstTransport)
+    connectPanePty(createPane(1) as never, manager as never, deps as never)
+    const firstOnExit = createdTransportOptions[0]?.onPtyExit as
+      | ((ptyId: string, exitCode: number) => void)
+      | undefined
+    firstOnExit?.('tab-pty', 1)
+    expect(deps.onPaneProcessDied).toHaveBeenCalledTimes(1)
+
+    // Relaunch: a fresh connection on a new transport, which then also dies.
+    const secondTransport = createMockTransport('tab-pty-2')
+    transportFactoryQueue.push(secondTransport)
+    connectPanePty(createPane(1) as never, manager as never, deps as never)
+    const secondOnExit = createdTransportOptions[1]?.onPtyExit as
+      | ((ptyId: string, exitCode: number) => void)
+      | undefined
+    secondOnExit?.('tab-pty-2', 1)
+
+    expect(deps.onPaneProcessDied).toHaveBeenCalledTimes(2)
+    expect(deps.onPtyExitRef.current).not.toHaveBeenCalled()
+  })
+
+  it('routes a remote-runtime sole pane death through onPtyExitRef, not the recovery overlay', async () => {
+    // Why: the recovery overlay's Restart spawns a LOCAL shell, which is wrong
+    // for a host-owned web-runtime pane (its liveness is host-authoritative).
+    // Remote/SSH panes therefore keep their prior teardown behavior.
+    enableActiveRuntimeEnvironment('env-1')
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport('tab-pty')
+    transportFactoryQueue.push(transport)
+    const manager = createManager(1)
+    const deps = createDeps()
+
+    connectPanePty(createPane(1) as never, manager as never, deps as never)
+    const onPtyExit = createdTransportOptions[0]?.onPtyExit as
+      | ((ptyId: string, exitCode: number) => void)
+      | undefined
+    expect(onPtyExit).toBeTypeOf('function')
+
+    onPtyExit?.('tab-pty', 1)
+
+    expect(deps.onPaneProcessDied).not.toHaveBeenCalled()
+    expect(deps.onPtyExitRef.current).toHaveBeenCalledWith('tab-pty')
+    expect(manager.closePane).not.toHaveBeenCalled()
+  })
+
   it('closes a split pane when an established PTY exits after output', async () => {
     const { connectPanePty } = await import('./pty-connection')
     const capturedDataCallback: { current: ((data: string) => void) | null } = { current: null }

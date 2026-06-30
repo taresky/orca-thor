@@ -1438,8 +1438,15 @@ export function connectPanePty(
       // should return to Landing; every failure keeps the dead pane mounted so
       // the error stays visible and the worktree stays selected, with a
       // recovery overlay (onPaneProcessDied) offering restart/close in place.
+      //
+      // Why local-only: the recovery overlay's "Restart" spawns a fresh LOCAL
+      // shell, and web-runtime liveness is host-snapshot-authoritative (its
+      // close already round-trips to the host). SSH/remote panes therefore keep
+      // their prior teardown behavior — a local in-place relaunch would be wrong
+      // for a host-owned session.
+      const isLocalPane = !connectionId && runtimeEnvironmentId === null
       const userEndedCleanly = exitCode === 0 && Number.isFinite(lastTerminalInputAt)
-      if (!userEndedCleanly) {
+      if (isLocalPane && !userEndedCleanly) {
         deps.onPaneProcessDied?.(exitCode)
         return
       }
