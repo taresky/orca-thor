@@ -1,66 +1,17 @@
-import { exec, spawn, type ChildProcess } from 'child_process'
+import { spawn, type ChildProcess } from 'child_process'
 import type { RelayDispatcher, RequestContext } from './dispatcher'
 import { getSpawnPlan, isSpawnEnoent, type SpawnCommand } from './agent-exec-spawn-plan'
+import { resolveCommandLaunchForRelay } from './relay-command-path-lookup'
+import { killProcessTree } from './agent-exec-process-tree'
+import type { CancelParams, ExecParams, ExecResult, InFlightExec } from './agent-exec-rpc-types'
 
 const DEFAULT_TIMEOUT_MS = 60_000
 const MAX_TIMEOUT_MS = 5 * 60 * 1000
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024
 
-// Why: mirrors src/main/text-generation/commit-message-text-generation.ts. On
-// Windows, npm-installed CLIs like `claude`/`codex` are usually `.cmd` shims.
-// We route those through cmd.exe so Node can launch them, and taskkill is
-// needed to terminate the whole wrapper + node.exe process tree. Kept
-// duplicated rather than imported because the relay ships to remote hosts.
-function killProcessTree(child: ChildProcess): void {
-  const pid = child.pid
-  if (!pid) {
-    return
-  }
-  if (process.platform === 'win32') {
-    exec(`taskkill /pid ${pid} /T /F`, () => {
-      // Best-effort; the spawn's `close` listener fires once the tree exits.
-    })
-    return
-  }
-  try {
-    child.kill('SIGKILL')
-  } catch {
-    // Child may already have exited between the kill request and now.
-  }
-}
-
-type ExecParams = {
-  binary: unknown
-  args: unknown
-  cwd: unknown
-  stdin: unknown
-  timeoutMs: unknown
-  env: unknown
-  operation: unknown
-  shell: unknown
-}
-
-type CancelParams = {
-  cwd: unknown
-  operation: unknown
-}
-
 function laneKeyFor(cwd: string, operation: unknown): string {
   const op = typeof operation === 'string' && operation ? operation : 'default'
   return JSON.stringify([op, cwd])
-}
-
-type InFlightExec = { child: ChildProcess; cancel: () => void }
-
-type ExecResult = {
-  stdout: string
-  stderr: string
-  exitCode: number | null
-  timedOut: boolean
-  /** Set when the user canceled the exec via `agent.cancelExec`. */
-  canceled?: boolean
-  /** Set when the binary could not be spawned (e.g. ENOENT). */
-  spawnError?: string
 }
 
 /**
@@ -115,19 +66,22 @@ export class AgentExecHandler {
     const useShell = params.shell === true
 
     return new Promise<ExecResult>((resolve) => {
-      const spawnPlannedChild = (plan: SpawnCommand): ChildProcess =>
+      const spawnPlannedChild = (
+        plan: SpawnCommand,
+        env: NodeJS.ProcessEnv = spawnEnv
+      ): ChildProcess =>
         spawn(plan.spawnCmd, plan.spawnArgs, {
           cwd,
-          env: spawnEnv,
+          env,
           stdio: ['pipe', 'pipe', 'pipe'],
           windowsHide: true
         })
 
       let child: ChildProcess
-      let shellFallback: SpawnCommand | undefined
+      let pathFallbackCommand: string | undefined
       try {
         const spawnPlan = getSpawnPlan(binary, args, spawnEnv, useShell)
-        shellFallback = spawnPlan.shellFallback
+        pathFallbackCommand = spawnPlan.pathFallbackCommand
         child = spawnPlannedChild(spawnPlan)
       } catch (error) {
         resolve({
@@ -147,7 +101,8 @@ export class AgentExecHandler {
       let timedOut = false
       let canceled = false
       let settled = false
-      let shellFallbackUsed = false
+      let pathFallbackUsed = false
+      let pathFallbackPending = false
       const laneKey = typeof cwd === 'string' ? this.laneKey(cwd, params.operation) : ''
       let entry: InFlightExec | null = null
       let timer: ReturnType<typeof setTimeout> | null = null
@@ -178,6 +133,10 @@ export class AgentExecHandler {
       }
       const cancelCurrent = (): void => {
         canceled = true
+        if (pathFallbackPending) {
+          finish({ stdout, stderr, exitCode: null, timedOut, canceled })
+          return
+        }
         killProcessTree(child)
       }
       if (laneKey) {
@@ -219,17 +178,64 @@ export class AgentExecHandler {
         stderr += chunk.toString('utf-8')
       }
       const onError = (error: Error): void => {
-        if (!settled && !canceled && !shellFallbackUsed && shellFallback && isSpawnEnoent(error)) {
-          shellFallbackUsed = true
+        if (
+          !settled &&
+          !canceled &&
+          !pathFallbackUsed &&
+          pathFallbackCommand &&
+          isSpawnEnoent(error)
+        ) {
+          pathFallbackUsed = true
           detachChildListeners()
-          try {
-            child = spawnPlannedChild(shellFallback)
-            if (entry) {
-              entry.child = child
+          pathFallbackPending = true
+          void (async () => {
+            const resolved = await resolveCommandLaunchForRelay(pathFallbackCommand, {
+              env: spawnEnv,
+              allowedShellNames: ['bash', 'zsh'],
+              includeInheritedPathFallback: false
+            })
+            pathFallbackPending = false
+            if (settled) {
+              return
             }
-            attachChildListeners()
-            sendStdin()
-          } catch (fallbackError) {
+            if (canceled) {
+              finish({ stdout, stderr, exitCode: null, timedOut, canceled })
+              return
+            }
+            if (!resolved) {
+              finish({
+                stdout,
+                stderr,
+                exitCode: null,
+                timedOut,
+                spawnError: error.message
+              })
+              return
+            }
+            try {
+              const fallbackEnv =
+                resolved.pathEnv === undefined ? spawnEnv : { ...spawnEnv, PATH: resolved.pathEnv }
+              child = spawnPlannedChild(
+                { spawnCmd: resolved.commandPath, spawnArgs: args },
+                fallbackEnv
+              )
+              if (entry) {
+                entry.child = child
+              }
+              attachChildListeners()
+              sendStdin()
+            } catch (fallbackError) {
+              finish({
+                stdout,
+                stderr,
+                exitCode: null,
+                timedOut,
+                spawnError:
+                  fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+              })
+            }
+          })().catch((fallbackError: unknown) => {
+            pathFallbackPending = false
             finish({
               stdout,
               stderr,
@@ -238,7 +244,7 @@ export class AgentExecHandler {
               spawnError:
                 fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
             })
-          }
+          })
           return
         }
         finish({

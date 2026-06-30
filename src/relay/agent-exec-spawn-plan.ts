@@ -1,12 +1,11 @@
 import { existsSync } from 'fs'
-import { userInfo } from 'os'
-import { delimiter, join, posix } from 'path'
+import { delimiter, join } from 'path'
 
 export const WINDOWS_BATCH_UNSAFE_ARGUMENTS_ERROR = 'UNSAFE_WINDOWS_BATCH_ARGUMENTS'
 
 export type SpawnCommand = { spawnCmd: string; spawnArgs: string[] }
 
-type SpawnPlan = SpawnCommand & { shellFallback?: SpawnCommand }
+type SpawnPlan = SpawnCommand & { pathFallbackCommand?: string }
 
 function getCmdExePath(): string {
   return process.env.ComSpec || `${process.env.SystemRoot ?? 'C:\\Windows'}\\System32\\cmd.exe`
@@ -60,54 +59,6 @@ function getWindowsSafeSpawn(binary: string, args: string[], env: NodeJS.Process
   return { spawnCmd: getCmdExePath(), spawnArgs: ['/d', '/s', '/c', commandLine] }
 }
 
-function normalizeInteractiveShell(shell: unknown): string | null {
-  if (typeof shell !== 'string') {
-    return null
-  }
-  if (!shell || !posix.isAbsolute(shell)) {
-    return null
-  }
-  const shellName = posix.basename(shell).toLowerCase()
-  return shellName === 'bash' || shellName === 'zsh' ? shell : null
-}
-
-function getAccountLoginShell(): string | null {
-  try {
-    return normalizeInteractiveShell(userInfo().shell)
-  } catch {
-    return null
-  }
-}
-
-function resolveRequestedInteractiveShell(env: NodeJS.ProcessEnv): string | null {
-  const envShell = typeof env.SHELL === 'string' ? env.SHELL : ''
-  if (envShell) {
-    return normalizeInteractiveShell(envShell)
-  }
-  return getAccountLoginShell()
-}
-
-function buildInteractiveShellFallback(
-  binary: string,
-  args: string[],
-  env: NodeJS.ProcessEnv
-): SpawnCommand | null {
-  if (binary.includes('/')) {
-    return null
-  }
-  const shell = resolveRequestedInteractiveShell(env)
-  if (!shell) {
-    return null
-  }
-  // Why: SSH relay processes are launched by a non-interactive SSH command,
-  // whose PATH often lacks nvm/fnm/Homebrew agent installs. Use the user's
-  // explicit bash/zsh only as an ENOENT fallback so normal PATH hits stay fast.
-  return {
-    spawnCmd: shell,
-    spawnArgs: ['-ilc', 'exec "$@"', '_', binary, ...args]
-  }
-}
-
 export function getSpawnPlan(
   binary: string,
   args: string[],
@@ -117,14 +68,16 @@ export function getSpawnPlan(
   if (process.platform === 'win32' || !useShell) {
     return getWindowsSafeSpawn(binary, args, env)
   }
-  const shellFallback = buildInteractiveShellFallback(binary, args, env)
-  if (!shellFallback) {
+  if (binary.includes('/')) {
     return { spawnCmd: binary, spawnArgs: args }
   }
   return {
     spawnCmd: binary,
     spawnArgs: args,
-    shellFallback
+    // Why: SSH commit/PR agents may be installed only after shell PATH
+    // initialization. Resolve that path only after direct ENOENT, then spawn
+    // the resolved binary directly instead of running the agent inside a shell.
+    pathFallbackCommand: binary
   }
 }
 
