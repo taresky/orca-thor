@@ -205,7 +205,11 @@ export class ClaudeAgentTeamsTmuxDispatcher {
     return team.paneOrder
       .map((paneId) => {
         const pane = team.panes.get(paneId)!
-        return renderTmuxFormat(tmuxValue(parsed, '-F'), formatContext(team, pane), pane.fakePaneId)
+        return renderTmuxFormat(
+          tmuxValue(parsed, '-F'),
+          formatContext(team, pane),
+          pane.fakePaneId
+        )
       })
       .join('\n')
       .concat('\n')
