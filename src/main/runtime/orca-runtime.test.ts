@@ -7513,8 +7513,81 @@ describe('OrcaRuntimeService', () => {
       expect(settled).toBe(false)
 
       // Agent finishes: output goes quiet. After >= TUI_IDLE_QUIESCENCE_MS the
-      // sustained-idle debounce elapses and the wait resolves.
-      await vi.advanceTimersByTimeAsync(4_000)
+      // sustained-idle debounce elapses and the wait resolves without waiting
+      // for another fallback poll interval.
+      await vi.advanceTimersByTimeAsync(999)
+      expect(settled).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      await expect(waitPromise).resolves.toMatchObject({
+        handle,
+        condition: 'tui-idle',
+        satisfied: true,
+        status: 'running'
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('resolves tui-idle immediately on an explicit idle OSC title', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000_000)
+    try {
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess: async () => null
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+      runtime.onPtyData('pty-bg', '\x1b]0;Codex working\x07working\n', Date.now())
+
+      const waitPromise = runtime.waitForTerminal(handle, {
+        condition: 'tui-idle',
+        timeoutMs: 60_000
+      })
+
+      runtime.onPtyData('pty-bg', '\x1b]0;Codex done\x07done\n', Date.now())
+
+      await expect(waitPromise).resolves.toMatchObject({
+        handle,
+        condition: 'tui-idle',
+        satisfied: true,
+        status: 'running'
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('resolves ambiguous tui-idle at the quiet deadline instead of the next poll', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000_000)
+    try {
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess: async () => null
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+      runtime.onPtyData('pty-bg', '\x1b]0;Codex\x07last chunk\n', Date.now())
+
+      const waitPromise = runtime.waitForTerminal(handle, {
+        condition: 'tui-idle',
+        timeoutMs: 60_000
+      })
+      let settled = false
+      void waitPromise.then(() => {
+        settled = true
+      })
+
+      await vi.advanceTimersByTimeAsync(2_999)
+      expect(settled).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(1)
       await expect(waitPromise).resolves.toMatchObject({
         handle,
         condition: 'tui-idle',
@@ -9457,6 +9530,39 @@ describe('OrcaRuntimeService', () => {
       expect(unread).toHaveLength(1)
       expect(unread[0].read).toBe(0)
       expect(unread[0].delivered_at).not.toBeNull()
+      db.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('delays push-on-idle message delivery for ambiguous name-only idle titles', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000_000)
+    try {
+      const runtime = new OrcaRuntimeService(store)
+      const db = new InMemoryOrchestrationMessages()
+      const write = vi.fn().mockReturnValue(true)
+      setInMemoryOrchestrationMessages(runtime, db)
+      runtime.setPtyController({
+        write,
+        kill: vi.fn(),
+        getForegroundProcess: async () => null
+      })
+      syncSinglePty(runtime)
+
+      const [terminal] = (await runtime.listTerminals()).terminals
+      db.insertMessage({ from: 'term_sender', to: terminal.handle, subject: 'quiet hello' })
+      runtime.onPtyData('pty-1', '\x1b]0;Codex working\x07working\n', Date.now())
+      runtime.onPtyData('pty-1', '\x1b]0;Codex\x07working 1\n', Date.now())
+
+      await vi.advanceTimersByTimeAsync(2_999)
+      expect(write).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(write).toHaveBeenCalledWith('pty-1', expect.stringContaining('Subject: quiet hello'))
+
+      await vi.advanceTimersByTimeAsync(500)
       db.close()
     } finally {
       vi.useRealTimers()

@@ -1165,7 +1165,14 @@ type TerminalWaiter = {
   reject: (error: Error) => void
   timeout: NodeJS.Timeout | null
   pollInterval: NodeJS.Timeout | null
+  quietTimeout: NodeJS.Timeout | null
   abortCleanup: (() => void) | null
+}
+
+type TuiIdleStatusTarget = {
+  lastAgentStatus: AgentStatus | null
+  lastOscTitle: string | null
+  lastOutputAt: number | null
 }
 
 type MessageWaiter = {
@@ -1813,6 +1820,7 @@ export class OrcaRuntimeService {
   private detachedPreAllocatedLeaves = new Map<string, RuntimeLeafRecord>()
   private graphSyncCallbacks: (() => void)[] = []
   private waitersByHandle = new Map<string, Set<TerminalWaiter>>()
+  private tuiIdleDeliveryTimeoutsByLeafKey = new Map<string, NodeJS.Timeout>()
   private ptyController: RuntimePtyController | null = null
   private notifier: RuntimeNotifier | null = null
   private clientEventListeners = new Set<(event: RuntimeClientEvent) => void>()
@@ -5073,7 +5081,9 @@ export class OrcaRuntimeService {
         // which isn't a task-completion signal.
         if (agentStatus === 'idle' && prevStatus !== 'idle') {
           this.resolveTuiIdleWaiters(leaf)
-          this.deliverPendingMessages(leaf)
+          this.deliverPendingMessagesWhenTuiIdleSatisfied(leaf)
+        } else if (agentStatus !== 'idle') {
+          this.clearTuiIdleDeliveryTimeout(leaf)
         }
       }
     }
@@ -8447,7 +8457,7 @@ export class OrcaRuntimeService {
       if (condition === 'tui-idle' && ptyBlockedReason) {
         return buildPtyTerminalWaitBlockedResult(handle, condition, pty.pty, ptyBlockedReason)
       }
-      if (condition === 'tui-idle' && this.hasSustainedTuiIdle(pty.pty)) {
+      if (condition === 'tui-idle' && this.hasSatisfiedTuiIdle(pty.pty)) {
         return buildPtyTerminalWaitResult(handle, condition, pty.pty)
       }
       if (
@@ -8472,6 +8482,7 @@ export class OrcaRuntimeService {
           reject,
           timeout: null,
           pollInterval: null,
+          quietTimeout: null,
           abortCleanup: null
         }
         if (!this.bindTerminalWaiterAbort(waiter, options?.signal)) {
@@ -8508,7 +8519,7 @@ export class OrcaRuntimeService {
               waiter,
               buildPtyTerminalWaitBlockedResult(handle, condition, live.pty, blockedReason)
             )
-          } else if (this.hasSustainedTuiIdle(live.pty)) {
+          } else if (this.hasSatisfiedTuiIdle(live.pty)) {
             this.resolveWaiter(waiter, buildPtyTerminalWaitResult(handle, condition, live.pty))
           } else if (
             (this.getAdoptedPtyExplicitIdleStatus(live.pty) === 'idle' &&
@@ -8539,7 +8550,7 @@ export class OrcaRuntimeService {
     // detection that powers the renderer's "Task complete" notifications.
     // Why: only 'idle' satisfies tui-idle, not 'permission'. Permission means the
     // agent is blocked on user approval, not finished with its task.
-    if (condition === 'tui-idle' && this.hasSustainedTuiIdle(leaf)) {
+    if (condition === 'tui-idle' && this.hasSatisfiedTuiIdle(leaf)) {
       return buildTerminalWaitResult(handle, condition, leaf)
     }
     if (condition === 'tui-idle') {
@@ -8572,6 +8583,7 @@ export class OrcaRuntimeService {
         reject,
         timeout: null,
         pollInterval: null,
+        quietTimeout: null,
         abortCleanup: null
       }
 
@@ -8613,7 +8625,7 @@ export class OrcaRuntimeService {
               waiter,
               buildTerminalWaitBlockedResult(handle, condition, live.leaf, blockedReason)
             )
-          } else if (this.hasSustainedTuiIdle(live.leaf)) {
+          } else if (this.hasSatisfiedTuiIdle(live.leaf)) {
             // Why: don't clear lastAgentStatus here. It's a factual record of the
             // last detected OSC state, not a one-shot signal. Clearing it causes
             // subsequent tui-idle waiters to hang even though the agent is idle —
@@ -18113,7 +18125,7 @@ export class OrcaRuntimeService {
   deliverPendingMessagesForHandle(handle: string): void {
     try {
       const { leaf } = this.getLiveLeafForHandle(handle)
-      if (leaf.lastAgentStatus === 'idle') {
+      if (this.hasSatisfiedTuiIdle(leaf)) {
         this.deliverPendingMessages(leaf)
       }
     } catch {
@@ -18465,20 +18477,62 @@ export class OrcaRuntimeService {
     return Date.now() - target.lastOutputAt < TUI_IDLE_QUIESCENCE_MS
   }
 
+  // Why: explicit OSC idle markers are the agent's own completion signal. Only
+  // ambiguous default-idle titles need the output-quiescence debounce.
+  private hasExplicitOscTuiIdle(target: TuiIdleStatusTarget): boolean {
+    return (
+      target.lastAgentStatus === 'idle' &&
+      target.lastOscTitle !== null &&
+      detectExplicitIdleStatusFromTitle(target.lastOscTitle) === 'idle'
+    )
+  }
+
   // Why: treat a title-derived 'idle' status as satisfying tui-idle only after
   // output has been quiet for TUI_IDLE_QUIESCENCE_MS — i.e. require *sustained*
-  // idle (debounce). A genuinely finished agent stops emitting, so the debounce
-  // window elapses; an agent that merely flashed an idle-looking title mid-work
-  // keeps producing output and never satisfies. Body-level prompt detection
-  // (isKnownReadyPromptPreview) is a direct "cursor at input prompt" signal and
-  // stays immediate; adopted/daemon handles with no PTY output stream
-  // (lastOutputAt == null) have nothing to debounce, so their title signal
-  // also stands.
-  private hasSustainedTuiIdle(target: {
-    lastAgentStatus: AgentStatus | null
-    lastOutputAt: number | null
-  }): boolean {
+  // idle (debounce). Explicit OSC idle titles bypass this helper via
+  // hasSatisfiedTuiIdle; ambiguous name-only agent titles do not.
+  private hasSustainedTuiIdle(target: TuiIdleStatusTarget): boolean {
     return target.lastAgentStatus === 'idle' && !this.isTuiOutputActive(target)
+  }
+
+  private hasSatisfiedTuiIdle(target: TuiIdleStatusTarget): boolean {
+    return this.hasExplicitOscTuiIdle(target) || this.hasSustainedTuiIdle(target)
+  }
+
+  private isTerminalWaiterActive(waiter: TerminalWaiter): boolean {
+    return this.waitersByHandle.get(waiter.handle)?.has(waiter) ?? false
+  }
+
+  private scheduleTuiIdleQuietCheck(
+    waiter: TerminalWaiter,
+    target: TuiIdleStatusTarget,
+    resolve: () => void
+  ): void {
+    if (!this.isTerminalWaiterActive(waiter)) {
+      return
+    }
+    if (this.hasSatisfiedTuiIdle(target)) {
+      return
+    }
+    if (target.lastAgentStatus !== 'idle' || target.lastOutputAt === null) {
+      return
+    }
+    if (waiter.quietTimeout) {
+      clearTimeout(waiter.quietTimeout)
+    }
+    const elapsedMs = Date.now() - target.lastOutputAt
+    const remainingMs = Math.max(TUI_IDLE_QUIESCENCE_MS - elapsedMs, 0)
+    waiter.quietTimeout = setTimeout(() => {
+      waiter.quietTimeout = null
+      if (!this.isTerminalWaiterActive(waiter)) {
+        return
+      }
+      if (this.hasSatisfiedTuiIdle(target)) {
+        resolve()
+        return
+      }
+      this.scheduleTuiIdleQuietCheck(waiter, target, resolve)
+    }, remainingMs)
   }
 
   private resolveTuiIdleWaiters(leaf: RuntimeLeafRecord): void {
@@ -18491,11 +18545,15 @@ export class OrcaRuntimeService {
       return
     }
     for (const waiter of [...waiters]) {
-      // Why: only resolve once idle is *sustained*. The transition fires the
-      // instant an idle-looking title arrives, which is itself fresh output; the
-      // fallback poll re-checks and resolves once output goes quiet.
-      if (waiter.condition === 'tui-idle' && this.hasSustainedTuiIdle(leaf)) {
+      if (waiter.condition !== 'tui-idle') {
+        continue
+      }
+      if (this.hasSatisfiedTuiIdle(leaf)) {
         this.resolveWaiter(waiter, buildTerminalWaitResult(handle, 'tui-idle', leaf))
+      } else {
+        this.scheduleTuiIdleQuietCheck(waiter, leaf, () => {
+          this.resolveWaiter(waiter, buildTerminalWaitResult(handle, 'tui-idle', leaf))
+        })
       }
     }
   }
@@ -18529,9 +18587,15 @@ export class OrcaRuntimeService {
       return
     }
     for (const waiter of [...waiters]) {
-      // Why: only resolve once idle is *sustained* (see resolveTuiIdleWaiters).
-      if (waiter.condition === 'tui-idle' && this.hasSustainedTuiIdle(pty)) {
+      if (waiter.condition !== 'tui-idle') {
+        continue
+      }
+      if (this.hasSatisfiedTuiIdle(pty)) {
         this.resolveWaiter(waiter, buildPtyTerminalWaitResult(handle, 'tui-idle', pty))
+      } else {
+        this.scheduleTuiIdleQuietCheck(waiter, pty, () => {
+          this.resolveWaiter(waiter, buildPtyTerminalWaitResult(handle, 'tui-idle', pty))
+        })
       }
     }
   }
@@ -18544,13 +18608,16 @@ export class OrcaRuntimeService {
   // + output quiescence. The poll self-cancels when the primary OSC path fires.
   private startTuiIdleFallbackPoll(waiter: TerminalWaiter, leaf: RuntimeLeafRecord): void {
     let foregroundPollInFlight = false
+    this.scheduleTuiIdleQuietCheck(waiter, leaf, () => {
+      this.resolveWaiter(waiter, buildTerminalWaitResult(waiter.handle, 'tui-idle', leaf))
+    })
     waiter.pollInterval = setInterval(async () => {
       if (!waiter.pollInterval) {
         return
       }
       let startedForegroundPoll = false
       try {
-        if (this.hasSustainedTuiIdle(leaf)) {
+        if (this.hasSatisfiedTuiIdle(leaf)) {
           if (waiter.pollInterval) {
             clearInterval(waiter.pollInterval)
             waiter.pollInterval = null
@@ -18572,6 +18639,9 @@ export class OrcaRuntimeService {
             return
           }
         }
+        this.scheduleTuiIdleQuietCheck(waiter, leaf, () => {
+          this.resolveWaiter(waiter, buildTerminalWaitResult(waiter.handle, 'tui-idle', leaf))
+        })
         const leafWaitText = buildTerminalWaitText(
           leaf.tailBuffer,
           leaf.tailPartialLine,
@@ -18631,13 +18701,16 @@ export class OrcaRuntimeService {
 
   private startPtyTuiIdleFallbackPoll(waiter: TerminalWaiter, pty: RuntimePtyWorktreeRecord): void {
     let foregroundPollInFlight = false
+    this.scheduleTuiIdleQuietCheck(waiter, pty, () => {
+      this.resolveWaiter(waiter, buildPtyTerminalWaitResult(waiter.handle, 'tui-idle', pty))
+    })
     waiter.pollInterval = setInterval(async () => {
       if (!waiter.pollInterval) {
         return
       }
       let startedForegroundPoll = false
       try {
-        if (this.hasSustainedTuiIdle(pty)) {
+        if (this.hasSatisfiedTuiIdle(pty)) {
           if (waiter.pollInterval) {
             clearInterval(waiter.pollInterval)
             waiter.pollInterval = null
@@ -18671,6 +18744,9 @@ export class OrcaRuntimeService {
           this.resolveWaiter(waiter, buildPtyTerminalWaitResult(waiter.handle, 'tui-idle', pty))
           return
         }
+        this.scheduleTuiIdleQuietCheck(waiter, pty, () => {
+          this.resolveWaiter(waiter, buildPtyTerminalWaitResult(waiter.handle, 'tui-idle', pty))
+        })
         if (pty.lastAgentStatus === null && this.ptyController && !foregroundPollInFlight) {
           foregroundPollInFlight = true
           startedForegroundPoll = true
@@ -18711,6 +18787,47 @@ export class OrcaRuntimeService {
       }
     }
     return null
+  }
+
+  private clearTuiIdleDeliveryTimeout(leaf: RuntimeLeafRecord): void {
+    const leafKey = this.getLeafKey(leaf.tabId, leaf.leafId)
+    const timeout = this.tuiIdleDeliveryTimeoutsByLeafKey.get(leafKey)
+    if (!timeout) {
+      return
+    }
+    clearTimeout(timeout)
+    this.tuiIdleDeliveryTimeoutsByLeafKey.delete(leafKey)
+  }
+
+  // Why: push-on-idle has the same correctness boundary as tui-idle waits:
+  // name-only idle must not inject text until output has actually gone quiet.
+  private deliverPendingMessagesWhenTuiIdleSatisfied(leaf: RuntimeLeafRecord): void {
+    const handle = this.handleByLeafKey.get(this.getLeafKey(leaf.tabId, leaf.leafId))
+    if (!handle || !this._orchestrationDb) {
+      return
+    }
+    if (this._orchestrationDb.getUndeliveredUnreadMessages(handle).length === 0) {
+      this.clearTuiIdleDeliveryTimeout(leaf)
+      return
+    }
+    if (this.hasSatisfiedTuiIdle(leaf)) {
+      this.clearTuiIdleDeliveryTimeout(leaf)
+      this.deliverPendingMessages(leaf)
+      return
+    }
+    if (leaf.lastAgentStatus !== 'idle' || leaf.lastOutputAt === null) {
+      this.clearTuiIdleDeliveryTimeout(leaf)
+      return
+    }
+    this.clearTuiIdleDeliveryTimeout(leaf)
+    const elapsedMs = Date.now() - leaf.lastOutputAt
+    const remainingMs = Math.max(TUI_IDLE_QUIESCENCE_MS - elapsedMs, 0)
+    const leafKey = this.getLeafKey(leaf.tabId, leaf.leafId)
+    const timeout = setTimeout(() => {
+      this.tuiIdleDeliveryTimeoutsByLeafKey.delete(leafKey)
+      this.deliverPendingMessagesWhenTuiIdleSatisfied(leaf)
+    }, remainingMs)
+    this.tuiIdleDeliveryTimeoutsByLeafKey.set(leafKey, timeout)
   }
 
   // Why: push-on-idle delivery — when an agent transitions working→idle, check
@@ -18827,6 +18944,10 @@ export class OrcaRuntimeService {
     }
     if (waiter.pollInterval) {
       clearInterval(waiter.pollInterval)
+    }
+    if (waiter.quietTimeout) {
+      clearTimeout(waiter.quietTimeout)
+      waiter.quietTimeout = null
     }
     if (waiter.abortCleanup) {
       waiter.abortCleanup()
