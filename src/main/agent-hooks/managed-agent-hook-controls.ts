@@ -1,6 +1,7 @@
 import type { AgentHookInstallStatus } from '../../shared/agent-hook-types'
 import type { HookInstallAgent } from '../../shared/telemetry-events'
 import type { ClaudeManagedAccount, GlobalSettings } from '../../shared/types'
+import { posix as pathPosix, win32 as pathWin32 } from 'node:path'
 import { parseWslUncPath } from '../../shared/wsl-paths'
 import { ampHookService } from '../amp/hook-service'
 import { antigravityHookService } from '../antigravity/hook-service'
@@ -150,9 +151,9 @@ function getWslSystemDefaultClaudeHookTargets(
     }
     return [
       {
-        configDir: `${wslHome.replace(/[\\/]+$/, '')}\\.claude`,
+        configDir: pathWin32.join(wslHome, '.claude'),
         runtime: 'wsl' as const,
-        wslLinuxConfigDir: `${wslHomeInfo.linuxPath.replace(/\/+$/, '')}/.claude`
+        wslLinuxConfigDir: pathPosix.join(wslHomeInfo.linuxPath, '.claude')
       }
     ]
   })
@@ -182,7 +183,7 @@ function removeClaudeHooksFromKnownConfigDirs(
     try {
       statuses.push(removeClaudeHooksFromTarget(target))
     } catch (error) {
-      statuses.push(errorStatus('claude', error))
+      statuses.push(errorStatus('claude', error, getConfigPath(CLAUDE_HOOK_SETTINGS, target)))
     }
   }
   return statuses
@@ -253,11 +254,15 @@ export function installManagedAgentHooks(): void {
   }
 }
 
-function errorStatus(agent: HookInstallAgent, error: unknown): AgentHookInstallStatus {
+function errorStatus(
+  agent: HookInstallAgent,
+  error: unknown,
+  configPath = ''
+): AgentHookInstallStatus {
   return {
     agent,
     state: 'error',
-    configPath: '',
+    configPath,
     managedHooksPresent: false,
     detail: error instanceof Error ? error.message : String(error)
   }

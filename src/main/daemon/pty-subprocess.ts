@@ -713,6 +713,9 @@ export function createPtySubprocess(opts: PtySubprocessOptions): SubprocessHandl
         addWslEnvKeys(env, WSL_AGENT_HOOK_ENV_KEYS)
         if (env.ORCA_AGENT_HOOK_ENDPOINT?.startsWith('/')) {
           addWslEnvKeys(env, ['ORCA_AGENT_HOOK_ENDPOINT'])
+        } else {
+          delete env.ORCA_AGENT_HOOK_ENDPOINT
+          removeWslEnvKeys(env, ['ORCA_AGENT_HOOK_ENDPOINT'])
         }
       }
     } else if (codexHomeWslInfo || isWslCodexHomeForHost(env.CODEX_HOME)) {

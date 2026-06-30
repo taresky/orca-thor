@@ -1997,6 +1997,7 @@ describe('createPtySubprocess', () => {
         rows: 24,
         cwd: '\\\\wsl.localhost\\Ubuntu\\home\\jin\\repo',
         env: {
+          WSLENV: 'KEEP/u:CLAUDE_CONFIG_DIR/u:ORCA_AGENT_HOOK_ENDPOINT/u',
           ORCA_AGENT_HOOK_PORT: '5678',
           ORCA_AGENT_HOOK_TOKEN: 'token',
           ORCA_AGENT_HOOK_ENV: 'test',
@@ -2081,6 +2082,7 @@ describe('createPtySubprocess', () => {
         rows: 24,
         cwd: '\\\\wsl.localhost\\Ubuntu\\home\\jin\\repo',
         env: {
+          WSLENV: 'KEEP/u',
           ORCA_AGENT_HOOK_PORT: '5678',
           ORCA_AGENT_HOOK_TOKEN: 'token',
           ORCA_PANE_KEY: 'tab:leaf',

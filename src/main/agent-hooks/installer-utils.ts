@@ -1,8 +1,9 @@
 import {
+  accessSync,
+  constants,
   existsSync,
   mkdirSync,
   readFileSync,
-  statSync,
   writeFileSync,
   chmodSync,
   copyFileSync,
@@ -269,8 +270,12 @@ export function writeManagedScript(scriptPath: string, content: string): void {
   if (existsSync(scriptPath)) {
     try {
       if (readFileSync(scriptPath, 'utf-8') === content) {
-        if (process.platform !== 'win32' && (statSync(scriptPath).mode & 0o111) === 0) {
-          chmodSync(scriptPath, 0o755)
+        if (process.platform !== 'win32') {
+          try {
+            accessSync(scriptPath, constants.X_OK)
+          } catch {
+            chmodSync(scriptPath, 0o755)
+          }
         }
         return
       }

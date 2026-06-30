@@ -579,6 +579,9 @@ export class LocalPtyProvider implements IPtyProvider {
           addWslEnvKeys(finalEnv, WSL_AGENT_HOOK_ENV_KEYS)
           if (finalEnv.ORCA_AGENT_HOOK_ENDPOINT?.startsWith('/')) {
             addWslEnvKeys(finalEnv, ['ORCA_AGENT_HOOK_ENDPOINT'])
+          } else {
+            delete finalEnv.ORCA_AGENT_HOOK_ENDPOINT
+            removeWslEnvKeys(finalEnv, ['ORCA_AGENT_HOOK_ENDPOINT'])
           }
         }
       } else if (codexHomeWslInfo || isWslCodexHomeForHost(finalEnv.CODEX_HOME)) {

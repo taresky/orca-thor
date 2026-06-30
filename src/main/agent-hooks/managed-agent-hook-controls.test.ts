@@ -16,6 +16,7 @@ const hookMocks = vi.hoisted(() => {
     getStatus: vi.fn(() => status(agent))
   })
   return {
+    status,
     getDefaultWslDistroMock: vi.fn(() => 'Ubuntu'),
     getWslHomeMock: vi.fn((distro: string): string | null =>
       distro === 'Ubuntu' ? '\\\\wsl.localhost\\Ubuntu\\home\\jin' : null
@@ -86,9 +87,14 @@ function managedClaudeAccount(overrides: {
 
 describe('applyAgentStatusHooksEnabled', () => {
   beforeEach(() => {
-    for (const service of Object.values(hookMocks.services)) {
+    const agentByServiceKey: Record<string, string> = {
+      commandCode: 'command-code',
+      openClaude: 'openclaude'
+    }
+    for (const [serviceKey, service] of Object.entries(hookMocks.services)) {
+      const agent = agentByServiceKey[serviceKey] ?? serviceKey
       service.install.mockClear()
-      service.remove.mockClear()
+      service.remove.mockReset().mockImplementation(() => hookMocks.status(agent))
       service.getStatus.mockClear()
     }
     hookMocks.getDefaultWslDistroMock.mockReset().mockReturnValue('Ubuntu')

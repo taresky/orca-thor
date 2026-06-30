@@ -889,11 +889,15 @@ export function buildPtyHostEnv(
   }
   if (opts.agentStatusHooksEnabled) {
     Object.assign(baseEnv, agentHookServer.buildPtyEnv())
-    if (opts.isWsl && agentHookServer.posixEndpointFilePath) {
-      // Why: WSL hook scripts source POSIX shell, not Windows cmd.exe.
-      // Point them at the stable endpoint.env path through DrvFs so
-      // long-lived WSL PTYs can refresh hook coords after Orca restarts.
-      baseEnv.ORCA_AGENT_HOOK_ENDPOINT = toLinuxPath(agentHookServer.posixEndpointFilePath)
+    if (opts.isWsl) {
+      if (agentHookServer.posixEndpointFilePath) {
+        // Why: WSL hook scripts source POSIX shell, not Windows cmd.exe.
+        // Point them at the stable endpoint.env path through DrvFs so
+        // long-lived WSL PTYs can refresh hook coords after Orca restarts.
+        baseEnv.ORCA_AGENT_HOOK_ENDPOINT = toLinuxPath(agentHookServer.posixEndpointFilePath)
+      } else {
+        delete baseEnv.ORCA_AGENT_HOOK_ENDPOINT
+      }
     }
   }
 

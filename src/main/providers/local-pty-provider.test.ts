@@ -452,6 +452,7 @@ describe('LocalPtyProvider', () => {
       Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
       provider.configure({
         buildSpawnEnv: (_id, env) => {
+          env.WSLENV = 'KEEP/u:CLAUDE_CONFIG_DIR/u:ORCA_AGENT_HOOK_ENDPOINT/u'
           env.ORCA_AGENT_HOOK_PORT = '5678'
           env.ORCA_AGENT_HOOK_TOKEN = 'token'
           env.ORCA_AGENT_HOOK_ENV = 'test'
@@ -519,6 +520,7 @@ describe('LocalPtyProvider', () => {
       Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
       provider.configure({
         buildSpawnEnv: (_id, env) => {
+          env.WSLENV = 'KEEP/u'
           env.ORCA_AGENT_HOOK_PORT = '5678'
           env.ORCA_AGENT_HOOK_TOKEN = 'token'
           env.ORCA_PANE_KEY = 'tab:leaf'

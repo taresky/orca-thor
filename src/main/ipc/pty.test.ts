@@ -715,6 +715,9 @@ describe('registerPtyHandlers', () => {
         }),
         { verifyStatus: false }
       )
+      expect(claudeHookInstallMock.mock.invocationCallOrder[0]).toBeLessThan(
+        spawnMock.mock.invocationCallOrder[0]
+      )
       expect(spawnMock).toHaveBeenCalled()
       await handlers.get('pty:kill')!(null, { id: result.id })
     })
@@ -894,6 +897,9 @@ describe('registerPtyHandlers', () => {
       expect(claudeHookInstallMock).toHaveBeenCalledWith(
         expect.objectContaining({ configDir: '/tmp/claude-runtime' }),
         { verifyStatus: false }
+      )
+      expect(claudeHookInstallMock.mock.invocationCallOrder[0]).toBeLessThan(
+        spawnMock.mock.invocationCallOrder[0]
       )
       clearProviderPtyState(result.id)
     })
@@ -1826,6 +1832,28 @@ describe('registerPtyHandlers', () => {
           expect(spawnOptions.env.ORCA_AGENT_HOOK_ENDPOINT).toBe(
             '/mnt/c/Users/test/AppData/Roaming/Orca/agent-hooks/endpoint.env'
           )
+        })
+      })
+
+      it('clears the native endpoint file path when WSL has no POSIX endpoint file', async () => {
+        await withWin32Platform(async () => {
+          buildAgentHookEnvMock.mockReturnValueOnce({
+            ORCA_AGENT_HOOK_PORT: '5678',
+            ORCA_AGENT_HOOK_TOKEN: 'agent-token',
+            ORCA_AGENT_HOOK_ENDPOINT:
+              'C:\\Users\\test\\AppData\\Roaming\\Orca\\agent-hooks\\endpoint.cmd'
+          })
+          agentHookPosixEndpointFilePathMock.mockReturnValue(null)
+
+          const spawnOptions = await daemonSpawnAndGetOptions(
+            {},
+            undefined,
+            () => ({ agentStatusHooksEnabled: true }),
+            undefined,
+            { shellOverride: 'wsl.exe' }
+          )
+
+          expect(spawnOptions.env.ORCA_AGENT_HOOK_ENDPOINT).toBeUndefined()
         })
       })
 
