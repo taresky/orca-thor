@@ -88,7 +88,7 @@ describe('installTerminalCapabilityReplyHandlers', () => {
     }
   })
 
-  it('leaves OSC color queries to other handlers when color replies are disabled', async () => {
+  it('consumes recognized OSC color queries without replying when color replies are disabled', async () => {
     const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true })
     term.options.theme = {
       foreground: '#2e3434',
@@ -114,10 +114,49 @@ describe('installTerminalCapabilityReplyHandlers', () => {
     })
 
     try {
-      await writeTerminal(term, '\x1b]10;?\x1b\\\x1b]11;?\x1b\\')
+      await writeTerminal(term, '\x1b]10;?\x1b\\\x1b]11;?\x1b\\\x1b]10;?;?\x1b\\')
 
       expect(sendInput).not.toHaveBeenCalled()
-      expect(returnValues).toEqual([false, false])
+      expect(returnValues).toEqual([true, true, true])
+    } finally {
+      disposable.dispose()
+      term.dispose()
+    }
+  })
+
+  it('leaves disabled OSC color commands and malformed queries to other handlers', async () => {
+    const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true })
+    term.options.theme = {
+      foreground: '#2e3434',
+      background: '#ffffff'
+    }
+    const sendInput = vi.fn<(data: string) => boolean>(() => true)
+    const returnValues: boolean[] = []
+    const disposable = installTerminalCapabilityReplyHandlers({
+      terminal: term as never,
+      parser: {
+        registerCsiHandler: (id, cb) =>
+          term.parser.registerCsiHandler(id, (params) => cb(params) === true),
+        registerOscHandler: (id, cb) =>
+          term.parser.registerOscHandler(id, (data) => {
+            const value = cb(data) === true
+            returnValues.push(value)
+            return value
+          })
+      },
+      sendInput,
+      isReplaying: () => false,
+      disableOscColorReplies: true
+    })
+
+    try {
+      await writeTerminal(
+        term,
+        '\x1b]10;#123456\x1b\\\x1b]11;?still-not-a-query\x1b\\\x1b]10;?;?;?\x1b\\'
+      )
+
+      expect(sendInput).not.toHaveBeenCalled()
+      expect(returnValues).toEqual([false, false, false])
     } finally {
       disposable.dispose()
       term.dispose()

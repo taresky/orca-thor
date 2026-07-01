@@ -76,6 +76,21 @@ function sendTerminalOscColorQueryRepliesForSlots(
   return true
 }
 
+function handleTerminalOscColorQuery(
+  slot: TerminalOscColorQuerySlot,
+  data: string,
+  deps: TerminalCapabilityRepliesDeps
+): boolean {
+  const slots = terminalOscColorQuerySlotsForBody(slot, data.trim())
+  if (!slots) {
+    return false
+  }
+  if (deps.disableOscColorReplies || deps.isReplaying()) {
+    return true
+  }
+  return sendTerminalOscColorQueryRepliesForSlots(slots, deps.terminal, deps.sendInput)
+}
+
 export function createTerminalPixelSizeQueryResponder(
   terminal: Pick<Terminal, 'cols' | 'rows' | 'element'>,
   sendInput: (data: string) => boolean | void
@@ -131,30 +146,10 @@ export function installTerminalCapabilityReplyHandlers(
       return true
     }),
     deps.parser.registerOscHandler(10, (data) => {
-      if (deps.disableOscColorReplies) {
-        return false
-      }
-      const slots = terminalOscColorQuerySlotsForBody(10, data.trim())
-      if (!slots) {
-        return false
-      }
-      if (deps.isReplaying()) {
-        return true
-      }
-      return sendTerminalOscColorQueryRepliesForSlots(slots, deps.terminal, deps.sendInput)
+      return handleTerminalOscColorQuery(10, data, deps)
     }),
     deps.parser.registerOscHandler(11, (data) => {
-      if (deps.disableOscColorReplies) {
-        return false
-      }
-      const slots = terminalOscColorQuerySlotsForBody(11, data.trim())
-      if (!slots) {
-        return false
-      }
-      if (deps.isReplaying()) {
-        return true
-      }
-      return sendTerminalOscColorQueryRepliesForSlots(slots, deps.terminal, deps.sendInput)
+      return handleTerminalOscColorQuery(11, data, deps)
     })
   ]
 
