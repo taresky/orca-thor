@@ -33,6 +33,8 @@ export function acceptTerminalTabTitleUpdate(
     }
   }
 
+  // Why: once OSC 0/1 has named the tab, later OSC 2 window titles must not
+  // demote the visible tab label back to legacy shell/window text.
   if (state.hasObservedAuthoritativeTabTitle) {
     return null
   }
