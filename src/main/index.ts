@@ -57,6 +57,7 @@ import {
   installDevParentDisconnectQuit,
   installDevParentSignalQuit,
   installDevParentWatchdog,
+  installServeObservability,
   installUncaughtPipeErrorGuard,
   isDevParentShutdownRequested,
   patchPackagedProcessPath,
@@ -560,9 +561,9 @@ ipcMain.handle(
 function startDesktopFirstWindowStartupServices(): Promise<void> {
   logStartupMilestone('first-window-startup-services-start')
   const startupServices = startFirstWindowStartupServices({
-    // Why: the persistent-terminal daemon is desktop-only. Headless `orca serve`
-    // registers its PTY runtime separately and must not spawn the desktop daemon
-    // or hook loopback listener.
+    // Why: this desktop first-window gate owns the persistent-terminal daemon.
+    // Headless `orca serve` starts its daemon provider later, without the
+    // first-window timeout machinery, after registering its PTY runtime.
     startDaemonPtyProvider: async (signal) => {
       logStartupMilestone('startup-service-start', { service: 'daemon-pty-provider' })
       await initDaemonPtyProvider(signal)
@@ -1361,6 +1362,60 @@ function installServeSignalHandlers(): void {
   process.once('SIGTERM', quit)
 }
 
+// Why: a stuck daemon init must not hang `orca serve` startup forever. If the
+// daemon hasn't swapped in by this point we fall open to the already-registered
+// in-process LocalPtyProvider; a late daemon swap is harmless (initDaemonPtyProvider
+// honors the abort signal so it never strands fallback PTYs on the old owner).
+const HEADLESS_DAEMON_INIT_TIMEOUT_MS = 30_000
+
+/**
+ * Route headless `orca serve` terminals through the same detached daemon the
+ * desktop app uses, so a crash of the serve process (e.g. the native watcher
+ * SIGABRT in #6635) leaves agent terminals alive and a restarted serve
+ * warm-reattaches to them. Falls back to the in-process provider on failure so
+ * a host that can't run the daemon still serves terminals.
+ */
+async function startHeadlessDaemonPtyProvider(): Promise<void> {
+  // Why: initDaemonPtyProvider honors the abort signal for its post-init swap,
+  // but ensureRunning() (probe/health-check/fork) has no internal cap, so a
+  // wedged daemon launch could otherwise block serve startup forever. Race the
+  // whole init against a timeout: on timeout we abort (so a late swap is a
+  // no-op) and proceed on the already-registered in-process LocalPtyProvider.
+  const abortController = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => {
+      abortController.abort()
+      resolve('timeout')
+    }, HEADLESS_DAEMON_INIT_TIMEOUT_MS)
+    timer.unref()
+  })
+  try {
+    const result = await Promise.race([
+      initDaemonPtyProvider(abortController.signal).then(() => 'ready' as const),
+      timeout
+    ])
+    if (result === 'timeout') {
+      console.error(
+        '[daemon] Daemon PTY provider did not start within the timeout for headless serve; serving terminals in-process'
+      )
+      return
+    }
+    console.log('[daemon] Headless serve terminals routed through the persistent daemon')
+  } catch (error) {
+    // Why: keep serving terminals on the in-process provider rather than
+    // failing startup; only resilience across serve restarts is lost.
+    console.error(
+      '[daemon] Failed to start daemon PTY provider for headless serve, falling back to in-process terminals:',
+      error
+    )
+  } finally {
+    if (timer) {
+      clearTimeout(timer)
+    }
+  }
+}
+
 // Why: on PTY teardown the paneKey mapping is dropped, so the spinner tick
 // would keep firing but sendSyntheticTitle would no-op forever. Drop the
 // entry explicitly so the shared timer shuts down once no panes are active.
@@ -1939,6 +1994,10 @@ app.whenReady().then(async () => {
   }
 
   if (serveOptions) {
+    // Why: headless serve has no Crashpad/renderer to surface faults; log
+    // JS-surfaced uncaught errors/rejections with an identifiable cause to
+    // journald before the process exits (#6635 diagnosis ask).
+    installServeObservability()
     await startServeAgentHookServer()
     registerHeadlessPtyRuntime(
       runtime,
@@ -1947,6 +2006,12 @@ app.whenReady().then(async () => {
       (target) => claudeRuntimeAuth!.prepareForClaudeLaunch(target),
       store
     )
+    // Why: swap the in-process provider for the detached daemon BEFORE the RPC
+    // transport accepts clients, so terminals created by remote clients are
+    // owned by the daemon and survive a serve-process crash/restart (#6635).
+    // registerHeadlessPtyRuntime above installed the provider listeners that
+    // initDaemonPtyProvider rebinds onto the daemon adapter.
+    await startHeadlessDaemonPtyProvider()
     // Why: headless servers have no renderer to mount <webview> browser panes.
     // Back them with main-process offscreen WebContents instead, so this host can
     // own browser pages and advertise browser.headless.v1 — but only when a

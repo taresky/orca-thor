@@ -118,6 +118,45 @@ export function installUncaughtPipeErrorGuard(): void {
   process.on('uncaughtException', onUncaughtException)
 }
 
+// Why: headless `orca serve` has no Crashpad handler and no renderer to surface
+// faults — crashes only reach journald/stdout (#6635). A native abort (the
+// @parcel/watcher SIGABRT) is uncatchable from JS by design and is handled
+// structurally by isolating the watcher into a child process; this installer
+// covers the *JS-surfaced* faults so the next occurrence logs an identifiable
+// cause (message + stack) with a stable `[serve]` tag instead of an opaque exit.
+// It is additive: the monitor observes the crash without becoming a recovery
+// handler, so the existing pipe guard/default fatal path still owns process exit.
+export function installServeObservability(): void {
+  process.on('uncaughtExceptionMonitor', (error) => {
+    const err = error as NodeJS.ErrnoException | undefined
+    if (err && (err.code === 'EIO' || err.code === 'EPIPE')) {
+      return
+    }
+    console.error(
+      `[serve] Uncaught exception (process will exit): ${err?.name ?? 'Error'}: ${
+        err?.message || '(no message)'
+      }\n${err?.stack ?? ''}`
+    )
+  })
+
+  process.on('unhandledRejection', (reason) => {
+    const err = reason instanceof Error ? reason : undefined
+    console.error(
+      `[serve] Unhandled promise rejection: ${err?.name ?? typeof reason}: ${
+        err?.message ?? String(reason)
+      }\n${err?.stack ?? ''}`
+    )
+    // Why: registering an unhandledRejection listener would otherwise suppress
+    // Node's default fatal behavior, silently leaving serve running in a
+    // possibly-inconsistent state. This installer is observability only — it
+    // must not change fatality — so re-raise on the next tick to preserve the
+    // crash (mirrors installUncaughtPipeErrorGuard's re-throw).
+    setImmediate(() => {
+      throw reason
+    })
+  })
+}
+
 export function patchPackagedProcessPath(): void {
   if (!app.isPackaged) {
     return

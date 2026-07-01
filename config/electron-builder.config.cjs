@@ -106,6 +106,9 @@ module.exports = {
     'out/main/win32-utils.js',
     'out/main/daemon-entry.js',
     'out/main/computer-sidecar.js',
+    // Why: forked via child_process.fork under ELECTRON_RUN_AS_NODE (#6635), so
+    // it must run from disk rather than inside app.asar like daemon-entry.
+    'out/main/file-watcher-process.js',
     'out/main/chunks/**',
     'resources/**',
     'node_modules/ws/**',

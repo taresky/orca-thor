@@ -31,6 +31,38 @@ export function parseArgs(argv: string[]): { socketPath: string; tokenPath: stri
   return { socketPath, tokenPath }
 }
 
+/**
+ * Whether an uncaught exception in the daemon is a native node-pty fault that
+ * is safe to suppress (the individual PTY is already dead; the daemon and its
+ * other terminal sessions are still healthy). Genuine JS logic bugs return
+ * false so they still crash the daemon rather than being masked.
+ */
+export function isSuppressibleDaemonNativeError(err: unknown): boolean {
+  const error = err as { name?: string; message?: string; stack?: string } | undefined
+  if (error?.name !== 'Error') {
+    return false
+  }
+  const msg = error.message ?? ''
+  const messageMatchesNativePty =
+    msg.includes('pty') ||
+    msg.includes('Pty') ||
+    msg.includes('EIO') ||
+    msg.includes('EPIPE') ||
+    msg.includes('EBADF') ||
+    msg.includes('ENXIO')
+  if (messageMatchesNativePty) {
+    return true
+  }
+  // The worst variant (#5377/#6635) is a Napi::Error with an EMPTY what() — no
+  // message and no JS stack frames, because it originates in C++, not JS. The
+  // original message-substring filter let that one fall through and crash the
+  // daemon (taking every terminal with it). A genuine JS logic bug always
+  // carries a message or a JS stack, so treat only the empty, stackless Error
+  // as the same native class.
+  const hasJsStackFrames = (error.stack ?? '').includes(' at ')
+  return msg === '' && !hasJsStackFrames
+}
+
 async function main(): Promise<void> {
   const { socketPath, tokenPath } = parseArgs(process.argv.slice(2))
   void warmPwshAvailabilityCache()
@@ -44,16 +76,7 @@ async function main(): Promise<void> {
   // Non-PTY errors (logic bugs, corrupt state) are re-thrown so they still
   // crash the daemon — masking those would hide real issues.
   process.on('uncaughtException', (err) => {
-    const msg = err?.message ?? ''
-    const isNativeError =
-      err?.name === 'Error' &&
-      (msg.includes('pty') ||
-        msg.includes('Pty') ||
-        msg.includes('EIO') ||
-        msg.includes('EPIPE') ||
-        msg.includes('EBADF') ||
-        msg.includes('ENXIO'))
-    if (isNativeError) {
+    if (isSuppressibleDaemonNativeError(err)) {
       console.error('[daemon] Native PTY exception (suppressed):', err)
       return
     }

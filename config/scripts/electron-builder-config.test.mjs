@@ -69,6 +69,19 @@ describe('electron-builder config', () => {
     )
   })
 
+  it('unpacks the forked child-process entries so they run under ELECTRON_RUN_AS_NODE', () => {
+    // file-watcher-process is forked (not a worker_thread) so a native
+    // @parcel/watcher abort cannot kill the serve process (#6635); it must be
+    // unpacked like daemon-entry / computer-sidecar.
+    expect(electronBuilderConfig.asarUnpack).toEqual(
+      expect.arrayContaining([
+        'out/main/daemon-entry.js',
+        'out/main/computer-sidecar.js',
+        'out/main/file-watcher-process.js'
+      ])
+    )
+  })
+
   it('uses the multi-size icon source for Linux packages', () => {
     expect(electronBuilderConfig.linux.icon).toBe('resources/build/icon.icns')
   })

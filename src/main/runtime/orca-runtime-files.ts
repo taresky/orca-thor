@@ -421,8 +421,9 @@ export class RuntimeFileCommands {
     if (process.platform === 'win32') {
       return watchWindowsRuntimeFileExplorer(rootPath, callback)
     }
-    // Why: the watcher runs in a worker thread so @parcel/watcher's blocking
-    // recursive crawl can't starve the main/`serve` process (issue #5308).
+    // Why: the watcher runs in a forked child process so @parcel/watcher's
+    // blocking recursive crawl can't starve the main/`serve` process (#5308)
+    // and a native teardown abort can't kill it (#6635).
     const dispose = await watchFileExplorerInWorker(rootPath, callback)
     return () => {
       trackRuntimeFileWatcherUnsubscribe(rootPath, dispose)
