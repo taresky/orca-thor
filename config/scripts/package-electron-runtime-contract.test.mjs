@@ -168,12 +168,20 @@ describe('Electron runtime package contract', () => {
     )
     expect(innerVerifyRun).toContain('& 7z x -y "-o$setupExtractDir" $installer')
     expect(innerVerifyRun).toContain(
+      "$innerExecutables = @(Get-ChildItem -LiteralPath $setupExtractDir -File -Filter 'Orca.exe')"
+    )
+    expect(innerVerifyRun).toContain('if ($innerExecutables.Count -eq 0)')
+    expect(innerVerifyRun).toContain(
       "$appArchives = @(Get-ChildItem -LiteralPath $setupExtractDir -Recurse -File -Filter 'app-*.7z')"
     )
     expect(innerVerifyRun).toContain('if ($appArchives.Count -ne 1)')
+    expect(innerVerifyRun).toContain('Expected app-root Orca.exe or exactly one app-*.7z')
     expect(innerVerifyRun).toContain('& 7z x -y "-o$appExtractDir" $($appArchives[0].FullName)')
     expect(innerVerifyRun).toContain(
       "$innerExecutables = @(Get-ChildItem -LiteralPath $appExtractDir -File -Filter 'Orca.exe')"
+    )
+    expect(innerVerifyRun.indexOf("-Filter 'Orca.exe'")).toBeLessThan(
+      innerVerifyRun.indexOf("-Filter 'app-*.7z'")
     )
     expect(innerVerifyRun).toContain('if ($innerExecutables.Count -ne 1)')
     expect(innerVerifyRun).toContain(
