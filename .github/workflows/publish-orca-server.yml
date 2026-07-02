@@ -20,6 +20,11 @@ on:
         description: 'Desktop release tag to publish, e.g. v1.4.116 or v1.4.116-rc.0'
         required: true
         type: string
+      publish_github_release_after_npm:
+        description: 'Publish the matching GitHub draft release after npm succeeds'
+        required: false
+        default: false
+        type: boolean
     secrets:
       NPM_TOKEN:
         required: true
@@ -29,6 +34,11 @@ on:
         description: 'Desktop release tag to publish, e.g. v1.4.116 or v1.4.116-rc.0'
         required: true
         type: string
+      publish_github_release_after_npm:
+        description: 'Publish the matching GitHub draft release after npm succeeds'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -93,12 +103,12 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - { runner: ubuntu-latest,    slot: linux-x64-glibc,   kind: glibc }
+          - { runner: ubuntu-latest, slot: linux-x64-glibc, kind: glibc }
           - { runner: ubuntu-24.04-arm, slot: linux-arm64-glibc, kind: glibc }
-          - { runner: ubuntu-latest,    slot: linux-x64-musl,    kind: musl }
-          - { runner: ubuntu-24.04-arm, slot: linux-arm64-musl,  kind: musl }
-          - { runner: macos-14,         slot: darwin-arm64,      kind: darwin }
-          - { runner: macos-13,         slot: darwin-x64,        kind: darwin }
+          - { runner: ubuntu-latest, slot: linux-x64-musl, kind: musl }
+          - { runner: ubuntu-24.04-arm, slot: linux-arm64-musl, kind: musl }
+          - { runner: macos-14, slot: darwin-arm64, kind: darwin }
+          - { runner: macos-13, slot: darwin-x64, kind: darwin }
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
@@ -151,6 +161,8 @@ jobs:
       - prebuilds
     if: github.repository == 'stablyai/orca'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -241,3 +253,18 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           ORCA_SERVER_VERSION: ${{ needs.resolve.outputs.version }}
           NPM_DIST_TAG: ${{ needs.resolve.outputs.npm_dist_tag }}
+
+      - name: Publish recovered GitHub draft release
+        # Why: recovered RC drafts are intentionally exposed only after their
+        # matching npm package exists, and this runs per tag so one failed RC
+        # cannot hold back another already-synced RC.
+        if: ${{ inputs.publish_github_release_after_npm }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" \
+            --draft=false \
+            --prerelease=true \
+            --repo "$GITHUB_REPOSITORY"

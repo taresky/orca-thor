@@ -40,6 +40,7 @@ describe('serveOrcaApp', () => {
         json: true,
         port: '6768',
         pairingAddress: '100.64.1.20',
+        userDataPath: '/srv/orca-data',
         noPairing: true
       })
     ).resolves.toBe(0)
@@ -48,8 +49,16 @@ describe('serveOrcaApp', () => {
       json: true,
       port: '6768',
       pairingAddress: '100.64.1.20',
+      userDataPath: '/srv/orca-data',
       noPairing: true
     })
+    expect(spawnMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects --user-data on the Electron foreground serve path', async () => {
+    expect(() => serveOrcaApp({ userDataPath: '/srv/orca-data' })).toThrow(
+      '`orca serve --user-data` is only supported by @stablyai/orca-server.'
+    )
     expect(spawnMock).not.toHaveBeenCalled()
   })
 

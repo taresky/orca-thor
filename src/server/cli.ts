@@ -26,6 +26,9 @@ function nodeServerArgv(args: ServeOrcaAppOptions): string[] {
   if (args.pairingAddress) {
     argv.push('--pairing-address', args.pairingAddress)
   }
+  if (args.userDataPath) {
+    argv.push('--user-data', args.userDataPath)
+  }
   if (args.noPairing) {
     argv.push('--no-pairing')
   }

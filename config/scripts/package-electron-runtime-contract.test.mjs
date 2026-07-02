@@ -286,7 +286,7 @@ describe('Electron runtime package contract', () => {
     )
     expect(releaseWorkflow.jobs['homebrew-bump'].if).not.toContain('-rc.')
     expect(releaseWorkflow.jobs['homebrew-bump-published-rc-draft'].with.tag).toBe(
-      '${{ needs.cut.outputs.latest_published_rc_tag }}'
+      '${{ needs.cut.outputs.latest_publishable_rc_tag }}'
     )
 
     const resolveCaskStep = homebrewWorkflow.jobs['bump-cask'].steps.find(
@@ -319,6 +319,9 @@ describe('Electron runtime package contract', () => {
     const publishReleaseJob = releaseWorkflow.jobs['publish-release']
     const npmResolveJob = npmWorkflow.jobs.resolve
     const npmPublishJob = npmWorkflow.jobs.publish
+    const findDraftStep = releaseCutJob.steps.find(
+      (step) => step.name === 'Find complete release-cut RC drafts from prior runs'
+    )
     const resolveStep = npmResolveJob.steps.find(
       (step) => step.name === 'Resolve npm version from desktop release tag'
     )
@@ -328,8 +331,12 @@ describe('Electron runtime package contract', () => {
     )
 
     expect(npmWorkflow.on.workflow_call.inputs.tag.required).toBe(true)
+    expect(npmWorkflow.on.workflow_call.inputs.publish_github_release_after_npm.default).toBe(false)
     expect(npmWorkflow.on.workflow_call.secrets.NPM_TOKEN.required).toBe(true)
     expect(npmWorkflow.on.workflow_dispatch.inputs.tag.required).toBe(true)
+    expect(npmWorkflow.on.workflow_dispatch.inputs.publish_github_release_after_npm.default).toBe(
+      false
+    )
     expect(npmWorkflow.on.push).toBeUndefined()
 
     expect(resolveStep.run).toContain('npm_dist_tag=alpha')
@@ -342,9 +349,22 @@ describe('Electron runtime package contract', () => {
     expect(distTagStep.run).toContain(
       'npm dist-tag add "@stablyai/orca-server@$ORCA_SERVER_VERSION" "$NPM_DIST_TAG"'
     )
+    expect(npmPublishJob.permissions.contents).toBe('write')
+    expect(npmPublishJob.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'Publish recovered GitHub draft release',
+          if: '${{ inputs.publish_github_release_after_npm }}'
+        })
+      ])
+    )
 
-    expect(releaseCutJob.outputs.published_rc_tags_json).toBe(
-      '${{ steps.publish_drafts.outputs.published_tags_json }}'
+    expect(findDraftStep.env.PUBLISH_DRAFT_RELEASES).toBe('false')
+    expect(releaseCutJob.outputs.publishable_rc_tags_json).toBe(
+      '${{ steps.publish_drafts.outputs.publishable_tags_json }}'
+    )
+    expect(releaseCutJob.outputs.latest_publishable_rc_tag).toBe(
+      '${{ steps.publish_drafts.outputs.latest_publishable_tag }}'
     )
     expect(npmReleaseJob.needs).toEqual(['cut', 'build', 'build-mac', 'terminal-rendering-golden'])
     expect(npmReleaseJob.uses).toBe('./.github/workflows/publish-orca-server.yml')
@@ -354,9 +374,10 @@ describe('Electron runtime package contract', () => {
 
     expect(npmRecoveredRcJob.strategy['max-parallel']).toBe(1)
     expect(npmRecoveredRcJob.strategy.matrix.tag).toBe(
-      '${{ fromJSON(needs.cut.outputs.published_rc_tags_json) }}'
+      '${{ fromJSON(needs.cut.outputs.publishable_rc_tags_json) }}'
     )
     expect(npmRecoveredRcJob.with.tag).toBe('${{ matrix.tag }}')
+    expect(npmRecoveredRcJob.with.publish_github_release_after_npm).toBe(true)
     expect(releaseWorkflow.jobs['homebrew-bump-published-rc-draft'].needs).toContain(
       'publish-orca-server-published-rc-drafts'
     )

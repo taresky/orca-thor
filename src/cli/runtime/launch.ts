@@ -6,6 +6,7 @@ export type ServeOrcaAppOptions = {
   json?: boolean
   port?: string | null
   pairingAddress?: string | null
+  userDataPath?: string | null
   noPairing?: boolean
   mobilePairing?: boolean
   recipeJson?: boolean
@@ -76,6 +77,12 @@ export function serveOrcaApp(args: ServeOrcaAppOptions = {}): Promise<number> {
   const nodeServerServe = globalThis.__ORCA_NODE_SERVER_SERVE__
   if (nodeServerServe) {
     return nodeServerServe(args)
+  }
+  if (args.userDataPath) {
+    throw new RuntimeClientError(
+      'unsupported_argument',
+      '`orca serve --user-data` is only supported by @stablyai/orca-server.'
+    )
   }
 
   const executable = resolveForegroundOrcaExecutable()

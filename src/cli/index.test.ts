@@ -1810,6 +1810,7 @@ describe('orca cli worktree awareness', () => {
       json: true,
       port: '6768',
       pairingAddress: '100.64.1.20',
+      userDataPath: null,
       noPairing: true,
       mobilePairing: false,
       recipeJson: false,
@@ -1829,6 +1830,7 @@ describe('orca cli worktree awareness', () => {
       json: true,
       port: null,
       pairingAddress: '100.64.1.20',
+      userDataPath: null,
       noPairing: false,
       mobilePairing: true,
       recipeJson: false,
@@ -1855,10 +1857,28 @@ describe('orca cli worktree awareness', () => {
       json: false,
       port: null,
       pairingAddress: 'wss://sandbox.example.com',
+      userDataPath: null,
       noPairing: false,
       mobilePairing: false,
       recipeJson: true,
       projectRoot: '/workspace/repo'
+    })
+  })
+
+  it('passes an explicit userData dir through to `orca serve`', async () => {
+    serveOrcaAppMock.mockResolvedValue(0)
+
+    await main(['serve', '--user-data', '/srv/orca-data', '--json'], '/tmp/repo')
+
+    expect(serveOrcaAppMock).toHaveBeenCalledWith({
+      json: true,
+      port: null,
+      pairingAddress: null,
+      userDataPath: '/srv/orca-data',
+      noPairing: false,
+      mobilePairing: false,
+      recipeJson: false,
+      projectRoot: null
     })
   })
 

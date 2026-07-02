@@ -189,7 +189,7 @@ Browser Automation:
 
 Common Commands:
   orca open [--json]
-  orca serve [--port <port>] [--pairing-address <host>] [--mobile-pairing] [--no-pairing] [--project-root <path>] [--recipe-json] [--json]
+  orca serve [--port <port>] [--pairing-address <host>] [--user-data <dir>] [--mobile-pairing] [--no-pairing] [--project-root <path>] [--recipe-json] [--json]
   orca status [--json]
   orca diagnostics memory [--json]
   orca environment add --name <name> --pairing-code <code> [--json]

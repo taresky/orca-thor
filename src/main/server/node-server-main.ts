@@ -33,6 +33,9 @@ export async function runNodeServer(argv: string[] = process.argv.slice(2)): Pro
   }
 
   // 1. Install host abstractions BEFORE any consumer resolves a path/secret.
+  const explicitlyConfiguredUserData = Boolean(
+    options.userDataPath || process.env.ORCA_USER_DATA_PATH
+  )
   const env = new NodeAppEnvironment({ userDataPath: options.userDataPath })
   setAppEnvironment(env)
   const userDataPath = env.getPath('userData')
@@ -42,7 +45,7 @@ export async function runNodeServer(argv: string[] = process.argv.slice(2)): Pro
   // Warn if we're about to share a desktop install's userData (data-race risk).
   warnIfSharingDesktopUserData({
     userDataPath,
-    explicitlyConfigured: Boolean(options.userDataPath || process.env.ORCA_USER_DATA_PATH)
+    explicitlyConfigured: explicitlyConfiguredUserData
   })
   // Why: the desktop app relies on Electron having created userData already.
   // Headless must create it itself before the RPC server binds its Unix socket
