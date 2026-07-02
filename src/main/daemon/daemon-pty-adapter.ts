@@ -97,6 +97,14 @@ export class DaemonPtyAdapter implements IPtyProvider {
   // Against older daemons the tick falls back to full-snapshot checkpoints.
   private supportsIncrementalCheckpoints: boolean
   private static CHECKPOINT_INTERVAL_MS = 5_000
+  // Why: a streaming session (build logs, `yes`) re-triggers a full multi-MB
+  // snapshot checkpoint on every 5s tick via pending-buffer overflow or the
+  // log-size cap — hundreds of MB/min of disk writes from one busy terminal.
+  // Bounding cap/overflow-triggered snapshots per session trades bounded
+  // cold-crash scrollback staleness (warm reattach and final checkpoints are
+  // unaffected and bypass this) for a ~9x cut in worst-case write volume.
+  private static FULL_CHECKPOINT_COOLDOWN_MS = 45_000
+  private lastFullCheckpointAt = new Map<string, number>()
 
   constructor(opts: DaemonPtyAdapterOptions) {
     this.protocolVersion = opts.protocolVersion ?? PROTOCOL_VERSION
@@ -305,6 +313,7 @@ export class DaemonPtyAdapter implements IPtyProvider {
     // (Under keepHistory the final checkpoint above already cleared the flag, so
     // this is a harmless no-op there — kept unconditional to cover both paths.)
     this.sessionsNeedingFullCheckpoint.delete(id)
+    this.lastFullCheckpointAt.delete(id)
     this.stopCheckpointTimerIfIdle()
     this.initialCwds.delete(id)
     // Why: history removal is for the "user explicitly closed this terminal"
@@ -504,6 +513,7 @@ export class DaemonPtyAdapter implements IPtyProvider {
     const ids = [...this.activeSessionIds]
     this.activeSessionIds.clear()
     this.dirtySessionVersions.clear()
+    this.lastFullCheckpointAt.clear()
     this.stopCheckpointTimer()
     for (const id of ids) {
       this.coldRestoreCache.delete(id)
@@ -563,6 +573,7 @@ export class DaemonPtyAdapter implements IPtyProvider {
   dispose(): void {
     this.stopCheckpointTimer()
     this.dirtySessionVersions.clear()
+    this.lastFullCheckpointAt.clear()
     this.coldRestoreCache.clear()
     this.removeEventListener?.()
     this.removeEventListener = null
@@ -598,6 +609,7 @@ export class DaemonPtyAdapter implements IPtyProvider {
     // and the pending getSnapshot RPCs would be rejected.
     await this.checkpointAllSessions()
     this.dirtySessionVersions.clear()
+    this.lastFullCheckpointAt.clear()
     this.coldRestoreCache.clear()
     this.removeEventListener?.()
     this.removeEventListener = null
@@ -723,8 +735,12 @@ export class DaemonPtyAdapter implements IPtyProvider {
           final: opts?.final === true,
           teardown: opts?.teardown === true
         })
-          .then(() => {
-            completed.add(sessionId)
+          .then((result) => {
+            // Why: deferred sessions stay dirty so the checkpoint timer keeps
+            // retrying until their full-snapshot cooldown expires.
+            if (result === 'done') {
+              completed.add(sessionId)
+            }
           })
           .catch((err) => console.warn('[history] checkpoint failed:', sessionId, err))
       }
@@ -739,18 +755,36 @@ export class DaemonPtyAdapter implements IPtyProvider {
     return completed
   }
 
+  // Why cooldown starts only after a session's FIRST full snapshot: a session
+  // with no checkpoint on disk yet must be able to write one immediately or a
+  // cold restore would find nothing.
+  private isFullCheckpointCoolingDown(sessionId: string): boolean {
+    const last = this.lastFullCheckpointAt.get(sessionId)
+    return last !== undefined && Date.now() - last < DaemonPtyAdapter.FULL_CHECKPOINT_COOLDOWN_MS
+  }
+
+  // Why 'deferred' exists: a cap/overflow-triggered full snapshot inside the
+  // cooldown window is postponed, and the session must STAY dirty so the 5s
+  // timer keeps retrying until the cooldown expires. While deferred, no
+  // takePendingOutput/append runs for the session — appending past a dropped
+  // range would leave a hole in the log, whereas skipping keeps the on-disk
+  // state a consistent (merely stale) prefix that the eventual full snapshot
+  // re-anchors.
   private async checkpointSession(
     sessionId: string,
     opts: { final: boolean; teardown: boolean }
-  ): Promise<void> {
+  ): Promise<'done' | 'deferred'> {
     if (!this.supportsIncrementalCheckpoints) {
       const result = await this.client.request<GetSnapshotResult>('getSnapshot', { sessionId })
       if (result.snapshot && this.historyManager) {
         await this.historyManager.checkpoint(sessionId, result.snapshot)
       }
-      return
+      return 'done'
     }
     if (opts.final || this.sessionsNeedingFullCheckpoint.has(sessionId)) {
+      if (!opts.final && this.isFullCheckpointCoolingDown(sessionId)) {
+        return 'deferred'
+      }
       // Why take-with-snapshot instead of plain getSnapshot: the take clears
       // the daemon's pending records in the same synchronous turn as the
       // serialize. A plain snapshot would leave pre-snapshot records pending;
@@ -759,25 +793,29 @@ export class DaemonPtyAdapter implements IPtyProvider {
       // contains them.
       await this.takeSnapshotAndCheckpoint(sessionId, { teardown: opts.teardown })
       this.sessionsNeedingFullCheckpoint.delete(sessionId)
-      return
+      return 'done'
     }
     const take = await this.client.request<TakePendingOutputResult | null>('takePendingOutput', {
       sessionId
     })
     if (!take) {
-      return
+      return 'done'
     }
     if (take.overflowed) {
       // Why: overflow dropped records, so the log has a hole — only a full
       // snapshot (which reflects everything ever written) can re-anchor it.
+      if (this.isFullCheckpointCoolingDown(sessionId)) {
+        this.sessionsNeedingFullCheckpoint.add(sessionId)
+        return 'deferred'
+      }
       await this.takeSnapshotAndCheckpoint(sessionId, { teardown: false })
-      return
+      return 'done'
     }
     if (take.records.length === 0) {
-      return
+      return 'done'
     }
     if (!this.historyManager) {
-      return
+      return 'done'
     }
     const appendResult = await this.historyManager.appendIncrements(
       sessionId,
@@ -787,8 +825,13 @@ export class DaemonPtyAdapter implements IPtyProvider {
     if (appendResult === 'needs-checkpoint') {
       // Why dropping take.records is lossless: they were applied to the live
       // emulator before the take, so the snapshot below contains them.
+      if (this.isFullCheckpointCoolingDown(sessionId)) {
+        this.sessionsNeedingFullCheckpoint.add(sessionId)
+        return 'deferred'
+      }
       await this.takeSnapshotAndCheckpoint(sessionId, { teardown: false })
     }
+    return 'done'
   }
 
   private async takeSnapshotAndCheckpoint(
@@ -802,6 +845,7 @@ export class DaemonPtyAdapter implements IPtyProvider {
     })
     if (take?.snapshot && this.historyManager) {
       await this.historyManager.checkpoint(sessionId, take.snapshot)
+      this.lastFullCheckpointAt.set(sessionId, Date.now())
       if (take.records.length > 0) {
         // Why: take-with-snapshot usually returns no records because the
         // snapshot subsumes them. Held parser-state bytes, such as an
