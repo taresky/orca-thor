@@ -194,6 +194,10 @@ describe('Electron runtime package contract', () => {
 
     expect(installStep.if).toBe("matrix.platform == 'win'")
     expect(installStep.shell).toBe('pwsh')
+    expect(installRun).toContain(
+      'if ($null -eq (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue))'
+    )
+    expect(installRun).toContain('Register-PSRepository -Default -InstallationPolicy Trusted')
     expect(installRun).toContain('Set-PSRepository -Name PSGallery -InstallationPolicy Trusted')
     expect(installRun).toMatch(/\$env:PSModulePath -split \[System\.IO\.Path\]::PathSeparator/)
     expect(installRun).toContain(
