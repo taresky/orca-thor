@@ -10,7 +10,7 @@
  * bundle is truly Electron-free.
  */
 import { build } from 'esbuild'
-import { mkdirSync, writeFileSync, readFileSync, copyFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, copyFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
 const __dirname = import.meta.dirname
@@ -28,6 +28,9 @@ const PACKAGE_NAME = '@stablyai/orca-server'
 const wantReport = process.argv.includes('--report')
 
 mkdirSync(OUT_DIR, { recursive: true })
+// Why: the npm server package used to publish an `orca` bin; remove stale local
+// output so package/tarball checks prove the Linux-safe `orca-ide` contract.
+rmSync(join(OUT_DIR, 'orca.js'), { force: true })
 
 // Why: esbuild cannot bundle .node native addons. Mark every native addon
 // (and packages that optionally require one, like ssh2 -> cpu-features) as
@@ -50,7 +53,7 @@ const externalNativeAddons = {
 const result = await build({
   entryPoints: {
     'orca-server': SERVER_ENTRY,
-    orca: SERVER_CLI_ENTRY
+    'orca-ide': SERVER_CLI_ENTRY
   },
   bundle: true,
   platform: 'node',
@@ -109,12 +112,12 @@ const serverPkg = {
   version: rootPkg.version,
   description: 'Headless, Electron-free Orca runtime server',
   type: 'commonjs',
-  bin: { orca: './orca.js', 'orca-server': './orca-server.js' },
+  bin: { 'orca-ide': './orca-ide.js', 'orca-server': './orca-server.js' },
   main: './orca-server.js',
   // Why: limit the published tarball to the runtime artifacts. Without this npm
   // would include stray files in OUT_DIR (metafile.json, etc.). The prebuilts
   // dir + scripts are load-bearing for the toolchain-free node-pty install.
-  files: ['orca.js', 'orca-server.js', 'package.json', 'scripts/', 'prebuilds/'],
+  files: ['orca-ide.js', 'orca-server.js', 'package.json', 'scripts/', 'prebuilds/'],
   // Why: after deps install, drop the matching shipped node-pty prebuilt into
   // place so no compiler is needed on supported platforms. Falls back silently
   // to node-pty's own source build when no prebuilt matches (see the script).
@@ -142,7 +145,7 @@ copyFileSync(
   join(OUT_DIR, 'scripts', 'install-node-pty-prebuilt.mjs')
 )
 console.log(
-  `Wrote ${join(OUT_DIR, 'package.json')} (type: commonjs, bin: orca + orca-server, postinstall: prebuilt installer)`
+  `Wrote ${join(OUT_DIR, 'package.json')} (type: commonjs, bin: orca-ide + orca-server, postinstall: prebuilt installer)`
 )
 
 console.log('\norca server bundles complete.')

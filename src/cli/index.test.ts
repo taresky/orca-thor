@@ -317,6 +317,7 @@ describe('orca cli worktree awareness', () => {
   const originalEnvironment = process.env.ORCA_ENVIRONMENT
   const originalWorkspaceId = process.env.ORCA_WORKSPACE_ID
   const originalWorktreeId = process.env.ORCA_WORKTREE_ID
+  const originalCliCommandName = process.env.ORCA_CLI_COMMAND_NAME
 
   beforeEach(() => {
     callMock.mockReset()
@@ -387,6 +388,11 @@ describe('orca cli worktree awareness', () => {
       delete process.env.ORCA_WORKTREE_ID
     } else {
       process.env.ORCA_WORKTREE_ID = originalWorktreeId
+    }
+    if (originalCliCommandName === undefined) {
+      delete process.env.ORCA_CLI_COMMAND_NAME
+    } else {
+      process.env.ORCA_CLI_COMMAND_NAME = originalCliCommandName
     }
   })
 
@@ -1880,6 +1886,30 @@ describe('orca cli worktree awareness', () => {
       recipeJson: false,
       projectRoot: null
     })
+  })
+
+  it('renders npm server help with the orca-ide command name', async () => {
+    process.env.ORCA_CLI_COMMAND_NAME = 'orca-ide'
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await main(['serve', '--help'], '/tmp/repo')
+
+    const output = String(logSpy.mock.calls[0][0])
+    expect(output).toContain('orca-ide serve')
+    expect(output).toContain('Usage: orca-ide serve')
+    expect(output).toContain('$ orca-ide serve --json')
+    expect(output).toContain('`orca-ide tab list --json`')
+    expect(output).not.toContain('Usage: orca serve')
+    expect(output).not.toContain('`orca tab list --json`')
+
+    logSpy.mockClear()
+    await main(['--help'], '/tmp/repo')
+
+    const rootOutput = String(logSpy.mock.calls[0][0])
+    expect(rootOutput).toContain('orca-ide tab create --url https://example.com')
+    expect(rootOutput).toContain('prefer: orca-ide tab list --json')
+    expect(rootOutput).not.toContain('Create or navigate:  orca tab create')
+    expect(rootOutput).not.toContain('prefer: orca tab list --json')
   })
 
   it('runs vm recipe doctor locally without contacting the app runtime', async () => {

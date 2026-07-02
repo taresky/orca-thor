@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates git openssh-client python3 build-essential \
   && rm -rf /var/lib/apt/lists/*
 
-# The published @stablyai/orca-server package carries the bundled `orca` CLI,
+# The published @stablyai/orca-server package carries the bundled `orca-ide` CLI,
 # server runtime, and node-pty prebuilt matrix; its postinstall selects the
 # matching binary (or compiles as a last resort using the toolchain above).
 RUN npm install -g @stablyai/orca-server
@@ -33,11 +33,11 @@ WORKDIR /work
 
 # Pairing/E2EE protects the API/WS; do not run an open port unauthenticated.
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD orca status || exit 1
+  CMD orca-ide status || exit 1
 
 # The WebSocket transport binds 0.0.0.0 by default, so the server is reachable
 # from outside the container. --json makes the pairing URL machine-readable.
-ENTRYPOINT ["orca", "serve", "--port", "6768", "--json"]
+ENTRYPOINT ["orca-ide", "serve", "--port", "6768", "--json"]
 
 # ---- full (adds Xvfb + chromium for browser panes) ----
 FROM slim AS full

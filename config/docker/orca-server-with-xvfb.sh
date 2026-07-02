@@ -19,4 +19,4 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 
-exec orca serve --port "${ORCA_SERVE_PORT:-6768}" --json "$@"
+exec orca-ide serve --port "${ORCA_SERVE_PORT:-6768}" --json "$@"

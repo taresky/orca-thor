@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
- * `orca` bin for the npm server package. It keeps the public CLI shape intact:
- * `orca serve` starts the plain-Node server, and every other `orca ...` command
- * is the normal RPC client pointed at the runtime metadata under userData.
+ * `orca-ide` bin for the npm server package. It keeps the public CLI shape
+ * intact without claiming Linux's GNOME Orca `orca` command: `orca-ide serve`
+ * starts the plain-Node server, and every other command is the normal RPC
+ * client pointed at the runtime metadata under userData.
  */
 import { runNodeServer } from '../main/server/node-server-main'
 import type { ServeOrcaAppOptions } from '../cli/runtime/launch'
@@ -12,7 +13,7 @@ function nodeServerArgv(args: ServeOrcaAppOptions): string[] {
   if (args.recipeJson) {
     throw new RuntimeClientError(
       'unsupported_argument',
-      '`orca serve --recipe-json` is not supported by @stablyai/orca-server yet.'
+      '`orca-ide serve --recipe-json` is not supported by @stablyai/orca-server yet.'
     )
   }
 
@@ -44,4 +45,5 @@ globalThis.__ORCA_NODE_SERVER_SERVE__ = async (args) => {
 }
 
 globalThis.__ORCA_CLI_DISABLE_AUTO_MAIN__ = true
+process.env.ORCA_CLI_COMMAND_NAME ??= 'orca-ide'
 void import('../cli/index').then(({ main }) => main())

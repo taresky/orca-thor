@@ -15,7 +15,7 @@ import { spawn } from 'node:child_process'
 import { WebSocket } from 'ws'
 import nacl from 'tweetnacl'
 
-const SERVER_ENTRY = process.argv[2] || '/app/orca.js'
+const SERVER_ENTRY = process.argv[2] || '/app/orca-ide.js'
 const SERVER_ARGS = SERVER_ENTRY.endsWith('orca-server.js')
   ? [SERVER_ENTRY, '--serve-port', '0', '--json']
   : [SERVER_ENTRY, 'serve', '--port', '0', '--json']

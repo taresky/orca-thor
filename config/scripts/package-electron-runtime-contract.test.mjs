@@ -329,6 +329,13 @@ describe('Electron runtime package contract', () => {
     const distTagStep = npmPublishJob.steps.find(
       (step) => step.name === 'Ensure npm dist-tag points at release version'
     )
+    const tarballStep = npmPublishJob.steps.find(
+      (step) => step.name === 'Verify tarball ships bundle + all prebuilts (incl. spawn-helper)'
+    )
+    const buildServerScript = readFileSync(
+      join(projectDir, 'config/scripts/build-server.mjs'),
+      'utf8'
+    )
 
     expect(npmWorkflow.on.workflow_call.inputs.tag.required).toBe(true)
     expect(npmWorkflow.on.workflow_call.inputs.publish_github_release_after_npm.default).toBe(false)
@@ -350,6 +357,16 @@ describe('Electron runtime package contract', () => {
       'npm dist-tag add "@stablyai/orca-server@$ORCA_SERVER_VERSION" "$NPM_DIST_TAG"'
     )
     expect(npmPublishJob.permissions.contents).toBe('write')
+    expect(tarballStep.run).toContain('^package/orca-ide.js$')
+    expect(tarballStep.run).toContain('^package/orca.js$')
+    expect(tarballStep.run).toContain('UNSAFE orca bin bundle present')
+    expect(buildServerScript).toContain(
+      "bin: { 'orca-ide': './orca-ide.js', 'orca-server': './orca-server.js' }"
+    )
+    expect(buildServerScript).toContain(
+      "files: ['orca-ide.js', 'orca-server.js', 'package.json', 'scripts/', 'prebuilds/']"
+    )
+    expect(buildServerScript).not.toContain("bin: { orca: './orca.js'")
     expect(npmPublishJob.steps).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
