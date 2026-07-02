@@ -34,6 +34,7 @@ type WorktreeTitleInlineRenameProps = {
   editingClassName?: string
   inputClassName?: string
   titleWrapper?: (title: React.ReactElement) => React.ReactElement
+  wrapTitle?: boolean
   onEditingChange?: (editing: boolean) => void
   onRename: (displayName: string) => Promise<void> | void
   // Why: lets a parent (e.g. the workspace.rename shortcut via WorktreeCard)
@@ -52,6 +53,7 @@ export function WorktreeTitleInlineRename({
   editingClassName,
   inputClassName,
   titleWrapper,
+  wrapTitle = false,
   onEditingChange,
   onRename,
   beginEditing = false,
@@ -282,7 +284,8 @@ export function WorktreeTitleInlineRename({
       key={`title:${titleElementKey}`}
       ref={handleRootRef}
       className={cn(
-        'block min-w-0 truncate leading-tight focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-worktree-sidebar-ring',
+        'block min-w-0 leading-tight focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-worktree-sidebar-ring',
+        wrapTitle ? 'break-words whitespace-normal' : 'truncate',
         titleEmphasisClassName,
         className
       )}
@@ -304,7 +307,7 @@ export function WorktreeTitleInlineRename({
     return titleWrapper(title)
   }
 
-  if (!titleTruncated) {
+  if (wrapTitle || !titleTruncated) {
     return title
   }
 

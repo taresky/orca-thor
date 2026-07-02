@@ -1816,11 +1816,13 @@ const WorktreeCard = React.memo(function WorktreeCard({
         automationHostId={worktree.hostId}
         branchName={hoverBranchName}
         workspaceTitle={hoverWorkspaceTitle}
+        workspaceTitleRenameDisabled={isDeleting || affiliateListMode}
         detailsAfter={
           workspacePorts.length > 0 ? <WorktreeCardPortsDetails ports={workspacePorts} /> : null
         }
         openDelay={100}
         hoverControl={detailsHoverControl}
+        onRenameWorkspaceTitle={affiliateListMode ? undefined : handleRenameTitle}
         onEditIssue={affiliateListMode ? undefined : handleEditIssue}
         onEditComment={affiliateListMode ? undefined : handleEditComment}
         onOpenGitHubIssueInOrca={
