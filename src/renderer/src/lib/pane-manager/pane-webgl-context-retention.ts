@@ -5,8 +5,9 @@ import type { ManagedPaneInternal } from './pane-manager-types'
 // and recreate it on return — ~5ms on macOS but 100-500ms per pane on Windows
 // (ANGLE → D3D11), paid synchronously on the switch path. With the app-level
 // context budget raised to 128 (#7064), hidden panes can keep their contexts;
-// this LRU cap only bounds hidden-pane GPU memory.
-export const RETAINED_WEBGL_PANE_CAP = 16
+// this LRU cap only bounds hidden-pane GPU memory. Sized for the reported hot
+// set (~10-16 worktrees × ~2 terminals) while staying far under the budget.
+export const RETAINED_WEBGL_PANE_CAP = 32
 
 /** Windows-only: context re-creation is cheap on macOS/Linux GL, so hidden
  *  panes there keep the long-proven dispose-on-hide behavior instead of

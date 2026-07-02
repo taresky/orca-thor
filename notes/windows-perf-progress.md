@@ -30,10 +30,12 @@ Findings (baseline, this machine):
   ConPTY corruption + perf differences on degraded-mode/fresh-local spawns).
 
 Fixes on this branch (PR #7080 merged in — WebGL release on dispose + stale pty:exit synthesis):
-- A: WebGL context retention across hide/show (pane-webgl-context-retention.ts, LRU cap 16;
-  suspend keeps live contexts; resume repaints instead of recreating). Gated to Windows
-  (getRendererAppPlatform() === 'win32'): macOS/Linux context creation is cheap, so they
-  keep dispose-on-hide and pay no retention GPU-memory cost.
+- A: WebGL context retention across hide/show (pane-webgl-context-retention.ts, LRU cap 32 —
+  sized for ~10-16 worktrees × ~2 terminals hot sets; suspend keeps live contexts; resume
+  repaints instead of recreating). Gated to Windows (getRendererAppPlatform() === 'win32'):
+  macOS/Linux context creation is cheap, so they keep dispose-on-hide and pay no retention
+  GPU-memory cost. Peer note: at least one comparable product raises the context budget to
+  256 and retains unbounded with a session-wide DOM latch on loss; we bound + recover instead.
 - B: useConptyDll for LocalPtyProvider spawns (local-pty-utils.ts) — parity with daemon.
 - D: atlas recovery bursts skip suspended panes (scoped to visible); retained panes repaint
   on resume (shared-atlas invariant preserved).
