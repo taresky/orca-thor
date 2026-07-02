@@ -557,6 +557,8 @@ export default function WorkspaceCleanupDialog(): React.JSX.Element {
             deleteState.error === null &&
             deleteState.phase === 'queued'
           ) {
+            // Why: candidates that fail before removal starts would otherwise
+            // stay marked "Queued for deletion" in the sidebar indefinitely.
             clearWorktreeDeleteState(failure.worktreeId)
           }
         }
