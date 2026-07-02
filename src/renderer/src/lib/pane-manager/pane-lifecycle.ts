@@ -237,11 +237,7 @@ export function disposePane(
   } catch {
     /* ignore */
   }
-  try {
-    pane.webglAddon?.dispose()
-  } catch {
-    /* ignore */
-  }
+  disposeWebgl(pane)
   try {
     pane.searchAddon.dispose()
   } catch {
