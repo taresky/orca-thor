@@ -338,11 +338,12 @@ function getGithubCacheFile(): string {
 function readGithubCacheSnapshot(): PersistedState['githubCache'] | null {
   try {
     const parsed = JSON.parse(readFileSync(getGithubCacheFile(), 'utf-8')) as unknown
+    const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+      typeof value === 'object' && value !== null && !Array.isArray(value)
     if (
-      parsed &&
-      typeof parsed === 'object' &&
-      typeof (parsed as { pr?: unknown }).pr === 'object' &&
-      typeof (parsed as { issue?: unknown }).issue === 'object'
+      isPlainRecord(parsed) &&
+      isPlainRecord((parsed as { pr?: unknown }).pr) &&
+      isPlainRecord((parsed as { issue?: unknown }).issue)
     ) {
       return parsed as PersistedState['githubCache']
     }
