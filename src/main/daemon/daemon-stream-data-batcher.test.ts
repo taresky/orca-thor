@@ -22,7 +22,7 @@ describe('DaemonStreamDataBatcher', () => {
       batcher.enqueue('client-1', 'session-1', 'b')
 
       expect(streamSocket.write).not.toHaveBeenCalled()
-      vi.advanceTimersByTime(7)
+      vi.advanceTimersByTime(1)
       expect(streamSocket.write).not.toHaveBeenCalled()
       vi.advanceTimersByTime(1)
 
@@ -45,7 +45,7 @@ describe('DaemonStreamDataBatcher', () => {
 
       expect(streamSocket.write).toHaveBeenCalledTimes(1)
       expect(String(streamSocket.write.mock.calls[0]?.[0])).toContain('\\u001b[20;2Hredraw')
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       expect(streamSocket.write).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
@@ -65,7 +65,7 @@ describe('DaemonStreamDataBatcher', () => {
       })
 
       expect(streamSocket.write).not.toHaveBeenCalled()
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       expect(streamSocket.write).toHaveBeenCalledTimes(1)
       expect(String(streamSocket.write.mock.calls[0]?.[0])).toContain(`${pending}redraw`)
     } finally {
@@ -91,7 +91,7 @@ describe('DaemonStreamDataBatcher', () => {
       )
       expect(String(streamSocket.write.mock.calls[0]?.[0])).toContain('"data":"echo"')
 
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       expect(streamSocket.write).toHaveBeenCalledTimes(2)
       expect(String(streamSocket.write.mock.calls[1]?.[0])).toContain(
         '"sessionId":"session-background"'
@@ -113,7 +113,7 @@ describe('DaemonStreamDataBatcher', () => {
       const parser = createNdjsonParser(onMessage, onError, { maxLineBytes })
 
       batcher.enqueue('client-1', 'session-1', data)
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       for (const [line] of streamSocket.write.mock.calls) {
         parser.feed(String(line))
       }

@@ -537,6 +537,30 @@ drain scheduling (sub-ms re-arm; also raises the throughput ceiling);
 (2) tighter effective in-flight window on the renderer delivery path.
 Target: VS Code's ~7ms class or below without giving back throughput.
 
+### 2026-07-03 — Batch windows were the gap: dev DSR-load p50 19 -> 8.0ms
+
+Lever results (dev, 3MB protocol, same session):
+- MessageChannel drains (2434dfaae): 19.01ms — NO change. Proved the
+  ~19ms was NOT queue depth: at 1MB/s vs ~11MB/s capacity (9% util)
+  there is no standing queue. Kept (correct, removes a real clamp).
+- Batch windows 8->2ms on BOTH hops (e67a91d7a: daemon
+  STREAM_DATA_BATCH_INTERVAL_MS + main PTY_BATCH_INTERVAL_MS):
+  **p50 8.00 / p90 10.13 / p99 12.26ms** (from 19.01/22.7/28.1).
+  Throughput unchanged (agent-tui 9.8 vs 9.1, ambient noise). 239
+  batcher+pty tests green after timing updates.
+
+Dev-mode 8.0ms already matches VS Code prod (7.18); prod build should
+land BELOW VS Code. p99: ours 12.3 vs VS Code 43.4. The remaining
+fixed-latency terms are renderer/xterm-internal (12ms parse slices).
+Note: main's interactive bypass (input-gated) means real keystroke echo
+skips batching entirely — the DSR metric understates real typing
+responsiveness; VS Code measured on the same freight path, comparison
+fair.
+
+Next: cut RC, confirm in prod, re-baseline vs Terminal.app (expect
+~8-15x from 300x at baseline; goal line 10x = 4.5ms now plausibly in
+reach).
+
 ## Success criteria (baseline-relative; finalize after task 1)
 
 - DSR-under-load p90 in Orca within striking distance of iTerm2 on the same

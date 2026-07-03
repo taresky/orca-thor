@@ -3248,7 +3248,7 @@ describe('registerPtyHandlers', () => {
       const result = await pendingSpawn
 
       daemon.emitData(result.id, 'daemon output')
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       daemon.emitExit(result.id, 0)
 
       expect(daemon.spawn).toHaveBeenCalledTimes(1)
@@ -6292,7 +6292,7 @@ describe('registerPtyHandlers', () => {
       mockProc.emitData('background output')
 
       expect(mainWindow.webContents.send).not.toHaveBeenCalled()
-      vi.advanceTimersByTime(7)
+      vi.advanceTimersByTime(1)
       expect(mainWindow.webContents.send).not.toHaveBeenCalled()
       vi.advanceTimersByTime(1)
       expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
@@ -6321,7 +6321,7 @@ describe('registerPtyHandlers', () => {
 
       setRendererPtyVisible(null, { id: spawnResult.id, visible: true })
       mockProc.emitData('visible output')
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
         id: spawnResult.id,
         data: 'visible output'
@@ -6331,7 +6331,7 @@ describe('registerPtyHandlers', () => {
       setRendererPtyVisible(null, { id: spawnResult.id, visible: false })
       mockProc.emitData('\x1b[2Khidden-width redraw')
       setRendererPtyVisible(null, { id: spawnResult.id, visible: true })
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
 
       expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
         id: spawnResult.id,
@@ -6362,7 +6362,7 @@ describe('registerPtyHandlers', () => {
       setRendererPtyVisible(null, { id: spawnResult.id, visible: true })
       handleRendererLoading()
       mockProc.emitData('reload-gap output')
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
 
       expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
         id: spawnResult.id,
@@ -6373,7 +6373,7 @@ describe('registerPtyHandlers', () => {
       mainWindow.webContents.send.mockClear()
       setRendererPtyVisible(null, { id: spawnResult.id, visible: true })
       mockProc.emitData('visible output')
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
 
       expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
         id: spawnResult.id,
@@ -6404,7 +6404,7 @@ describe('registerPtyHandlers', () => {
       resizePty(null, { id: spawnResult.id, cols: 72, rows: 24 })
       setRendererPtyVisible(null, { id: spawnResult.id, visible: true })
       mockProc.emitData('\x1b[2Khidden-resize redraw')
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
 
       expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
         id: spawnResult.id,
@@ -6415,7 +6415,7 @@ describe('registerPtyHandlers', () => {
       mainWindow.webContents.send.mockClear()
       resizePty(null, { id: spawnResult.id, cols: 80, rows: 24 })
       mockProc.emitData('visible repaint')
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
 
       expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
         id: spawnResult.id,
@@ -6448,7 +6448,7 @@ describe('registerPtyHandlers', () => {
       setRendererPtyVisible(null, { id: spawnResult.id, visible: true })
       writePty(mainWindowIpcEvent, { id: spawnResult.id, data: 'x' })
       mockProc.emitData('x')
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
 
       expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
         id: spawnResult.id,
@@ -6483,7 +6483,7 @@ describe('registerPtyHandlers', () => {
 
       expect(mockProc.proc.write).toHaveBeenCalledWith('\x1b]10;rgb:eeee/eeee/eeee\x1b\\')
       expect(mockProc.proc.write).toHaveBeenCalledWith('\x1b]11;rgb:1111/1111/1111\x1b\\')
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
         id: spawnResult.id,
         data: 'ready'
@@ -6517,7 +6517,7 @@ describe('registerPtyHandlers', () => {
 
       expect(mockProc.proc.write).toHaveBeenCalledWith('\x1b]10;rgb:eeee/eeee/eeee\x1b\\')
       expect(mockProc.proc.write).toHaveBeenCalledWith('\x1b]11;rgb:1111/1111/1111\x1b\\')
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
         id: spawnResult.id,
         data: 'ready'
@@ -6549,7 +6549,7 @@ describe('registerPtyHandlers', () => {
       mockProc.emitData(`${query}ready`)
 
       expect(mockProc.proc.write).not.toHaveBeenCalled()
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
         id: spawnResult.id,
         data: `${query}ready`
@@ -6583,7 +6583,7 @@ describe('registerPtyHandlers', () => {
       mockProc.emitData(`${command}ready`)
 
       expect(mockProc.proc.write).not.toHaveBeenCalled()
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
         id: spawnResult.id,
         data: `${command}ready`
@@ -6644,7 +6644,7 @@ describe('registerPtyHandlers', () => {
 
       expect(write).toHaveBeenCalledWith(spawnResult.id, '\x1b]10;rgb:eeee/eeee/eeee\x1b\\')
       expect(write).toHaveBeenCalledWith(spawnResult.id, '\x1b]11;rgb:1111/1111/1111\x1b\\')
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
         id: spawnResult.id,
         data: 'daemon-ready'
@@ -6719,7 +6719,7 @@ describe('registerPtyHandlers', () => {
         id: spawnResult.id,
         data: '\x1b]10;?\x1b\\\x1b]11;?\x1b\\ready'
       })
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
 
       expect(write).toHaveBeenCalledWith(spawnResult.id, '\x1b]10;rgb:eeee/eeee/eeee\x1b\\')
       expect(write).toHaveBeenCalledWith(spawnResult.id, '\x1b]11;rgb:1111/1111/1111\x1b\\')
@@ -6759,7 +6759,7 @@ describe('registerPtyHandlers', () => {
         id: spawnResult.id,
         data: '\x1b[20;2Hredraw'
       })
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       expect(mainWindow.webContents.send).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
@@ -6815,7 +6815,7 @@ describe('registerPtyHandlers', () => {
       mockProc.emitData(largeOutput)
 
       expect(mainWindow.webContents.send).not.toHaveBeenCalled()
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
         id: spawnResult.id,
         data: largeOutput
@@ -6851,7 +6851,7 @@ describe('registerPtyHandlers', () => {
       }
 
       expect(mainWindow.webContents.send).toHaveBeenCalledTimes(64)
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       expect(mainWindow.webContents.send).toHaveBeenCalledTimes(65)
       expect(mainWindow.webContents.send).toHaveBeenNthCalledWith(65, 'pty:data', {
         id: spawnResult.id,
@@ -6889,7 +6889,7 @@ describe('registerPtyHandlers', () => {
         id: spawnResult.id,
         data: redraw
       })
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       expect(mainWindow.webContents.send).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
@@ -6921,7 +6921,7 @@ describe('registerPtyHandlers', () => {
       mockProc.emitData('redraw')
 
       expect(mainWindow.webContents.send).not.toHaveBeenCalled()
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
         id: spawnResult.id,
         data: `${pendingOutput}redraw`
@@ -6956,7 +6956,7 @@ describe('registerPtyHandlers', () => {
       secondProc.emitData('second-terminal-output')
       firstProc.emitData(`${firstChunk}${firstRemainder}`)
 
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
 
       expect(mainWindow.webContents.send).toHaveBeenCalledTimes(2)
       expect(mainWindow.webContents.send).toHaveBeenNthCalledWith(1, 'pty:data', {
@@ -7002,7 +7002,7 @@ describe('registerPtyHandlers', () => {
       mainWindow.webContents.send.mockClear()
 
       firstProc.emitData('x'.repeat(600 * 1024))
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       for (let index = 0; index < 31; index++) {
         vi.advanceTimersByTime(1)
       }
@@ -7027,7 +7027,7 @@ describe('registerPtyHandlers', () => {
       })
 
       secondProc.emitData('second-terminal-output')
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
 
       expect(mainWindow.webContents.send).toHaveBeenCalledTimes(33)
       expect(mainWindow.webContents.send).toHaveBeenNthCalledWith(33, 'pty:data', {
@@ -7085,7 +7085,7 @@ describe('registerPtyHandlers', () => {
       // Saturate the renderer in-flight window (512 KB) with no ACKs — the
       // frozen/starved-renderer shape from the field reports.
       mockProc.emitData('x'.repeat(600 * 1024))
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       for (let index = 0; index < 32; index++) {
         vi.advanceTimersByTime(1)
       }
@@ -7109,7 +7109,7 @@ describe('registerPtyHandlers', () => {
       // sentinel so the pane repaints from the main-owned snapshot.
       mainWindow.webContents.send.mockClear()
       ackData(null, { id: spawn.id, charCount: 512 * 1024 })
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
         id: spawn.id,
         data: '',
@@ -7119,7 +7119,7 @@ describe('registerPtyHandlers', () => {
       // Fresh output after the sentinel flows normally again.
       mainWindow.webContents.send.mockClear()
       mockProc.emitData('back to normal')
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
         id: spawn.id,
         data: 'back to normal'
@@ -7147,7 +7147,7 @@ describe('registerPtyHandlers', () => {
       // Saturate the in-flight window with no ACKs, then buffer 3 MB — over
       // the floor, under the scaled cap: it must be retained, not dropped.
       mockProc.emitData('x'.repeat(600 * 1024))
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       for (let index = 0; index < 32; index++) {
         vi.advanceTimersByTime(1)
       }
@@ -7264,7 +7264,7 @@ describe('registerPtyHandlers', () => {
       mainWindow.webContents.send.mockClear()
 
       mockProc.emitData('remote-output')
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
 
       expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
         id: 'remote-like-pty',
@@ -7315,7 +7315,7 @@ describe('registerPtyHandlers', () => {
       for (const proc of bulkProcs) {
         proc.emitData('x'.repeat(600 * 1024))
       }
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       for (let index = 0; index < 400; index++) {
         vi.advanceTimersByTime(1)
       }
@@ -7381,7 +7381,7 @@ describe('registerPtyHandlers', () => {
       for (const proc of procs) {
         proc.emitData('x'.repeat(600 * 1024))
       }
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       for (let index = 0; index < 400; index++) {
         vi.advanceTimersByTime(1)
       }
@@ -7422,7 +7422,7 @@ describe('registerPtyHandlers', () => {
       for (let index = 0; index < procs.length - 1; index++) {
         procs[index]!.emitData('x'.repeat(600 * 1024))
       }
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       for (let index = 0; index < 400; index++) {
         vi.advanceTimersByTime(1)
       }
@@ -7431,7 +7431,7 @@ describe('registerPtyHandlers', () => {
       const activeIndex = procs.length - 1
       procs[activeIndex]!.emitData('active-output')
       setActiveRendererPty(null, { id: spawns[activeIndex]!.id, active: true })
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
 
       expect(mainWindow.webContents.send).toHaveBeenCalledTimes(513)
       expect(mainWindow.webContents.send).toHaveBeenNthCalledWith(513, 'pty:data', {
@@ -7465,7 +7465,7 @@ describe('registerPtyHandlers', () => {
       mainWindow.webContents.send.mockClear()
 
       activeProc.emitData('x'.repeat(768 * 1024))
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       for (let index = 0; index < 31; index++) {
         vi.advanceTimersByTime(1)
       }
@@ -7577,7 +7577,7 @@ describe('registerPtyHandlers', () => {
 
         // A keystroke-sized redraw would take the immediate path when visible.
         mockProc.emitData('\x1b[20;2Hredraw')
-        vi.advanceTimersByTime(8)
+        vi.advanceTimersByTime(2)
 
         expect(mainWindow.webContents.send).toHaveBeenCalledTimes(1)
         expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:modelRestoreNeeded', {
@@ -7608,7 +7608,7 @@ describe('registerPtyHandlers', () => {
         setHidden(null, { id: spawnResult.id, hidden: true })
         setInterest(null, { id: spawnResult.id, interested: true })
         mockProc.emitData('sidecar bytes')
-        vi.advanceTimersByTime(8)
+        vi.advanceTimersByTime(2)
         expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
           id: spawnResult.id,
           data: 'sidecar bytes'
@@ -7617,7 +7617,7 @@ describe('registerPtyHandlers', () => {
         setInterest(null, { id: spawnResult.id, interested: false })
         mainWindow.webContents.send.mockClear()
         mockProc.emitData('gated bytes')
-        vi.advanceTimersByTime(8)
+        vi.advanceTimersByTime(2)
         expect(mainWindow.webContents.send).toHaveBeenCalledTimes(1)
         expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:modelRestoreNeeded', {
           id: spawnResult.id,
@@ -7648,7 +7648,7 @@ describe('registerPtyHandlers', () => {
 
         setHidden(null, { id: spawnResult.id, hidden: true })
         mockProc.emitData('still delivered')
-        vi.advanceTimersByTime(8)
+        vi.advanceTimersByTime(2)
 
         expect(mainWindow.webContents.send).toHaveBeenCalledTimes(1)
         expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
@@ -7685,7 +7685,7 @@ describe('registerPtyHandlers', () => {
           id: spawnResult.id,
           reason: 'hidden-drop'
         })
-        vi.advanceTimersByTime(8)
+        vi.advanceTimersByTime(2)
         expect(mainWindow.webContents.send).toHaveBeenCalledTimes(1)
         expect(getPtyRendererDeliveryDebugSnapshot()).toMatchObject({ pendingPtyCount: 0 })
       } finally {
@@ -7710,7 +7710,7 @@ describe('registerPtyHandlers', () => {
 
         setHidden(null, { id: spawnResult.id, hidden: true })
         mockProc.emitData('dropped while hidden')
-        vi.advanceTimersByTime(8)
+        vi.advanceTimersByTime(2)
         expect(mainWindow.webContents.send).toHaveBeenCalledTimes(1)
 
         // Why: a renderer reload can replace the view that latched
@@ -7723,7 +7723,7 @@ describe('registerPtyHandlers', () => {
         })
 
         mockProc.emitData('visible again')
-        vi.advanceTimersByTime(8)
+        vi.advanceTimersByTime(2)
         expect(mainWindow.webContents.send).toHaveBeenLastCalledWith('pty:data', {
           id: spawnResult.id,
           data: 'visible again'
@@ -7803,7 +7803,7 @@ describe('registerPtyHandlers', () => {
 
         setHidden(null, { id: spawnResult.id, hidden: true })
         mockProc.emitData('dropped while hidden')
-        vi.advanceTimersByTime(8)
+        vi.advanceTimersByTime(2)
         expect(mainWindow.webContents.send).toHaveBeenCalledTimes(1)
 
         // Why: a hidden remount (tab move, parking handoff) re-marks the PTY
@@ -8036,7 +8036,7 @@ describe('registerPtyHandlers', () => {
 
         expect(isHiddenRendererPty(spawnResult.id)).toBe(true)
         mockProc.emitData('first chunk')
-        vi.advanceTimersByTime(8)
+        vi.advanceTimersByTime(2)
 
         expect(mainWindow.webContents.send).toHaveBeenCalledTimes(1)
         expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:modelRestoreNeeded', {
@@ -8063,7 +8063,7 @@ describe('registerPtyHandlers', () => {
 
         expect(isHiddenRendererPty(spawnResult.id)).toBe(false)
         mockProc.emitData('visible output')
-        vi.advanceTimersByTime(8)
+        vi.advanceTimersByTime(2)
 
         expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
           id: spawnResult.id,
@@ -8147,7 +8147,7 @@ describe('registerPtyHandlers', () => {
       mockProc.emitData('z'.repeat(64 * 1024))
       expect(mainWindow.webContents.send).toHaveBeenCalledTimes(1)
 
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       expect(mainWindow.webContents.send).toHaveBeenCalledTimes(2)
       expect(mainWindow.webContents.send).toHaveBeenLastCalledWith('pty:data', {
         id: spawnResult.id,
@@ -8189,7 +8189,7 @@ describe('registerPtyHandlers', () => {
           expect.anything()
         )
 
-        vi.advanceTimersByTime(8)
+        vi.advanceTimersByTime(2)
         expect(mainWindow.webContents.send).toHaveBeenLastCalledWith('pty:data', {
           id: spawnResult.id,
           data: '',
@@ -8225,7 +8225,7 @@ describe('registerPtyHandlers', () => {
       mockProc.emitData('stale redraw')
 
       expect(mainWindow.webContents.send).not.toHaveBeenCalled()
-      vi.advanceTimersByTime(8)
+      vi.advanceTimersByTime(2)
       expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
         id: spawnResult.id,
         data: 'stale redraw'
