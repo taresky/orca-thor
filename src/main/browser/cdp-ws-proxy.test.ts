@@ -647,10 +647,11 @@ describe('CdpWsProxy', () => {
   })
 
   it('does not register a PDF stream when the client disconnects mid-print', async () => {
-    let resolvePrint: (buf: Buffer) => void = () => {}
+    type PrintToPdfData = Awaited<ReturnType<typeof mock.webContents.printToPDF>>
+    let resolvePrint: (buf: PrintToPdfData) => void = () => {}
     mock.webContents.printToPDF.mockImplementationOnce(
       () =>
-        new Promise<Buffer>((resolve) => {
+        new Promise<PrintToPdfData>((resolve) => {
           resolvePrint = resolve
         })
     )
