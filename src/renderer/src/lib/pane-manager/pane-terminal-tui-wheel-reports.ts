@@ -67,6 +67,11 @@ function legacyVerticalWheelDelta(event: TerminalTuiWheelEventInput): number | n
   return null
 }
 
+function hasDiscreteLegacyWheelDelta(event: TerminalTuiWheelEventInput): boolean {
+  const legacyDelta = legacyVerticalWheelDelta(event)
+  return legacyDelta !== null && Math.abs(legacyDelta) >= LEGACY_MOUSE_WHEEL_DELTA_MIN
+}
+
 export function isDiscreteTerminalTuiWheelEvent(event: TerminalTuiWheelEventInput): boolean {
   if ((event.deltaMode ?? DOM_DELTA_PIXEL) !== DOM_DELTA_PIXEL) {
     return true
@@ -76,8 +81,15 @@ export function isDiscreteTerminalTuiWheelEvent(event: TerminalTuiWheelEventInpu
     return true
   }
 
-  const legacyDelta = legacyVerticalWheelDelta(event)
-  return legacyDelta !== null && Math.abs(legacyDelta) >= LEGACY_MOUSE_WHEEL_DELTA_MIN
+  return hasDiscreteLegacyWheelDelta(event)
+}
+
+function canBurstBoostWheelEvent(event: TerminalTuiWheelEventInput): boolean {
+  if ((event.deltaMode ?? DOM_DELTA_PIXEL) !== DOM_DELTA_PIXEL) {
+    return true
+  }
+
+  return hasDiscreteLegacyWheelDelta(event)
 }
 
 function wheelInputTime(event: TerminalTuiWheelEventInput): number | null {
@@ -130,6 +142,13 @@ function resolveBurstWheelDistanceRows(
   state: TerminalTuiMouseWheelDistanceState,
   distanceRows: number
 ): number {
+  if (!canBurstBoostWheelEvent(event)) {
+    state.fastStreak = 0
+    state.lastDistanceRows = null
+    state.lastInputAt = null
+    return 0
+  }
+
   const currentInputAt = wheelInputTime(event)
   if (currentInputAt === null) {
     state.fastStreak = 0
