@@ -94,6 +94,9 @@ describe('WorktreeCardDetailsHover interactions', () => {
       root.unmount()
     })
     container.remove()
+    document
+      .querySelectorAll('[data-worktree-title-rename-portal]')
+      .forEach((node) => node.remove())
     interactionMocks.hoverOpen = false
     interactionMocks.reviewMenuOpen = false
     interactionMocks.onHoverOpenChange = undefined
@@ -212,17 +215,20 @@ describe('WorktreeCardDetailsHover interactions', () => {
     act(() => {
       title?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }))
     })
-    const input = container.querySelector('[data-worktree-title-rename-input]')
-    const sizingTitle = container.querySelector(
-      '[data-worktree-title-inline-rename="editing"] [aria-hidden="true"]'
-    )
+    // Why: the field editor is portaled onto document.body to escape the fixed,
+    // GPU-composited hover panel (cursor-flicker fix); an invisible in-flow anchor
+    // holds the title slot inside the panel.
+    const input = document.querySelector('[data-worktree-title-rename-input]')
+    const editingAnchor = container.querySelector('[data-worktree-title-inline-rename="editing"]')
+    const portal = document.querySelector('[data-worktree-title-rename-portal]')
 
     expect(identityHeader?.className).toContain('cursor-text')
+    expect(editingAnchor?.className).toContain('invisible')
+    expect(portal).not.toBeNull()
     expect(input).not.toBeNull()
     expect(input?.className).toContain('cursor-text')
     expect(input?.className).toContain('select-text')
     expect(input?.className).not.toContain('select-none')
-    expect(sizingTitle?.className).toContain('pointer-events-none')
     expect(input?.getAttribute('draggable')).toBeNull()
     expect(input?.className).toContain('bg-input/40')
     expect(input?.className).toContain('rounded-sm')

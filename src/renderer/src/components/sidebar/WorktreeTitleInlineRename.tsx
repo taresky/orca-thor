@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { LoaderCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
+import { useFieldEditorAnchorRect } from './worktree-title-field-editor-rect'
 
 export type WorktreeTitleRenameCommit = { kind: 'cancel' } | { kind: 'save'; displayName: string }
 
@@ -97,6 +99,12 @@ export function WorktreeTitleInlineRename({
     const nextTruncated = element ? isWorktreeTitleTruncated(element) : false
     setTitleTruncated((current) => (current === nextTruncated ? current : nextTruncated))
   }, [])
+
+  // Why: the field editor (hovercard) is portaled onto the document body so its
+  // input escapes Radix's fixed, GPU-composited panel (cursor-flicker fix, see
+  // the editing render). Track the in-flow anchor so the portal stays pinned.
+  const isFieldEditing = editing && editingPresentation === 'field'
+  const fieldEditorRect = useFieldEditorAnchorRect(isFieldEditing, titleElementRef)
 
   const handleRootRef = useCallback(
     (node: HTMLSpanElement | null): void => {
@@ -294,6 +302,86 @@ export function WorktreeTitleInlineRename({
   )
 
   if (editing) {
+    const editorInput = (
+      <Input
+        ref={handleInputRef}
+        value={value}
+        style={isFieldEditing ? undefined : { font: 'inherit' }}
+        disabled={saving}
+        spellCheck={false}
+        aria-label={translate(
+          'auto.components.sidebar.WorktreeTitleInlineRename.bff3bdd00c',
+          'Rename workspace'
+        )}
+        data-worktree-title-rename-input="true"
+        onChange={(event) => setValue(event.target.value)}
+        onBlur={() => void commitRename()}
+        onClick={stopCardEvent}
+        onDoubleClick={handleInputDoubleClick}
+        onMouseDown={handleInputMouseDown}
+        onPointerDown={stopCardEvent}
+        onKeyDown={handleKeyDown}
+        className={cn(
+          'min-w-0 cursor-text truncate text-foreground outline-none select-text',
+          isFieldEditing
+            ? 'w-full text-[13px] font-semibold leading-snug'
+            : 'col-start-1 row-start-1',
+          editingInputClassName,
+          saving && savingInputClassName,
+          inputClassName
+        )}
+      />
+    )
+    const savingSpinner = saving ? (
+      <LoaderCircle
+        className={cn(
+          'pointer-events-none absolute top-1/2 size-3 -translate-y-1/2 animate-spin text-muted-foreground',
+          savingSpinnerClassName
+        )}
+      />
+    ) : null
+
+    // Why: the field editor lives on the document body, not in Radix's fixed,
+    // GPU-composited hover panel — Chromium paints a stale default cursor over
+    // inputs on a composited fixed layer during fast pointer motion, which is the
+    // reported I-beam/arrow flicker. An invisible in-flow anchor holds the title
+    // slot; the portaled editor is pinned over it via the tracked box.
+    if (isFieldEditing) {
+      return (
+        <>
+          <span
+            key={`editing:${titleElementKey}`}
+            ref={handleRootRef}
+            className={cn(
+              'invisible block min-w-0 truncate text-[13px] font-semibold leading-snug',
+              className
+            )}
+            data-worktree-title-inline-rename="editing"
+            aria-hidden="true"
+          >
+            {displayName}
+          </span>
+          {fieldEditorRect && typeof document !== 'undefined'
+            ? createPortal(
+                <span
+                  className="absolute z-[60] block leading-snug"
+                  style={{
+                    left: fieldEditorRect.left - 6,
+                    top: fieldEditorRect.top,
+                    width: fieldEditorRect.width + 12
+                  }}
+                  data-worktree-title-rename-portal=""
+                >
+                  {editorInput}
+                  {savingSpinner}
+                </span>,
+                document.body
+              )
+            : null}
+        </>
+      )
+    }
+
     return (
       <span
         key={`editing:${titleElementKey}`}
@@ -312,40 +400,8 @@ export function WorktreeTitleInlineRename({
         >
           {displayName}
         </span>
-        <Input
-          ref={handleInputRef}
-          value={value}
-          style={{ font: 'inherit' }}
-          disabled={saving}
-          spellCheck={false}
-          aria-label={translate(
-            'auto.components.sidebar.WorktreeTitleInlineRename.bff3bdd00c',
-            'Rename workspace'
-          )}
-          data-worktree-title-rename-input="true"
-          onChange={(event) => setValue(event.target.value)}
-          onBlur={() => void commitRename()}
-          onClick={stopCardEvent}
-          onDoubleClick={handleInputDoubleClick}
-          onMouseDown={handleInputMouseDown}
-          onPointerDown={stopCardEvent}
-          onKeyDown={handleKeyDown}
-          className={cn(
-            'col-start-1 row-start-1 min-w-0 cursor-text truncate text-foreground outline-none',
-            'select-text',
-            editingInputClassName,
-            saving && savingInputClassName,
-            inputClassName
-          )}
-        />
-        {saving ? (
-          <LoaderCircle
-            className={cn(
-              'pointer-events-none absolute top-1/2 size-3 -translate-y-1/2 animate-spin text-muted-foreground',
-              savingSpinnerClassName
-            )}
-          />
-        ) : null}
+        {editorInput}
+        {savingSpinner}
       </span>
     )
   }

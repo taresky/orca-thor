@@ -26,6 +26,9 @@ describe('WorktreeTitleInlineRename lifecycle', () => {
     root = null
     container?.remove()
     container = null
+    document
+      .querySelectorAll('[data-worktree-title-rename-portal]')
+      .forEach((node) => node.remove())
   })
 
   it('reports editing=false if it unmounts while renaming', () => {
@@ -139,7 +142,8 @@ describe('WorktreeTitleInlineRename lifecycle', () => {
         ?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }))
     })
 
-    const input = nextContainer.querySelector('[data-worktree-title-rename-input]')
+    // Why: the field editor is portaled onto document.body (cursor-flicker fix).
+    const input = document.querySelector('[data-worktree-title-rename-input]')
     // Why: the hovercard field opens with the caret at the end (no selection) so a
     // pointer parked over the title never flips between the I-beam and the macOS
     // drag-selection arrow.
@@ -179,7 +183,7 @@ describe('WorktreeTitleInlineRename lifecycle', () => {
         ?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }))
     })
 
-    const editingInput = nextContainer.querySelector('[data-worktree-title-rename-input]')
+    const editingInput = document.querySelector('[data-worktree-title-rename-input]')
     expect(editingInput).not.toBeNull()
     expect((editingInput as HTMLInputElement | null)?.readOnly).toBe(false)
     expect(editingInput?.className).toContain('bg-input/40')
