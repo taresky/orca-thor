@@ -51,8 +51,6 @@ type TerminalRenderDiagnostics = {
   }[]
 }
 
-}
-
 async function setNarrowTerminalViewport(page: Page): Promise<void> {
   await page.setViewportSize({ width: 900, height: 820 })
   await page.waitForTimeout(250)
