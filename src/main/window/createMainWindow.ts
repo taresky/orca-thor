@@ -1,16 +1,32 @@
 /* oxlint-disable max-lines */
-import { app, BrowserWindow, ipcMain, Menu, nativeTheme, screen, shell } from 'electron'
-import { join } from 'path'
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  Menu,
+  nativeTheme,
+  Notification,
+  screen,
+  shell
+} from 'electron'
+import { join } from 'node:path'
 import { is } from '@electron-toolkit/utils'
 import type { Store } from '../persistence'
 import { getAppIconPath } from '../app-icon'
 import { browserManager } from '../browser/browser-manager'
 import { browserSessionRegistry } from '../browser/browser-session-registry'
+import { translateMain } from '../i18n/main-i18n'
 import {
   normalizeBrowserNavigationUrl,
   normalizeExternalBrowserUrl
 } from '../../shared/browser-url'
+import { ORCA_BROWSER_GUEST_WEB_PREFERENCES } from '../../shared/browser-guest-web-preferences'
 import { isCrashReportReason } from '../../shared/crash-reporting'
+import {
+  DEFAULT_RENDERER_RECOVERY_MAX_RECOVERIES,
+  DEFAULT_RENDERER_RECOVERY_WINDOW_MS,
+  RendererRecoveryCircuitBreaker
+} from '../crash-reporting/renderer-recovery-circuit-breaker'
 import {
   getWindowShortcutActionId,
   matchesRecentTabSwitcherChord,
@@ -30,6 +46,7 @@ import {
 } from '../../shared/keybindings'
 import { getMainE2EConfig } from '../e2e-config'
 import { buildEditableContextMenuTemplate } from './editable-context-menu'
+import { clearTrustedUIRendererWebContentsId, setTrustedUIRendererWebContentsId } from '../ipc/ui'
 
 function forceRepaint(window: BrowserWindow): void {
   if (window.isDestroyed()) {
@@ -80,6 +97,18 @@ function nativeZoomCommandMatchesKeybindings(
   )
 }
 
+function isMacAppPasteInput(input: Electron.Input): boolean {
+  return (
+    process.platform === 'darwin' &&
+    input.type === 'keyDown' &&
+    input.meta &&
+    !input.control &&
+    !input.alt &&
+    !input.shift &&
+    (input.code === 'KeyV' || input.key.toLowerCase() === 'v')
+  )
+}
+
 // Why: the titlebar is 36px (border-box, 1px border-bottom).  The visual
 // center of the CSS-centered content sits at ~18 CSS px from the top.
 // At zoom factor z that becomes 18·z window px.  Traffic lights are
@@ -126,6 +155,14 @@ type CreateMainWindowOptions = {
     details: Electron.RenderProcessGoneDetails,
     webContentsId: number
   ) => boolean
+  /** Called when consecutive auto-recoveries hit the circuit-breaker limit, so
+   *  the host can record diagnostics and surface a recovery prompt instead of
+   *  letting Orca crash-loop. */
+  onRendererRecoveryExhausted?: (info: {
+    details: Electron.RenderProcessGoneDetails
+    webContentsId: number
+    recentRecoveryCount: number
+  }) => void
   /** Why: main-process startup must register IPC handlers before the renderer
    *  begins booting, or eager renderer calls can race into missing channels. */
   deferLoad?: boolean
@@ -258,6 +295,12 @@ export function createMainWindow(
         : process.platform === 'win32'
           ? 'hidden'
           : undefined,
+    // Why: Linux ignores titleBarStyle: 'hidden', so without this the native
+    // WM title bar stays and stacks on top of our renderer titlebar (double
+    // title bar). frame: false drops the native frame; the renderer draws its
+    // own titlebar + window controls (see WindowControls in App.tsx), matching
+    // the Windows custom-titlebar path.
+    ...(process.platform === 'linux' ? { frame: false } : {}),
     // Why: initial position for 1x zoom; syncTrafficLightPosition() adjusts
     // dynamically when the user changes UI zoom.
     ...(process.platform === 'darwin'
@@ -277,6 +320,9 @@ export function createMainWindow(
     }
   })
   const rendererWebContentsId = mainWindow.webContents.id
+  // Why: native paste fallback is privileged IPC; only the real top-level
+  // renderer should be allowed to request Electron's native paste operation.
+  setTrustedUIRendererWebContentsId(rendererWebContentsId)
 
   if (process.platform === 'darwin') {
     // Why: persistent browser webviews use separate compositor layers, and on
@@ -309,11 +355,34 @@ export function createMainWindow(
   // handler re-runs maximize() from the persisted savedMaximized flag, snapping
   // the window back to full-screen after the user already resized it (#591).
   let handledInitialReadyToShow = false
-  mainWindow.on('ready-to-show', () => {
+  let initialRevealFallbackTimer: ReturnType<typeof setTimeout> | null =
+    process.platform === 'win32'
+      ? setTimeout(() => {
+          // Why: GPU/driver failures on Windows can prevent ready-to-show forever,
+          // leaving the only app window hidden while the main process stays alive.
+          initialRevealFallbackTimer = null
+          revealInitialWindow()
+        }, 10_000)
+      : null
+  initialRevealFallbackTimer?.unref?.()
+
+  const clearInitialRevealFallbackTimer = (): void => {
+    if (initialRevealFallbackTimer) {
+      clearTimeout(initialRevealFallbackTimer)
+      initialRevealFallbackTimer = null
+    }
+  }
+
+  const revealInitialWindow = (): void => {
+    if (mainWindow.isDestroyed()) {
+      clearInitialRevealFallbackTimer()
+      return
+    }
     if (handledInitialReadyToShow) {
       return
     }
     handledInitialReadyToShow = true
+    clearInitialRevealFallbackTimer()
 
     // Why: in E2E headless mode, the window stays hidden to avoid stealing
     // focus and screen real estate during test runs. Playwright interacts
@@ -326,7 +395,8 @@ export function createMainWindow(
       mainWindow.maximize()
     }
     mainWindow.show()
-  })
+  }
+  mainWindow.on('ready-to-show', revealInitialWindow)
 
   // Why: persist window bounds so the app restores to the user's last
   // position/size instead of maximizing on every launch. Debounce to avoid
@@ -465,6 +535,9 @@ export function createMainWindow(
     webPreferences.allowRunningInsecureContent = false
     webPreferences.contextIsolation = true
     webPreferences.sandbox = true
+    // Why: keep renderer-created webviews aligned with the browser guest policy
+    // even if the host markup omits or misspells a preference.
+    Object.assign(webPreferences, ORCA_BROWSER_GUEST_WEB_PREFERENCES)
     // Why: preserve the registry-validated partition instead of forcing the
     // legacy constant. This lets imported/isolated session profiles use their
     // own cookie/storage partition while keeping all other hardening intact.
@@ -588,6 +661,14 @@ export function createMainWindow(
   }
   let rendererProcessGone = false
   let rendererRecoveryTimer: ReturnType<typeof setTimeout> | null = null
+  // Why: stop a deterministic per-load renderer fault (bad GPU driver, corrupt
+  // chunk, AV interference) from auto-reloading every ~0.25-1.3s forever
+  // (Windows crash-loop clusters). The breaker opens after too many recoveries
+  // inside a rolling window and hands off to the host's recovery surface.
+  const rendererRecoveryCircuitBreaker = new RendererRecoveryCircuitBreaker({
+    windowMs: DEFAULT_RENDERER_RECOVERY_WINDOW_MS,
+    maxRecoveries: DEFAULT_RENDERER_RECOVERY_MAX_RECOVERIES
+  })
   const clearRendererRecoveryTimer = (): void => {
     if (rendererRecoveryTimer) {
       clearTimeout(rendererRecoveryTimer)
@@ -614,6 +695,17 @@ export function createMainWindow(
         opts?.shouldRecoverRenderer?.(details, rendererWebContentsId) === false ||
         mainWindow.isDestroyed()
       ) {
+        return
+      }
+      const recovery = rendererRecoveryCircuitBreaker.registerRecoveryAttempt(Date.now())
+      if (!recovery.allowed) {
+        // Why: too many reloads in the window means reloading again will just
+        // crash again. Stop the loop and let the host surface a recovery prompt.
+        opts?.onRendererRecoveryExhausted?.({
+          details,
+          webContentsId: rendererWebContentsId,
+          recentRecoveryCount: recovery.recentRecoveryCount
+        })
         return
       }
       // Why: a transient Network Service / renderer loss can leave Chromium
@@ -696,6 +788,9 @@ export function createMainWindow(
       case 'openQuickOpen':
         mainWindow.webContents.send('ui:openQuickOpen')
         return
+      case 'toggleQuickCommandsMenu':
+        mainWindow.webContents.send('ui:toggleQuickCommandsMenu')
+        return
       case 'openNewWorkspace':
         mainWindow.webContents.send('ui:openNewWorkspace')
         return
@@ -770,6 +865,11 @@ export function createMainWindow(
       return true
     }
 
+    if (action.type === 'toggleQuickCommandsMenu' && isAutoRepeat) {
+      event.preventDefault()
+      return true
+    }
+
     event.preventDefault()
     if (capturedTerminalActionId) {
       mainWindow.webContents.send('ui:terminalShortcutCaptured', {
@@ -793,6 +893,14 @@ export function createMainWindow(
       } else {
         mainWindow.webContents.openDevTools({ mode: 'undocked' })
       }
+      return
+    }
+
+    if (isMacAppPasteInput(input)) {
+      // Why: native chat/terminal panes can own focus without being native
+      // editable controls, so route Cmd+V through Orca's paste ownership first.
+      event.preventDefault()
+      mainWindow.webContents.send('ui:appMenuPaste')
       return
     }
 
@@ -932,7 +1040,50 @@ export function createMainWindow(
   let windowCloseConfirmed = false
   const confirmCloseChannel = 'window:confirm-close'
 
+  // Why: Windows minimize-to-tray. Hides the window instead of closing when the
+  // setting is on, this isn't a real quit (Ctrl+Q / tray "Quit" set
+  // getIsQuitting), and the renderer is alive. Returns true when it handled the
+  // close by hiding, so callers skip their normal close path. Shared by BOTH the
+  // renderer-drawn X (window:request-close) and the native close event (Alt+F4).
+  const hideToTrayIfEnabled = (): boolean => {
+    const isRendererCrashed = mainWindow.webContents.isCrashed?.() ?? false
+    if (
+      process.platform !== 'win32' ||
+      rendererProcessGone ||
+      isRendererCrashed ||
+      opts?.getIsQuitting?.() === true ||
+      store?.getSettings().minimizeToTrayOnClose !== true
+    ) {
+      return false
+    }
+    mainWindow.hide()
+    // Why: tell the user once that closing only hid the window; the persisted
+    // flag stops the notice from repeating on every later minimize.
+    if (store.getUI().trayMinimizeNoticeShown !== true) {
+      try {
+        new Notification({
+          title: 'Orca',
+          body: translateMain(
+            'tray.minimizeNotice.body',
+            'Orca is still running in the system tray'
+          )
+        }).show()
+      } catch {
+        // Notification is best-effort — never block hiding the window.
+      }
+      store.updateUI({ trayMinimizeNoticeShown: true })
+    }
+    return true
+  }
+
   mainWindow.on('close', (e) => {
+    // Why: Alt+F4 and programmatic closes reach the native event; apply the same
+    // minimize-to-tray guard the renderer-drawn X uses via onRequestClose.
+    if (!windowCloseConfirmed && hideToTrayIfEnabled()) {
+      e.preventDefault()
+      return
+    }
+    const isRendererCrashed = mainWindow.webContents.isCrashed?.() ?? false
     if (windowCloseConfirmed) {
       windowCloseConfirmed = false
       // Why: past this point Electron/OS may emit resize/move/unmaximize as
@@ -947,7 +1098,6 @@ export function createMainWindow(
       }
       return
     }
-    const isRendererCrashed = mainWindow.webContents.isCrashed?.() ?? false
     if (rendererProcessGone || isRendererCrashed) {
       // Why: after a native renderer crash the renderer cannot answer
       // window:close-requested. Let Cmd+Q / OS close complete instead of
@@ -987,8 +1137,8 @@ export function createMainWindow(
   }
   ipcMain.on(trafficLightChannel, onSyncTrafficLights)
 
-  // Why: renderer-drawn window controls on Windows send these to replicate the
-  // native title bar buttons that 'hidden' titleBarStyle removes.
+  // Why: renderer-drawn window controls on Windows/Linux desktop send these to
+  // replicate the native title bar buttons hidden by custom chrome.
   const minimizeChannel = 'window:minimize'
   const onMinimize = (): void => {
     if (!mainWindow.isDestroyed()) {
@@ -1016,13 +1166,20 @@ export function createMainWindow(
   // with windowCloseConfirmed = true.
   const requestCloseChannel = 'window:request-close'
   const onRequestClose = (): void => {
-    if (!mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('window:close-requested', { isQuitting: false })
+    if (mainWindow.isDestroyed()) {
+      return
     }
+    // Why: the renderer-drawn X on Windows routes here (not the native close
+    // event), so the minimize-to-tray guard must run on this path too — hide
+    // instead of asking the renderer to close.
+    if (hideToTrayIfEnabled()) {
+      return
+    }
+    mainWindow.webContents.send('window:close-requested', { isQuitting: false })
   }
-  // Why: the ··· button in the renderer-drawn title bar on Windows pops up
-  // the application menu at the cursor position, replicating the Alt-key
-  // reveal that autoHideMenuBar normally provides.
+  // Why: the ··· button in the renderer-drawn title bar on Windows/Linux
+  // desktop pops up the application menu at the cursor position, replicating
+  // the Alt-key reveal that autoHideMenuBar normally provides.
   const popupMenuChannel = 'menu:popup'
   const onPopupMenu = (): void => {
     Menu.getApplicationMenu()?.popup({ window: mainWindow })
@@ -1044,6 +1201,7 @@ export function createMainWindow(
 
   ipcMain.on(confirmCloseChannel, onConfirmClose)
   mainWindow.on('closed', () => {
+    clearInitialRevealFallbackTimer()
     // Why: default-deny the Cmd+B carve-out after the window is gone so a
     // stale-true flag can't leak past subsequent state transitions. Paired
     // with the webContents lifecycle resets above.
@@ -1064,6 +1222,7 @@ export function createMainWindow(
     ipcMain.removeListener(terminalInputFocusChannel, onTerminalInputFocused)
     ipcMain.removeListener(floatingTerminalInputFocusChannel, onFloatingTerminalInputFocused)
     ipcMain.removeListener(shortcutRecorderFocusChannel, onShortcutRecorderFocused)
+    clearTrustedUIRendererWebContentsId(rendererWebContentsId)
     // Why: on updater-triggered shutdown, BrowserWindow can emit `closed`
     // after its webContents has already been destroyed. The destroyed
     // webContents owns its listeners, so do not touch `mainWindow.webContents`
