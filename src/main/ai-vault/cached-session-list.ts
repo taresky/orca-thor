@@ -1,4 +1,4 @@
-import { join } from 'path'
+import { join } from 'node:path'
 import { scanAiVaultSessions } from './session-scanner'
 import { getWslHomeAsync, listWslDistrosAsync } from '../wsl'
 import type { AiVaultListArgs, AiVaultListResult } from '../../shared/ai-vault-types'

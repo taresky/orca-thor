@@ -16493,6 +16493,7 @@ describe('OrcaRuntimeService', () => {
       terminalFitOverrideChanged: vi.fn(),
       terminalDriverChanged: vi.fn()
     })
+    const webContents = { send: vi.fn() }
     const send = vi.fn((_channel: string, payload: { requestId: string }) => {
       runtime.syncWindowGraph(1, {
         tabs: [],
@@ -16529,15 +16530,16 @@ describe('OrcaRuntimeService', () => {
       })
       ipcMain.emit(
         'terminal:tabCreateReply',
-        {},
+        { sender: webContents },
         { requestId: payload.requestId, tabId: 'tab-renderer', title: 'Terminal' }
       )
     })
+    webContents.send = send
     runtime.attachWindow(1)
     runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
     electronMocks.BrowserWindow.fromId.mockReturnValue({
       isDestroyed: () => false,
-      webContents: { send }
+      webContents
     })
 
     const first = await runtime.createMobileSessionTerminal(`id:${TEST_WORKTREE_ID}`, {
