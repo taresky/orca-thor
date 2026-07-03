@@ -4,9 +4,10 @@ import type { PaneForegroundAgentEntry } from '@/store/slices/pane-foreground-ag
 
 // Why: the read must land after the shell has exec'd the command; and when it
 // still sees a node/python wrapper, the daemon resolves that ancestry
-// asynchronously, so give its cache one bounded re-read — not a retry ladder.
+// asynchronously — observed to take >1.5s for real node-wrapped CLIs — so
+// give its cache two bounded re-reads, not an open-ended retry loop.
 const COMMAND_SETTLE_MS = 350
-const WRAPPER_RESOLVE_RETRY_MS = 1200
+const WRAPPER_RESOLVE_RETRY_DELAYS_MS = [1200, 3500] as const
 
 type PaneForegroundAgentTrackerDeps = {
   getPtyId: () => string | null
@@ -45,15 +46,15 @@ export function createPaneForegroundAgentTracker(deps: PaneForegroundAgentTracke
     }
   }
 
-  const scheduleRead = (delayMs: number, allowWrapperRetry: boolean): void => {
+  const scheduleRead = (delayMs: number, retryIndex: number): void => {
     const generation = readGeneration
     readTimer = window.setTimeout(() => {
       readTimer = null
-      void readForeground(generation, allowWrapperRetry)
+      void readForeground(generation, retryIndex)
     }, delayMs)
   }
 
-  async function readForeground(generation: number, allowWrapperRetry: boolean): Promise<void> {
+  async function readForeground(generation: number, retryIndex: number): Promise<void> {
     const ptyId = trackablePtyId()
     if (disposed || generation !== readGeneration || !ptyId) {
       return
@@ -71,8 +72,9 @@ export function createPaneForegroundAgentTracker(deps: PaneForegroundAgentTracke
       deps.publish({ agent: null, shellForeground: true })
       return
     }
-    if (allowWrapperRetry && processName) {
-      scheduleRead(WRAPPER_RESOLVE_RETRY_MS, false)
+    const retryDelay = WRAPPER_RESOLVE_RETRY_DELAYS_MS[retryIndex]
+    if (retryDelay !== undefined && processName) {
+      scheduleRead(retryDelay, retryIndex + 1)
       return
     }
     deps.publish({ agent: null, shellForeground: false })
@@ -87,7 +89,7 @@ export function createPaneForegroundAgentTracker(deps: PaneForegroundAgentTracke
       // Why: the foreground left the prompt the moment C fired — stale
       // shell-foreground evidence must not clear the command that just started.
       deps.publish({ agent: null, shellForeground: false })
-      scheduleRead(COMMAND_SETTLE_MS, true)
+      scheduleRead(COMMAND_SETTLE_MS, 0)
     },
     onCommandFinished() {
       cancelPendingRead()

@@ -80,6 +80,36 @@ describe('resolveTabAgentFromSignals process identity', () => {
     ).toBeNull()
   })
 
+  it('suppresses stuck-title identity once shell foreground is proven on a manual pane', () => {
+    // Why: pre-probe-removal, the foreground read cleared icons for TUIs that
+    // died with a stuck title; shell-foreground evidence restores that.
+    expect(
+      resolveTabAgentFromSignals({
+        hasObservedAgentSignal: true,
+        isRemote: false,
+        title: '✳ Claude Code',
+        hookAgent: null,
+        processAgent: null,
+        processShellForeground: true,
+        launchAgent: undefined
+      })
+    ).toBeNull()
+  })
+
+  it('keeps remote title identity even when a shell-foreground flag is passed', () => {
+    expect(
+      resolveTabAgentFromSignals({
+        hasObservedAgentSignal: true,
+        isRemote: true,
+        title: '✳ Claude Code',
+        hookAgent: null,
+        processAgent: null,
+        processShellForeground: true,
+        launchAgent: undefined
+      })
+    ).toBe('claude')
+  })
+
   it('keeps launch identity while the recognized process is still in the foreground', () => {
     expect(
       resolveTabAgentFromSignals({

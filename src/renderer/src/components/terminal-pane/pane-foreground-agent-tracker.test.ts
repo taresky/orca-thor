@@ -6,6 +6,7 @@ import type { PaneForegroundAgentEntry } from '@/store/slices/pane-foreground-ag
 
 const COMMAND_SETTLE_MS = 350
 const WRAPPER_RESOLVE_RETRY_MS = 1200
+const SECOND_WRAPPER_RETRY_MS = 3500
 
 describe('createPaneForegroundAgentTracker', () => {
   const readForegroundProcess = vi.fn<(ptyId: string) => Promise<string | null>>()
@@ -51,8 +52,13 @@ describe('createPaneForegroundAgentTracker', () => {
     expect(publish).toHaveBeenLastCalledWith({ agent: 'claude', shellForeground: false })
   })
 
-  it('re-reads once when the first read still sees an interpreter wrapper', async () => {
-    readForegroundProcess.mockResolvedValueOnce('node').mockResolvedValueOnce('claude')
+  it('re-reads on a bounded ladder while the read still sees an interpreter wrapper', async () => {
+    // Why: daemon shell/helper→agent ancestry resolution has been observed to
+    // take >1.5s for real node-wrapped CLIs, so the ladder gets two re-reads.
+    readForegroundProcess
+      .mockResolvedValueOnce('node')
+      .mockResolvedValueOnce('node')
+      .mockResolvedValueOnce('claude')
     const tracker = makeTracker()
 
     tracker.onCommandStarted()
@@ -62,7 +68,23 @@ describe('createPaneForegroundAgentTracker', () => {
 
     await flushSettleRead(WRAPPER_RESOLVE_RETRY_MS)
     expect(readForegroundProcess).toHaveBeenCalledTimes(2)
+
+    await flushSettleRead(SECOND_WRAPPER_RETRY_MS)
+    expect(readForegroundProcess).toHaveBeenCalledTimes(3)
     expect(publish).toHaveBeenLastCalledWith({ agent: 'claude', shellForeground: false })
+  })
+
+  it('stops after the ladder and publishes no identity for a persistent unknown process', async () => {
+    readForegroundProcess.mockResolvedValue('some-unknown-tool')
+    const tracker = makeTracker()
+
+    tracker.onCommandStarted()
+    await flushSettleRead(
+      COMMAND_SETTLE_MS + WRAPPER_RESOLVE_RETRY_MS + SECOND_WRAPPER_RETRY_MS + 10_000
+    )
+
+    expect(readForegroundProcess).toHaveBeenCalledTimes(3)
+    expect(publish).toHaveBeenLastCalledWith({ agent: null, shellForeground: false })
   })
 
   it('publishes shell foreground when the read lands after a fast command already exited', async () => {

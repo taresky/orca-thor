@@ -73,22 +73,28 @@ export function resolveTabAgentFromSignals(args: {
   // A live title that explicitly names a *different* agent, once the pane has
   // shown any activity, overrides that stale launch identity so the tab icon
   // tracks what is actually running (codex launch reused for claude, etc.).
+  // Why: OSC 133;D proved this local pane's foreground is back at the shell,
+  // so any title-derived identity is stale by definition — a TUI that died
+  // with a stuck title must not keep painting the tab through the title layer.
+  const processProvesShell = !args.isRemote && args.processShellForeground === true
   const titleOverridesLaunch =
     launchAgent !== null &&
     explicitTitleAgent !== null &&
     explicitTitleAgent !== launchAgent &&
     args.hasObservedAgentSignal
-  const titleAgent = titleOverridesLaunch
-    ? explicitTitleAgent
-    : launchAgent
-      ? null
-      : explicitTitleAgent
+  const titleAgent = processProvesShell
+    ? null
+    : titleOverridesLaunch
+      ? explicitTitleAgent
+      : launchAgent
+        ? null
+        : explicitTitleAgent
   const hasCompletedHook = (args.focusedCompletedHookAgent ?? null) !== null
   const noAgentTitle = titleShowsNoAgent(args.title, args.defaultTitle)
   // Why: remote pane titles can lag their runtime, so keep the last completed
   // hook identity instead of flashing unknown when the title reads as a shell.
   const completedHookAgent =
-    !args.isRemote && noAgentTitle && hasCompletedHook
+    !args.isRemote && (noAgentTitle || processProvesShell) && hasCompletedHook
       ? null
       : (args.focusedCompletedHookAgent ?? args.siblingCompletedHookAgent ?? null)
   const focusedHookAgent = args.hookAgent ?? null
