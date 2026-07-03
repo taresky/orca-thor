@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { app, ipcMain } from 'electron'
 import {
   configureAiVaultSessionSources,
   listAiVaultSessions,
@@ -17,4 +17,11 @@ export function registerAiVaultHandlers(options: AiVaultHandlerOptions = {}): vo
   ipcMain.handle('aiVault:listSessions', (_event, args?: AiVaultListArgs) =>
     listAiVaultSessions(args)
   )
+  // DOM focus/visibility events don't fire in the renderer on macOS app
+  // activation, so refresh-on-refocus needs this main-process signal.
+  app.on('browser-window-focus', (_event, window) => {
+    if (!window.isDestroyed()) {
+      window.webContents.send('aiVault:windowFocused')
+    }
+  })
 }
