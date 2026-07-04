@@ -708,16 +708,9 @@ export class CodexRuntimeHomeService {
     for (const homePath of candidateHomes) {
       const configPath = join(homePath, 'config.toml')
       if (existsSync(configPath)) {
-        // Why: the seed config is read over UNC but consumed by Codex inside
-        // WSL, so relative path-valued settings must anchor to the Linux-side
-        // source home; a verbatim copy breaks Codex config load (os error 2).
-        const sourceConfigDir = parseWslUncPath(homePath)?.linuxPath ?? homePath
         writeFileAtomically(
           runtimeConfigPath,
-          prepareSystemConfigForFreshRuntimeMirror(
-            readFileSync(configPath, 'utf-8'),
-            sourceConfigDir
-          )
+          prepareWslRuntimeSeedConfig(readFileSync(configPath, 'utf-8'), homePath)
         )
         return
       }
@@ -1574,4 +1567,17 @@ export class CodexRuntimeHomeService {
   clearSystemDefaultSnapshot(): void {
     rmSync(this.getSystemDefaultSnapshotPath(), { force: true })
   }
+}
+
+// Why: the seed config is read over UNC but consumed by Codex inside WSL, so
+// relative path-valued settings must anchor to the Linux-side source home; a
+// verbatim copy breaks Codex config load (os error 2).
+export function prepareWslRuntimeSeedConfig(
+  configContents: string,
+  sourceHomePath: string
+): string {
+  return prepareSystemConfigForFreshRuntimeMirror(
+    configContents,
+    parseWslUncPath(sourceHomePath)?.linuxPath ?? sourceHomePath
+  )
 }
