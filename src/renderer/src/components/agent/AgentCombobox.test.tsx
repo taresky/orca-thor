@@ -32,7 +32,7 @@ describe('AgentCombobox', () => {
     const markup = renderToStaticMarkup(<AgentIcon agent="opencode" />)
 
     expect(markup).toContain('<svg')
-    expect(markup).toContain('viewBox="0 0 240 300"')
+    expect(markup).toContain('viewBox="0 0 512 512"')
     expect(markup).not.toContain('/resources/opencode.webp')
     expect(markup).not.toContain('https://www.google.com/s2/favicons')
     expect(markup).not.toContain('<img')
