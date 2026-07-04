@@ -73,7 +73,12 @@ type PtyOutputProcessorOptions = Pick<
   | 'onAgentBecameWorking'
   | 'onAgentExited'
   | 'onAgentStatus'
->
+> & {
+  /** Seed for processors that start mid-session (parked-tab byte watchers):
+   *  the pane's last known title, so a working agent that finishes while the
+   *  processor owns the stream still yields a working→idle transition. */
+  initialAgentTitle?: string
+}
 
 type ProcessPtyOutputOptions = {
   replayingBufferedData?: boolean
@@ -95,7 +100,8 @@ export function createPtyOutputProcessor({
   onAgentBecameIdle,
   onAgentBecameWorking,
   onAgentExited,
-  onAgentStatus
+  onAgentStatus,
+  initialAgentTitle
 }: PtyOutputProcessorOptions): {
   processData: (
     data: string,
@@ -110,7 +116,11 @@ export function createPtyOutputProcessor({
 } {
   const bellDetector = createBellDetector()
   const processAgentStatusChunk = createAgentStatusOscProcessor()
-  let lastEmittedTitle: string | null = null
+  // Why: seed both the emitted-title memory (stale-title probe) and the agent
+  // tracker so a mid-session processor behaves as if it had observed the
+  // pane's last live title — full parity with the live path it replaces.
+  let lastEmittedTitle: string | null =
+    initialAgentTitle !== undefined ? normalizeTerminalTitle(initialAgentTitle) : null
   let staleTitleTimer: ReturnType<typeof setTimeout> | null = null
   let sideEffectDrainTimer: ReturnType<typeof setTimeout> | null = null
   let pendingSideEffects: PendingPtySideEffect[] = []
@@ -123,7 +133,8 @@ export function createPtyOutputProcessor({
             onAgentBecameIdle?.(title)
           },
           onAgentBecameWorking,
-          onAgentExited
+          onAgentExited,
+          initialAgentTitle
         )
       : null
 

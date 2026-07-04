@@ -51,6 +51,14 @@ type OrcaTestFixtures = {
   // Why: most E2E specs need a ready project before assertions start. Golden
   // first-run specs opt out so they can prove the zero-project onboarding path.
   seedTestRepo: boolean
+  // Why: spec-scoped launch env. Mutating process.env at spec module scope
+  // leaks into other specs when a worker reloads files without replaying the
+  // first spec's afterAll; per-test launch env cannot leak.
+  orcaAppExtraEnv: Record<string, string>
+  // Why: spec-scoped Chromium switches (e.g. --enable-precise-memory-info for
+  // memory benchmarks). Prepended before the main entry so Electron forwards
+  // them to Chromium without affecting other specs' launches.
+  orcaAppExtraArgs: string[]
   // Why: a few IPC repro specs need to launch the Electron app with a scoped
   // PATH/token environment. Keep this fixture-owned so tests never mutate the
   // developer's shell or already-running Orca instance.
@@ -203,7 +211,11 @@ export const test = base.extend<OrcaTestFixtures, OrcaWorkerFixtures>({
   ],
 
   // Test-scoped: one Electron app per test
-  electronApp: async ({ dismissOnboarding, launchEnv }, provideFixture, testInfo) => {
+  electronApp: async (
+    { dismissOnboarding, launchEnv, orcaAppExtraEnv, orcaAppExtraArgs },
+    provideFixture,
+    testInfo
+  ) => {
     const mainPath = path.join(process.cwd(), 'out', 'main', 'index.js')
     const userDataDir = mkdtempSync(path.join(os.tmpdir(), 'orca-e2e-userdata-'))
 
@@ -240,7 +252,7 @@ export const test = base.extend<OrcaTestFixtures, OrcaWorkerFixtures>({
       mkdirSync(recordVideoDir, { recursive: true })
     }
     const app = await electron.launch({
-      args: getOrcaElectronLaunchArgs(mainPath, headful),
+      args: [...orcaAppExtraArgs, ...getOrcaElectronLaunchArgs(mainPath, headful)],
       ...(slowMo > 0 ? { slowMo } : {}),
       ...(recordVideoDir ? { recordVideo: { dir: recordVideoDir } } : {}),
       // Why: keep NODE_ENV=development so window.__store is exposed and
@@ -265,7 +277,8 @@ export const test = base.extend<OrcaTestFixtures, OrcaWorkerFixtures>({
         !cleanEnv.ORCA_RELAY_PATH
           ? { ORCA_RELAY_PATH: path.join(process.cwd(), 'out', 'relay') }
           : {}),
-        ...(headful ? { ORCA_E2E_HEADFUL: '1' } : { ORCA_E2E_HEADLESS: '1' })
+        ...(headful ? { ORCA_E2E_HEADFUL: '1' } : { ORCA_E2E_HEADLESS: '1' }),
+        ...orcaAppExtraEnv
       }
     })
     forwardElectronProcessLogs(app, testInfo)
@@ -281,6 +294,8 @@ export const test = base.extend<OrcaTestFixtures, OrcaWorkerFixtures>({
   dismissOnboarding: [true, { option: true }],
   seedTestRepo: [true, { option: true }],
   launchEnv: [{}, { option: true }],
+  orcaAppExtraEnv: [{}, { option: true }],
+  orcaAppExtraArgs: [[], { option: true }],
 
   // Test-scoped: grab the first BrowserWindow, add the test repo, and wait
   // until the session is fully ready with a worktree active.
@@ -314,38 +329,23 @@ export const test = base.extend<OrcaTestFixtures, OrcaWorkerFixtures>({
       await window.api.repos.add({ path: repoPath })
     }, repoPath)
 
-    // Fetch repos in the renderer store so it picks up the new repo, then opt
-    // this disposable repo into showing external worktrees.
-    // Why: repos.add() fires a repos:changed echo that triggers a *concurrent*
-    // fetchRepos() in the renderer; the store's generation guard can then drop
-    // this awaited fetch's result, leaving `repos` briefly stale. Poll the
-    // public fetch path until the repo lands instead of asserting on the first
-    // tick (mirrors the seeded-worktree poll below). updateRepo is idempotent,
-    // so running it once the repo appears is safe across poll ticks.
-    await playwrightExpect
-      .poll(
-        () =>
-          page.evaluate(async (repoPath) => {
-            const store = window.__store
-            if (!store) {
-              return false
-            }
-            await store.getState().fetchRepos()
-            const repo = store.getState().repos.find((candidate) => candidate.path === repoPath)
-            if (!repo) {
-              return false
-            }
-            // Why: the fixture deliberately creates external Git worktrees. New
-            // repos hide those by default after the visibility rollout.
-            await store.getState().updateRepo(repo.id, { externalWorktreeVisibility: 'show' })
-            return true
-          }, repoPath),
-        {
-          timeout: 30_000,
-          message: `Expected e2e repo to be loaded: ${repoPath}`
-        }
-      )
-      .toBe(true)
+    // Fetch repos in the renderer store so it picks up the new repo
+    await page.evaluate(async (repoPath) => {
+      const store = window.__store
+      if (!store) {
+        return
+      }
+
+      await store.getState().fetchRepos()
+      const repo = store.getState().repos.find((candidate) => candidate.path === repoPath)
+      if (!repo) {
+        throw new Error(`Expected e2e repo to be loaded: ${repoPath}`)
+      }
+      // Why: the fixture deliberately creates external Git worktrees. New
+      // repos hide those by default after the visibility rollout, so opt this
+      // disposable repo into showing them before specs assert on worktree state.
+      await store.getState().updateRepo(repo.id, { externalWorktreeVisibility: 'show' })
+    }, repoPath)
 
     // Wait for the repo to appear and fetch its worktrees
     await page.evaluate(async () => {

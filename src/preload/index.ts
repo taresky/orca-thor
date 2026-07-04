@@ -1688,6 +1688,10 @@ const api = {
   settings: {
     get: (): Promise<unknown> => ipcRenderer.invoke('settings:get'),
 
+    // Why: blocking read for the few startup decisions (terminal side-effect
+    // authority) that cannot wait for async hydration. Call sparingly.
+    getSync: (): unknown => ipcRenderer.sendSync('settings:get-sync'),
+
     set: (args: Record<string, unknown>): Promise<unknown> =>
       ipcRenderer.invoke('settings:set', args),
 

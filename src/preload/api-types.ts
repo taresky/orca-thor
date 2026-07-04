@@ -262,6 +262,7 @@ import type {
   MigrationUnsupportedPtyEntry
 } from '../shared/agent-status-types'
 import type { AgentInterruptInferenceRequest } from '../shared/agent-interrupt-intent'
+import type { TerminalSideEffectBatch } from '../shared/terminal-side-effect-facts'
 import type {
   RuntimeBrowserDriverState,
   RuntimeMobileSessionTabMove,
@@ -1155,6 +1156,11 @@ export type PreloadApi = {
     ackData: (id: string, charCount: number) => void
     setActiveRendererPty: (id: string, active: boolean) => void
     setRendererPtyVisible: (id: string, visible: boolean) => void
+    /** Hidden-delivery gate (PR #7214): absent in this build — no main-process
+     *  gate exists yet. Declared optional so gate-aware renderer code
+     *  (parked-terminal byte watcher) typechecks; it only fires when the
+     *  terminalHiddenDeliveryGate setting is on, which requires the emitter. */
+    setHiddenRendererPty?: (id: string, hidden: boolean) => void
     hasChildProcesses: (id: string) => Promise<boolean>
     getForegroundProcess: (id: string) => Promise<string | null>
     getCwd: (id: string) => Promise<string>
@@ -1199,6 +1205,14 @@ export type PreloadApi = {
       }) => void
     ) => () => void
     onReplay: (callback: (data: { id: string; data: string }) => void) => () => void
+    /** Batched derived side-effect facts channel (PR #7214): absent in this
+     *  build — main has no side-effect emitter yet. Declared optional so the
+     *  renderer facts-handler typechecks and degrades to "no channel";
+     *  terminalMainSideEffectAuthority defaults false until the emitter lands. */
+    onSideEffect?: (callback: (batch: TerminalSideEffectBatch) => void) => () => void
+    /** Title-only replay snapshot companion to onSideEffect (PR #7214):
+     *  absent in this build for the same reason. */
+    getSideEffectSnapshot?: (id: string) => Promise<TerminalSideEffectBatch | null>
     onExit: (callback: (data: { id: string; code: number }) => void) => () => void
     onSerializeBufferRequest: (
       callback: (data: {
@@ -1894,6 +1908,10 @@ export type PreloadApi = {
   telemetryAcknowledgeBanner: () => Promise<void>
   settings: {
     get: () => Promise<GlobalSettings>
+    /** Synchronous persisted-settings read for startup decisions that cannot
+     *  wait for async hydration (terminal side-effect authority). Blocking
+     *  IPC — call sparingly. */
+    getSync: () => GlobalSettings | null
     set: (args: Partial<GlobalSettings>) => Promise<GlobalSettings>
     listFonts: () => Promise<string[]>
     previewGhosttyImport: () => Promise<GhosttyImportPreview>
