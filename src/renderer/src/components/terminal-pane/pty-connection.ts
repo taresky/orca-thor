@@ -67,6 +67,7 @@ import {
   scanMode2031Sequences
 } from '../../../../shared/terminal-color-scheme-protocol'
 import { warnTerminalLifecycleAnomaly } from './terminal-lifecycle-diagnostics'
+import { subscribeToTerminalUserInput } from './terminal-user-input-signal'
 import { registerPtySerializer, registerPtyTitleSource } from './pty-buffer-serializer'
 import { getRemoteRuntimePtyEnvironmentId } from '@/runtime/runtime-terminal-stream'
 import { inspectRuntimeTerminalProcess } from '@/runtime/runtime-terminal-inspection'
@@ -2561,12 +2562,27 @@ export function connectPanePty(
   const markTerminalInputSent = (): void => {
     lastTerminalInputAt = performance.now()
   }
-  const recordAcceptedTerminalInputForHibernation = (): void => {
+  const recordTerminalInputForHibernation = (): void => {
     useAppStore.getState().recordTerminalInput(cacheKey)
+  }
+  // Why: onData mixes real user input with xterm's parser auto-replies (focus
+  // reports, DA/DSR/CPR responses). Recording those replies as activity makes
+  // the hibernation planner treat a pane hidden after its agent finished as
+  // "input after done" forever. The core user-input signal fires only for real
+  // input, so hibernation activity records from it; onData recording remains
+  // solely as the fallback when the internal API is unavailable.
+  const userInputActivityDisposable = subscribeToTerminalUserInput(
+    pane.terminal,
+    recordTerminalInputForHibernation
+  )
+  const recordTerminalInputForHibernationFallback = (): void => {
+    if (userInputActivityDisposable === null) {
+      recordTerminalInputForHibernation()
+    }
   }
   const markAcceptedTerminalInputSent = (): void => {
     markTerminalInputSent()
-    recordAcceptedTerminalInputForHibernation()
+    recordTerminalInputForHibernationFallback()
   }
   const terminalTheme = pane.terminal.options.theme
   const terminalColorQueryReplies = terminalTheme
@@ -2737,7 +2753,7 @@ export function connectPanePty(
         .sendInputAccepted(data)
         .then((accepted) => {
           if (accepted) {
-            recordAcceptedTerminalInputForHibernation()
+            recordTerminalInputForHibernationFallback()
             observeAcceptedShellCommandInput(data)
             observeAcceptedTerminalInput(data, acknowledgedIntent)
             interruptInference.observeInputIntent(acknowledgedIntent)
@@ -5946,6 +5962,7 @@ export function connectPanePty(
         connectFallbackTimer = null
       }
       onDataDisposable.dispose()
+      userInputActivityDisposable?.dispose()
       terminalCapabilityRepliesDisposable.dispose()
       onResizeDisposable.dispose()
       onBufferChangeDisposable?.dispose()
