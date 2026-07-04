@@ -31,10 +31,6 @@ type AgentTitleEvidence = {
   title: string
 }
 
-type TitleHintAgentTarget = NotesSendAgentTarget & {
-  source: 'launch-agent' | 'manual-title'
-}
-
 function detectTitleHintPaneEvidence(
   paneTitleResolution: RuntimePaneTitleLeafResolution,
   tabTitle: string
@@ -91,7 +87,14 @@ export function deriveNotesSendAgentTargets(
       continue
     }
 
-    mergeTitleHintAgentTarget(targets, titleHintTarget)
+    // Why: a launchAgent tab carries an owner bit, so its live title can promote a
+    // stale status row on the same pane. A manually started CLI has no owner bit,
+    // so it only ever adds a row and must not override existing status evidence.
+    if (tab.launchAgent) {
+      mergeLaunchAgentTitleTarget(targets, titleHintTarget)
+    } else {
+      mergeManualAgentTitleTarget(targets, titleHintTarget)
+    }
   }
 
   return targets
@@ -110,7 +113,7 @@ function resolveNotesTargetAgentType(
 function deriveTitleHintAgentTarget(
   state: NotesSendAgentTargetState,
   tab: TerminalTab
-): TitleHintAgentTarget | null {
+): NotesSendAgentTarget | null {
   const layout = state.terminalLayoutsByTabId[tab.id]
   const leafId = layout?.activeLeafId
   if (!leafId || !isTerminalLeafId(leafId)) {
@@ -141,23 +144,27 @@ function deriveTitleHintAgentTarget(
     agentType: tab.launchAgent ?? resolveTerminalTitleAgentType(titleEvidence.title),
     tabTitle: tab.title,
     status: disabledReason ? 'disabled' : 'eligible',
-    ...(disabledReason ? { disabledReason } : {}),
-    source: tab.launchAgent ? 'launch-agent' : 'manual-title'
+    ...(disabledReason ? { disabledReason } : {})
   }
 }
 
-function mergeTitleHintAgentTarget(
+// Why: a manual title hint is the weakest signal, so never duplicate a tab that
+// already has a status-backed or launch-agent row — even a disabled one.
+function mergeManualAgentTitleTarget(
   targets: NotesSendAgentTarget[],
-  titleHintTarget: TitleHintAgentTarget
+  target: NotesSendAgentTarget
 ): void {
-  if (
-    titleHintTarget.source === 'manual-title' &&
-    targets.some((target) => target.tabId === titleHintTarget.tabId)
-  ) {
+  if (targets.some((existing) => existing.tabId === target.tabId)) {
     return
   }
+  targets.push(target)
+}
 
-  const samePaneIndex = targets.findIndex((target) => target.paneKey === titleHintTarget.paneKey)
+function mergeLaunchAgentTitleTarget(
+  targets: NotesSendAgentTarget[],
+  target: NotesSendAgentTarget
+): void {
+  const samePaneIndex = targets.findIndex((existing) => existing.paneKey === target.paneKey)
   if (samePaneIndex !== -1) {
     const existing = targets[samePaneIndex]
     if (existing.status === 'eligible' || existing.disabledReason === 'Agent needs permission') {
@@ -168,12 +175,12 @@ function mergeTitleHintAgentTarget(
     // same live launch-agent pane has a fresh title proof, prefer the sendable
     // runtime evidence over the stale retained status row.
     targets[samePaneIndex] = {
-      ...stripTitleHintSource(titleHintTarget),
+      ...target,
       agentType:
         existing.agentType && existing.agentType !== 'unknown'
           ? existing.agentType
-          : titleHintTarget.agentType,
-      tabTitle: existing.tabTitle || titleHintTarget.tabTitle
+          : target.agentType,
+      tabTitle: existing.tabTitle || target.tabTitle
     }
     return
   }
@@ -182,25 +189,13 @@ function mergeTitleHintAgentTarget(
   // be a split shell pane, which would list a second bogus row for the same tab.
   if (
     targets.some(
-      (target) =>
-        target.tabId === titleHintTarget.tabId &&
-        (target.status === 'eligible' || target.disabledReason === 'Agent needs permission')
+      (existing) =>
+        existing.tabId === target.tabId &&
+        (existing.status === 'eligible' || existing.disabledReason === 'Agent needs permission')
     )
   ) {
     return
   }
 
-  targets.push(stripTitleHintSource(titleHintTarget))
-}
-
-function stripTitleHintSource(target: TitleHintAgentTarget): NotesSendAgentTarget {
-  return {
-    paneKey: target.paneKey,
-    tabId: target.tabId,
-    leafId: target.leafId,
-    agentType: target.agentType,
-    tabTitle: target.tabTitle,
-    status: target.status,
-    ...(target.disabledReason ? { disabledReason: target.disabledReason } : {})
-  }
+  targets.push(target)
 }
