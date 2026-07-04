@@ -1160,7 +1160,12 @@ export type PreloadApi = {
     signal: (id: string, signal: string) => void
     kill: (id: string, opts?: { keepHistory?: boolean }) => Promise<void>
     ackColdRestore: (id: string) => void
-    ackData: (id: string, charCount: number) => void
+    ackData: (id: string, charCount: number, processedChars?: number) => void
+    onDeliveryResyncRequest: (callback: (payload: { requestId: number }) => void) => () => void
+    respondDeliveryResync: (payload: {
+      requestId: number
+      processedCharsByPty: Record<string, number>
+    }) => void
     setActiveRendererPty: (id: string, active: boolean) => void
     setRendererPtyVisible: (id: string, visible: boolean) => void
     /** Hidden-delivery gate (Phase 4): hidden=true lets main drop renderer
@@ -2745,6 +2750,7 @@ export type PreloadApi = {
       callback: (payload: RichMarkdownContextMenuCommandPayload) => void
     ) => () => void
     onFullscreenChanged: (callback: (isFullScreen: boolean) => void) => () => void
+    onSystemResumed: (callback: () => void) => () => void
     minimize: () => void
     maximize: () => void
     isMaximized: () => Promise<boolean>
