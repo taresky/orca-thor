@@ -19,7 +19,7 @@ Stack topology facts the rest of this plan depends on (verified 2026-07-02):
 
 Known Orca PR stack:
 
-- [#7001](https://github.com/stablyai/orca/pull/7001), `Add reliability gate manifest`: merged on 2026-07-03. The manifest, checker, and plan docs are on main; a follow-up manifest-v2 PR hardens the checker policy and registers the merged #7133/#7148/#7173/#7192 regression tests as partial gates with fresh main-side evidence.
+- [#7001](https://github.com/stablyai/orca/pull/7001), `Add reliability gate manifest`: merged on 2026-07-03. The manifest, checker, and plan docs are on main; [#7295](https://github.com/stablyai/orca/pull/7295) hardens the checker policy and registers the merged #7133/#7148/#7173/#7192 regression tests as partial gates with fresh main-side evidence.
 - [#7005](https://github.com/stablyai/orca/pull/7005), `Add terminal snapshot freshness contract gate`: depends on #7001 and protects the stale-liveness/newborn-PTY class behind `terminal-session.snapshot-freshness`.
 - [#7008](https://github.com/stablyai/orca/pull/7008), `Expand provider session replay ownership gate`: depends on #7001 and protects the agent/provider ownership class behind `agent-session.provider-ownership`.
 - [#7004](https://github.com/stablyai/orca/pull/7004), `Contain xterm addon failures to terminal panes`: depends on #7001. The current branch has a first executable xterm containment slice for addon load, link-provider, search, and WebGL failure containment; it still needs live typed input/output survival before promotion.
