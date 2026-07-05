@@ -9,6 +9,7 @@ import {
   TERMINAL_INPUT_MAX_BYTES
 } from '../../shared/terminal-input'
 import { CLIPBOARD_TEXT_MEASURE_YIELD_CODE_UNITS } from '../../shared/clipboard-text'
+import { FLOATING_TERMINAL_WORKTREE_ID } from '../../shared/constants'
 
 const isWindowsHost = process.platform === 'win32'
 const posixOnlyIt = isWindowsHost ? it.skip : it
@@ -1366,6 +1367,7 @@ describe('registerPtyHandlers', () => {
         // from main and PR #2662 command threading for OMP target selection.
         spawnArgs?: {
           cwd?: string
+          worktreeId?: string
           shellOverride?: string
           command?: string
           envToDelete?: string[]
@@ -1559,7 +1561,10 @@ describe('registerPtyHandlers', () => {
               CODEX_HOME: 'C:\\Users\\test\\AppData\\Roaming\\Orca\\codex-runtime-home\\home',
               ORCA_CODEX_HOME: 'C:\\Users\\test\\AppData\\Roaming\\Orca\\codex-runtime-home\\home'
             },
-            { cwd: '\\\\wsl.localhost\\Ubuntu\\home\\test\\repo' }
+            {
+              cwd: '\\\\wsl.localhost\\Ubuntu\\home\\test\\repo',
+              worktreeId: 'repo-1::\\\\wsl.localhost\\Ubuntu\\home\\test\\repo'
+            }
           )
           const { env } = spawnOptions
           expect(env.CODEX_HOME).toBeUndefined()
@@ -4415,7 +4420,7 @@ describe('registerPtyHandlers', () => {
       cols: 80,
       rows: 24,
       cwd: '/tmp',
-      worktreeId: 'wt-1',
+      worktreeId: 'repo-1::/tmp',
       tabId: 'tab-race',
       leafId,
       env: { ORCA_PANE_KEY: paneKey },
@@ -4429,12 +4434,12 @@ describe('registerPtyHandlers', () => {
       cols: 80,
       rows: 24,
       cwd: '/tmp',
-      worktreeId: 'wt-1',
+      worktreeId: 'repo-1::/tmp',
       tabId: 'tab-race',
       leafId,
       env: {
         ORCA_TAB_ID: 'tab-race',
-        ORCA_WORKTREE_ID: 'wt-1'
+        ORCA_WORKTREE_ID: 'repo-1::/tmp'
       }
     }) as Promise<{ id: string }>
     await Promise.resolve()
@@ -4447,7 +4452,7 @@ describe('registerPtyHandlers', () => {
     ])
     expect(providerSpawn).toHaveBeenCalledTimes(1)
     expect(store.persistPtyBinding).toHaveBeenCalledWith({
-      worktreeId: 'wt-1',
+      worktreeId: 'repo-1::/tmp',
       tabId: 'tab-race',
       leafId,
       ptyId: 'pty-shared',
@@ -4529,13 +4534,13 @@ describe('registerPtyHandlers', () => {
       cols: 80,
       rows: 24,
       cwd: '/tmp',
-      worktreeId: 'wt-1',
+      worktreeId: 'repo-1::/tmp',
       tabId: 'tab-race',
       leafId,
       env: {
         ORCA_PANE_KEY: paneKey,
         ORCA_TAB_ID: 'tab-race',
-        ORCA_WORKTREE_ID: 'wt-1'
+        ORCA_WORKTREE_ID: 'repo-1::/tmp'
       }
     }) as Promise<{ id: string }>
     await Promise.resolve()
@@ -4545,7 +4550,7 @@ describe('registerPtyHandlers', () => {
       cols: 80,
       rows: 24,
       cwd: '/tmp',
-      worktreeId: 'wt-1',
+      worktreeId: 'repo-1::/tmp',
       tabId: 'tab-race',
       leafId,
       env: { ORCA_PANE_KEY: paneKey },
@@ -4561,7 +4566,7 @@ describe('registerPtyHandlers', () => {
     ])
     expect(providerSpawn).toHaveBeenCalledTimes(1)
     expect(store.persistPtyBinding).toHaveBeenCalledWith({
-      worktreeId: 'wt-1',
+      worktreeId: 'repo-1::/tmp',
       tabId: 'tab-race',
       leafId,
       ptyId: 'pty-renderer',
@@ -5915,6 +5920,22 @@ describe('registerPtyHandlers', () => {
     })
   })
 
+  it('passes floating terminal cwds through to the spawned shell', async () => {
+    // Why: the floating sentinel has no worktree root; its cwd is validated
+    // against trusted-directory grants before it reaches pty:spawn.
+    registerPtyHandlers(mainWindow as never)
+
+    await handlers.get('pty:spawn')!(null, {
+      cols: 80,
+      rows: 24,
+      cwd: '/tmp/floating-notes',
+      worktreeId: FLOATING_TERMINAL_WORKTREE_ID
+    })
+
+    const [, , options] = spawnMock.mock.calls.at(-1) as [string, string[], { cwd: string }]
+    expect(options.cwd).toBe('/tmp/floating-notes')
+  })
+
   it('rejects missing WSL worktree cwd instead of validating only the fallback Windows cwd', async () => {
     const originalPlatform = process.platform
     const originalUserProfile = process.env.USERPROFILE
@@ -5925,8 +5946,10 @@ describe('registerPtyHandlers', () => {
     })
     process.env.USERPROFILE = 'C:\\Users\\jinwo'
 
+    // Why: the startup-cwd guard normalizes separators, so the provider sees
+    // the forward-slash UNC form.
     existsSyncMock.mockImplementation((targetPath: string) => {
-      if (targetPath === '\\\\wsl.localhost\\Ubuntu\\home\\jin\\missing') {
+      if (targetPath === '//wsl.localhost/Ubuntu/home/jin/missing') {
         return false
       }
       return true
@@ -5939,10 +5962,11 @@ describe('registerPtyHandlers', () => {
         handlers.get('pty:spawn')!(null, {
           cols: 80,
           rows: 24,
-          cwd: '\\\\wsl.localhost\\Ubuntu\\home\\jin\\missing'
+          cwd: '\\\\wsl.localhost\\Ubuntu\\home\\jin\\missing',
+          worktreeId: 'repo-1::\\\\wsl.localhost\\Ubuntu\\home\\jin'
         })
       ).rejects.toThrow(
-        'Working directory "\\\\wsl.localhost\\Ubuntu\\home\\jin\\missing" does not exist.'
+        'Working directory "//wsl.localhost/Ubuntu/home/jin/missing" does not exist.'
       )
       expect(spawnMock).not.toHaveBeenCalled()
     } finally {
@@ -8719,7 +8743,8 @@ describe('registerPtyHandlers', () => {
       const result = await handlers.get('pty:spawn')!(null, {
         cols: 80,
         rows: 24,
-        cwd: '/tmp'
+        cwd: '/tmp',
+        worktreeId: 'repo-1::/tmp'
       })
 
       expect(result).toEqual({ id: expect.any(String), pid: 12345 })
@@ -8759,7 +8784,8 @@ describe('registerPtyHandlers', () => {
       await handlers.get('pty:spawn')!(null, {
         cols: 80,
         rows: 24,
-        cwd: '/tmp'
+        cwd: '/tmp',
+        worktreeId: 'repo-1::/tmp'
       })
 
       expect(spawnMock).toHaveBeenCalledTimes(1)
@@ -9104,6 +9130,7 @@ describe('registerPtyHandlers', () => {
         cols: 80,
         rows: 24,
         cwd: '/tmp',
+        worktreeId: 'repo-1::/tmp',
         env: { SHELL: '/opt/homebrew/bin/bash' }
       })
 
