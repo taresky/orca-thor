@@ -144,6 +144,7 @@ describe.runIf(process.platform === 'win32')('patched node-pty loader override',
     })
     expect(destDir).not.toBeNull()
 
+    const previousNativeDir = process.env.ORCA_NODE_PTY_NATIVE_DIR
     process.env.ORCA_NODE_PTY_NATIVE_DIR = destDir!
     try {
       const utils = requireFromHere('node-pty/lib/utils.js')
@@ -151,7 +152,11 @@ describe.runIf(process.platform === 'win32')('patched node-pty loader override',
       expect(loaded.dir).toBe(destDir)
       expect(typeof loaded.module.startProcess).toBe('function')
     } finally {
-      delete process.env.ORCA_NODE_PTY_NATIVE_DIR
+      if (previousNativeDir === undefined) {
+        delete process.env.ORCA_NODE_PTY_NATIVE_DIR
+      } else {
+        process.env.ORCA_NODE_PTY_NATIVE_DIR = previousNativeDir
+      }
     }
   })
 })

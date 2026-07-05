@@ -111,9 +111,10 @@ export function installRelocatedNodePtyNativeRuntime(): void {
   if (!app.isPackaged && process.env.ORCA_FORCE_CONPTY_RELOCATION !== '1') {
     return
   }
-  if (process.env[NODE_PTY_NATIVE_DIR_ENV_VAR]) {
-    return
-  }
+  // Note: a pre-set env var is deliberately NOT honored here. The update
+  // relaunch chain (old app -> installer -> new app) inherits the previous
+  // version's value, which would pin the new process to stale binaries and
+  // skip copying the current version.
   let nodePtyPackageDir: string
   try {
     const requireFromHere = createRequire(import.meta.url)
