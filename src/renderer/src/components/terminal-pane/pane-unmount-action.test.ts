@@ -80,6 +80,23 @@ describe('resolvePaneUnmountAction', () => {
     ).toBe('destroy')
   })
 
+  it('P0-2: a tab closed mid-eviction (live exclusive PTY) -> destroy, never park', () => {
+    // Guards the orphan-PTY leak: if the user closes a tab while its eviction
+    // teardown is in flight, the tab is gone by unmount time. A closed tab must
+    // reach destroy() (kill the PTY) — parking it would leave a live PTY with no
+    // owning tab and no close-reconcile owner. tabStillExists=false wins over the
+    // eviction park branch precisely so this can never orphan.
+    const action = resolvePaneUnmountAction({
+      isEviction: true,
+      tabStillExists: false,
+      tabId: 't1',
+      ptyId: 'pty-1',
+      worktreeTabs: []
+    })
+    expect(action).toBe('destroy')
+    expect(action).not.toBe('park')
+  })
+
   it('a shared PTY is never parked even under an eviction unmount', () => {
     // Guards against two transports claiming one PTY: if the PTY still belongs to
     // a sibling tab, detach wins over park regardless of the eviction flag.

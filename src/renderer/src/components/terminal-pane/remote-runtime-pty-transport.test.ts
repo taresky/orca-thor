@@ -1265,7 +1265,7 @@ describe('createRemoteRuntimePtyTransport', () => {
     // On remount claim, a remote transport is released via detach() (not another
     // park), which closes the per-instance multiplexed stream. Without this the
     // subscription + parser would leak on every remote evict/remount.
-    transport.detach()
+    transport.detach?.()
     emitOutput(streamId, '\x1b]0;after-release\x07')
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(parkedTitle).not.toHaveBeenCalled()
