@@ -133,6 +133,8 @@ function applyExternalRichMarkdownContent(
       contentType: 'markdown',
       emitUpdate: false
     })
+    // Why: normalizeEmptyListItems avoids splitting hard-wrapped paragraphs from
+    // external content, matching onCreate's single-paragraph reflow behavior.
     normalizeEmptyListItems(editor)
     lastCommittedMarkdownRef.current = content
     if (hadFocus) {

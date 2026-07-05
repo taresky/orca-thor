@@ -208,6 +208,9 @@ export function createRichMarkdownEditorConfig(params: EditorConfigParams): UseE
       clearAnnotationTarget()
     },
     onCreate: ({ editor: nextEditor }) => {
+      // Why: normalizeEmptyListItems (not normalizeSoftBreaks) so hard-wrapped
+      // source paragraphs stay one paragraph and reflow via CSS instead of being
+      // split on load.
       normalizeEmptyListItems(nextEditor)
       lastCommittedMarkdownRef.current = content
       isInitializingRef.current = false
