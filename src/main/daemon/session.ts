@@ -305,6 +305,13 @@ export class Session {
     if (process.platform !== 'win32') {
       return
     }
+    // Why: before shell-ready, write() would queue the form feed behind the
+    // buffered startup command and deliver it at an arbitrary later moment,
+    // when the foreground/prompt gates below no longer hold. The nudge is
+    // cosmetic — skip it rather than defer it.
+    if (this._shellState === 'pending' || this.postReadyFlushGate.isPending) {
+      return
+    }
     if (!isPowerShellProcess(this.subprocess.getForegroundProcess())) {
       return
     }

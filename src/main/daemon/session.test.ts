@@ -477,6 +477,20 @@ describe('Session', () => {
       expect(subprocess.written).toEqual([])
     })
 
+    it('does not send or queue a form feed before shell-ready', async () => {
+      createSession({ shellReadySupported: true })
+      subprocess.foregroundProcess = 'powershell.exe'
+      subprocess.simulateData('PS C:\\Users\\me> ')
+      await vi.advanceTimersByTimeAsync(10)
+      // Why: a queued form feed would flush after the startup command at an
+      // arbitrary later moment, when the prompt gates no longer hold.
+      withPlatform('win32', () => session.clearScrollback())
+      expect(subprocess.written).toEqual([])
+      subprocess.simulateData('\x1b]777;orca-shell-ready\x07\r\nPS C:\\Users\\me> ')
+      await vi.advanceTimersByTimeAsync(10)
+      expect(subprocess.written).toEqual([])
+    })
+
     it('does not send a form feed at a PowerShell continuation prompt', async () => {
       createSession()
       subprocess.foregroundProcess = 'powershell.exe'
