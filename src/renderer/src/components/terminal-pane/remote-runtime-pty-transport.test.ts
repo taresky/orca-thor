@@ -1199,6 +1199,50 @@ describe('createRemoteRuntimePtyTransport', () => {
     expect(onBell).toHaveBeenCalledTimes(1)
   })
 
+  it('park() retains the title/exit feed and keeps the multiplexed stream open (STA-1282 gate #3)', async () => {
+    const { createRemoteRuntimePtyTransport } = await import('./remote-runtime-pty-transport')
+    const onTitleChange = vi.fn()
+    const onPtyExit = vi.fn()
+    const onDataCallback = vi.fn()
+    const transport = createRemoteRuntimePtyTransport('env-1', {
+      worktreeId: 'wt-1',
+      onTitleChange,
+      onPtyExit
+    })
+
+    await transport.connect({ url: '', callbacks: { onData: onDataCallback } })
+    await vi.waitFor(() => expect(subscriptionSendBinary).toHaveBeenCalled())
+    const { streamId } = latestSubscribePayload()
+
+    // Pre-park (mounted pane): a title feeds the live feed and data reaches xterm.
+    emitOutput(streamId, '\x1b]0;live-title\x07')
+    expect(onDataCallback).toHaveBeenCalledWith(
+      '\x1b]0;live-title\x07',
+      expect.objectContaining({ seq: 1 })
+    )
+    // Title extraction rides the async terminal parser — settle before asserting.
+    await vi.waitFor(() => expect(onTitleChange).toHaveBeenCalledWith('live-title', 'live-title'))
+    onTitleChange.mockClear()
+    onDataCallback.mockClear()
+
+    // Evict. Provider-specific: remote park re-points the renderer-owned title/
+    // exit feed but must NOT close the multiplexed stream (unlike detach) — that
+    // stream is the channel host output and the snapshot ride on. Emitting more
+    // host output after park and seeing the parked feed receive it proves the
+    // stream is still open.
+    const parkedTitle = vi.fn()
+    const parkedExit = vi.fn()
+    transport.park?.({ onTitleChange: parkedTitle, onPtyExit: parkedExit })
+
+    emitOutput(streamId, '\x1b]0;parked-title\x07')
+    // The parked title feed still receives host output (stream still open)…
+    await vi.waitFor(() => expect(parkedTitle).toHaveBeenCalledWith('parked-title', 'parked-title'))
+    // …with no xterm write (storedCallbacks cleared) — the pane's DOM/xterm is gone…
+    expect(onDataCallback).not.toHaveBeenCalled()
+    // …and the original (unmounted) pane's feed is silent.
+    expect(onTitleChange).not.toHaveBeenCalled()
+  })
+
   it('processes binary remote data chunks through the terminal parser', async () => {
     const { createRemoteRuntimePtyTransport } = await import('./remote-runtime-pty-transport')
     const onData = vi.fn()

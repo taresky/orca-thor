@@ -1,4 +1,4 @@
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useShallow } from 'zustand/react/shallow'
 import type { Tab, TabGroup, TerminalTab } from '../../../../shared/types'
@@ -12,6 +12,10 @@ import {
 import TerminalPane from './TerminalPane'
 import { closeTerminalTab } from '../terminal/terminal-tab-actions'
 import { useNativeChatToggleShortcut } from '../native-chat/use-native-chat-toggle-shortcut'
+import { noteTerminalPaneVisibility } from './terminal-pane-eviction-coordinator'
+import { shouldMountTerminalPaneNow } from './pane-mount-policy'
+import { isTabParked } from './evicted-pane-registry'
+import { isTerminalPaneEvictionEnabled } from '../../../../shared/terminal-pane-eviction-settings'
 
 type TerminalOverlayAssignment = {
   unifiedTabId: string
@@ -55,6 +59,7 @@ type TerminalOverlaySlotProps = {
   isWorktreeActive: boolean
   isVisible: boolean
   isActive: boolean
+  evictionEnabled: boolean
   activityTerminalPortal: ActivityTerminalPortalTarget | null
   onFocusOwningGroup: ((groupId: string) => void) | undefined
   consumeSuppressedPtyExit: (ptyId: string) => boolean
@@ -72,6 +77,7 @@ const TerminalOverlaySlot = memo(function TerminalOverlaySlot({
   isWorktreeActive,
   isVisible,
   isActive,
+  evictionEnabled,
   activityTerminalPortal,
   onFocusOwningGroup,
   consumeSuppressedPtyExit,
@@ -80,6 +86,20 @@ const TerminalOverlaySlot = memo(function TerminalOverlaySlot({
 }: TerminalOverlaySlotProps): React.JSX.Element {
   const anchorName = groupId !== undefined ? tabGroupBodyAnchorName(groupId) : undefined
   const overlayRef = useRef<HTMLDivElement | null>(null)
+  // Why: STA-1282 — report this mounted pane's visibility to the eviction
+  // coordinator. A pane that goes hidden becomes a warm candidate; going visible
+  // re-warms it and invalidates any queued teardown. An Activity-portaled pane
+  // counts as visible (Tier 0) so it is never evicted out from under the user.
+  // Flag-OFF inertness: with eviction disabled we do NOT report — no timestamps,
+  // no coordinator subscription (byte-identical to the pre-eviction app). The
+  // effect re-runs on flip so enabling at runtime activates the coordinator.
+  const effectiveVisibleForEviction = isVisible || activityTerminalPortal !== null
+  useEffect(() => {
+    if (!evictionEnabled) {
+      return
+    }
+    noteTerminalPaneVisibility(terminalTabId, worktreeId, effectiveVisibleForEviction)
+  }, [evictionEnabled, effectiveVisibleForEviction, terminalTabId, worktreeId])
   const [measuredFallbackRect, setMeasuredFallbackRect] = useState<MeasuredFallbackRect | null>(
     null
   )
@@ -293,6 +313,8 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
       activeGroupId: state.activeGroupIdByWorktree[worktreeId]
     }))
   )
+  const mountByTabId = useAppStore((state) => state.terminalPaneMountByTabId)
+  const evictionEnabled = useAppStore((state) => isTerminalPaneEvictionEnabled(state.settings))
   const focusGroup = useAppStore((state) => state.focusGroup)
   const consumeSuppressedPtyExit = useAppStore((state) => state.consumeSuppressedPtyExit)
   const closeTab = useAppStore((state) => state.closeTab)
@@ -360,6 +382,22 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
           worktreeId,
           tabId: terminalTab.id
         })
+        // STA-1282 tab-dimension gate: a pane mounts iff it is visible now (incl.
+        // Activity portal) OR the eviction coordinator keeps it warm/exempt.
+        // Evicted (Tier 2) and never-visited hidden tabs render no TerminalPane —
+        // this is the mount-storm fix. Flag-OFF: mount every non-parked tab so
+        // behavior is byte-identical to the pre-eviction app (parked panes stay
+        // claimable-on-demand rather than force-remounting on a runtime flip-OFF).
+        const shouldMount = shouldMountTerminalPaneNow({
+          evictionEnabled,
+          isVisible,
+          hasActivityPortal: activityTerminalPortal !== null,
+          isWarm: mountByTabId[terminalTab.id] === true,
+          isParked: evictionEnabled ? false : isTabParked(terminalTab.id)
+        })
+        if (!shouldMount) {
+          return null
+        }
         return (
           <TerminalOverlaySlot
             key={terminalTab.id}
@@ -372,6 +410,7 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
             isWorktreeActive={isWorktreeActive}
             isVisible={isVisible}
             isActive={isActive}
+            evictionEnabled={evictionEnabled}
             activityTerminalPortal={activityTerminalPortal}
             onFocusOwningGroup={focusOwningGroup}
             consumeSuppressedPtyExit={consumeSuppressedPtyExit}

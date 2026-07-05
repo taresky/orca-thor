@@ -8095,6 +8095,117 @@ describe('connectPanePty', () => {
     }
   })
 
+  it('charges the fail-open counter when a claimed eviction remount snapshot rejects through the real IPC shape (STA-1282 gate #5)', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const {
+      __resetEvictedPaneRegistryForTest,
+      isEvictionSelfDisabled,
+      recordEvictionRemountReplayOutcome,
+      registerEvictedPane
+    } = await import('./evicted-pane-registry')
+    __resetEvictedPaneRegistryForTest()
+    // Two prior structural failures pre-charged: the third must come from the
+    // real remount snapshot path (rejecting IPC) and trip the self-disable.
+    recordEvictionRemountReplayOutcome('error')
+    recordEvictionRemountReplayOutcome('error')
+    registerEvictedPane({
+      paneKey: makePaneKey('tab-1', LEAF_1),
+      tabId: 'tab-1',
+      worktreeId: 'wt-1',
+      getPtyId: () => 'pty-id',
+      destroy: vi.fn(),
+      releaseForClaim: vi.fn()
+    })
+    const transport = createMockTransport('pty-id')
+    const capturedDataCallback: { current: ((data: string) => void) | null } = { current: null }
+    transport.connect.mockImplementation(async ({ callbacks }: { callbacks: ConnectCallbacks }) => {
+      capturedDataCallback.current = callbacks.onData ?? null
+      return 'pty-id'
+    })
+    transportFactoryQueue.push(transport)
+    const getMainBufferSnapshot = window.api.pty.getMainBufferSnapshot as unknown as ReturnType<
+      typeof vi.fn
+    >
+    getMainBufferSnapshot.mockRejectedValue(new Error('mirror boom'))
+
+    const isVisibleRef = { current: false }
+    const pane = createPane(1)
+    const manager = createManager(1)
+    const binding = connectPanePty(
+      pane as never,
+      manager as never,
+      createDeps({ isVisibleRef, startup: { command: 'codex' } }) as never
+    )
+    try {
+      await flushAsyncTicks(6)
+      capturedDataCallback.current?.('\x1b[6')
+      isVisibleRef.current = true
+      capturedDataCallback.current?.('n')
+      await flushAsyncTicks(20)
+
+      expect(getMainBufferSnapshot).toHaveBeenCalled()
+      expect(isEvictionSelfDisabled()).toBe(true)
+    } finally {
+      binding.dispose()
+      __resetEvictedPaneRegistryForTest()
+    }
+  })
+
+  it('does not charge the fail-open counter for a nil mirror on a claimed eviction remount (STA-1282 gate #5)', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const {
+      __resetEvictedPaneRegistryForTest,
+      isEvictionSelfDisabled,
+      recordEvictionRemountReplayOutcome,
+      registerEvictedPane
+    } = await import('./evicted-pane-registry')
+    __resetEvictedPaneRegistryForTest()
+    recordEvictionRemountReplayOutcome('error')
+    recordEvictionRemountReplayOutcome('error')
+    registerEvictedPane({
+      paneKey: makePaneKey('tab-1', LEAF_1),
+      tabId: 'tab-1',
+      worktreeId: 'wt-1',
+      getPtyId: () => 'pty-id',
+      destroy: vi.fn(),
+      releaseForClaim: vi.fn()
+    })
+    const transport = createMockTransport('pty-id')
+    const capturedDataCallback: { current: ((data: string) => void) | null } = { current: null }
+    transport.connect.mockImplementation(async ({ callbacks }: { callbacks: ConnectCallbacks }) => {
+      capturedDataCallback.current = callbacks.onData ?? null
+      return 'pty-id'
+    })
+    transportFactoryQueue.push(transport)
+    const getMainBufferSnapshot = window.api.pty.getMainBufferSnapshot as unknown as ReturnType<
+      typeof vi.fn
+    >
+    getMainBufferSnapshot.mockResolvedValue(null)
+
+    const isVisibleRef = { current: false }
+    const pane = createPane(1)
+    const manager = createManager(1)
+    const binding = connectPanePty(
+      pane as never,
+      manager as never,
+      createDeps({ isVisibleRef, startup: { command: 'codex' } }) as never
+    )
+    try {
+      await flushAsyncTicks(6)
+      capturedDataCallback.current?.('\x1b[6')
+      isVisibleRef.current = true
+      capturedDataCallback.current?.('n')
+      await flushAsyncTicks(20)
+
+      expect(getMainBufferSnapshot).toHaveBeenCalled()
+      // A nil mirror is a successful blank+live remount, never a failure.
+      expect(isEvictionSelfDisabled()).toBe(false)
+    } finally {
+      binding.dispose()
+      __resetEvictedPaneRegistryForTest()
+    }
+  })
+
   it('keeps all visible bytes after a pending hidden ESC becomes non-query output', async () => {
     const { connectPanePty } = await import('./pty-connection')
     const transport = createMockTransport('pty-id')
