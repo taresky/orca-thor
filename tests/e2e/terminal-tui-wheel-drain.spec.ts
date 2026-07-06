@@ -22,10 +22,13 @@ const VISIBLE_TUI_FIXTURE_PATH = path.join(
 // output starved that drain, and the backlog replayed for seconds after the
 // fingers left the trackpad.
 const MAX_ARRIVAL_LAG_MS = 900
-// Why: each event is a serial CDP mouse.wheel round-trip; 240 of them against a
-// deliberately heavy TUI overran the 120s test timeout on loaded CI. 120 is
-// still a dense burst that exercises the drain/coalesce path.
-const WHEEL_EVENTS = 120
+// Why: each event is a serial CDP mouse.wheel round-trip that competes with the
+// heavy TUI's per-report full-screen redraw, so under loaded CI a round-trip can
+// take ~2.7s — 120 of them overran even the tripled test.slow() budget (360s).
+// 60 back-to-back events (no inter-event sleep) is still a dense burst that
+// exercises the drain/coalesce path while keeping the dispatch loop well inside
+// the timeout.
+const WHEEL_EVENTS = 60
 
 type WheelStreamResult = {
   dispatchedEvents: number
