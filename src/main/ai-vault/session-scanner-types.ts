@@ -4,6 +4,7 @@ import type {
   AiVaultSession,
   AiVaultSessionPreviewMessage
 } from '../../shared/ai-vault-types'
+import type { ExecutionHostId } from '../../shared/execution-host'
 
 export type AiVaultScanOptions = {
   claudeProjectsDir?: string
@@ -29,7 +30,11 @@ export type AiVaultScanOptions = {
   kimiSessionsDir?: string
   limit?: number
   limitPerAgent?: number
+  // Active workspace/project paths whose sessions must be included regardless of
+  // the recency cap (see discoverInScopeClaudeFiles).
+  scopePaths?: readonly string[]
   platform?: NodeJS.Platform
+  executionHostId?: ExecutionHostId
 }
 
 export type FileWithMtime = {

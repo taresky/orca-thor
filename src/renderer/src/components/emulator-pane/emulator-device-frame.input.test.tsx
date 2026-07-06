@@ -100,6 +100,7 @@ function renderFrame(props?: {
         loading={false}
         isLive={true}
         visualOrientation="portrait"
+        isActive={true}
         onTap={props?.onTap ?? vi.fn()}
         onGesture={props?.onGesture ?? vi.fn()}
       />

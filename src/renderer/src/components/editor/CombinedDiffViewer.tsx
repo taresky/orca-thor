@@ -55,10 +55,7 @@ import {
   createCombinedDiffSectionIndexMap,
   handleCombinedDiffFileTreeNavigation
 } from './CombinedDiffFileTree'
-import {
-  getCombinedDiffFileTreeSectionKey,
-  type CombinedDiffFileTreeMode
-} from './combined-diff-file-tree-model'
+import { getCombinedDiffFileTreeSectionKey } from './combined-diff-file-tree-model'
 import {
   ORCA_EDITOR_EXTERNAL_FILE_CHANGE_EVENT,
   type EditorPathMutationTarget
@@ -77,6 +74,7 @@ import type { DiffSection } from './diff-section-types'
 import { getInitialCombinedDiffSectionLoadIndices } from './combined-diff-initial-section-load'
 import { removeDiffSectionMeasuredHeight } from './diff-section-height-cache'
 import { createCombinedDiffLoadScheduler } from './combined-diff-load-scheduler'
+import { combinedDiffSectionsMatchEntryMetadata } from './combined-diff-section-cache-match'
 import {
   beginCombinedDiffScrollbarDrag,
   type CombinedDiffScrollbarDragCleanup
@@ -208,26 +206,6 @@ function getInitialCombinedDiffFileTreeCollapsed(
   // Why: the tree is opt-in for new sessions; only an explicit saved setting
   // should make it the opening surface while settings are still loading.
   return combinedDiffFileTreeCollapsedPreference ?? combinedDiffFileTreeVisibleByDefault !== true
-}
-
-function cachedCombinedDiffSectionsMatchEntries({
-  entries,
-  sections,
-  treeMode
-}: {
-  entries: readonly (GitStatusEntry | GitBranchChangeEntry)[]
-  sections: readonly DiffSection[]
-  treeMode: CombinedDiffFileTreeMode
-}): boolean {
-  return (
-    sections.length === entries.length &&
-    sections.every((section, index) => {
-      const entry = entries[index]
-      return (
-        entry !== undefined && section.key === getCombinedDiffFileTreeSectionKey(treeMode, entry)
-      )
-    })
-  )
 }
 
 export default function CombinedDiffViewer({
@@ -541,7 +519,7 @@ export default function CombinedDiffViewer({
     const canRestoreSnapshotSectionsByKey =
       hasUncommittedEntriesSnapshot &&
       cached !== undefined &&
-      cachedCombinedDiffSectionsMatchEntries({
+      combinedDiffSectionsMatchEntryMetadata({
         entries,
         sections: cached.sections,
         treeMode

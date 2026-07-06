@@ -42,6 +42,8 @@ type EmulatorDeviceFrameProps = {
   loading: boolean
   isLive: boolean
   visualOrientation: EmulatorDeviceVisualOrientation
+  /** False when backgrounded; parks the stream with the pane's visibility. */
+  isActive: boolean
   onTap: (x: number, y: number) => void
   onGesture: (points: EmulatorGesturePoint[]) => void
 }
@@ -69,6 +71,7 @@ export function EmulatorDeviceFrame({
   loading,
   isLive,
   visualOrientation,
+  isActive,
   onTap,
   onGesture
 }: EmulatorDeviceFrameProps) {
@@ -331,7 +334,9 @@ export function EmulatorDeviceFrame({
     setStreamError(true)
   }, [])
 
-  const showStream = isLive && Boolean(previewUrl)
+  // Why: hidden panes still receive emulator frames, including over SSH, so
+  // parking the stream avoids background decode/IPC churn while staying attached.
+  const showStream = isActive && isLive && Boolean(previewUrl)
   const streamAspectRatio = streamSize ? streamSize.width / streamSize.height : 9 / 19
   // Why: serve-sim can rotate screen pixels without swapping the stream canvas,
   // so the physical frame follows the requested orientation instead.
