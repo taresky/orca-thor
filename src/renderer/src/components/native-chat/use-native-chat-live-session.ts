@@ -135,6 +135,10 @@ export function useNativeChatLiveSession(
 
   const latestSessionId = useRef<string | null>(sessionId)
   latestSessionId.current = sessionId
+  // Tracks the current owner's transport so a load-earlier resolve from a prior
+  // host is discarded after an owner flip (the session id can stay the same).
+  const latestTransport = useRef(transport)
+  latestTransport.current = transport
 
   // Incremental assembler: reset on the base axis (session/agent/read swap),
   // applyAppends on the hot append axis. `appliedTranscriptRef` is the exact
@@ -232,8 +236,9 @@ export function useNativeChatLiveSession(
     void transport
       .readSession(agent, sessionId, nextLimit, transcriptPath ?? undefined)
       .then((result) => {
-        // Ignore a stale resolve from a session that swapped underneath us.
-        if (latestSessionId.current !== sessionId) {
+        // Ignore a stale resolve from a session that swapped OR an owner that
+        // flipped underneath us — either would paint the wrong host's history.
+        if (latestSessionId.current !== sessionId || latestTransport.current !== transport) {
           return
         }
         if (!result || 'error' in result) {

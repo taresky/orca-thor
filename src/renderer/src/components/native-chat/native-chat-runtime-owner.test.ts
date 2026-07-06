@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import type { TerminalTab } from '../../../../shared/types'
-import type { AppState } from '@/store/types'
 import {
   selectNativeChatRuntimeEnvironmentId,
   type NativeChatRuntimeOwnerState

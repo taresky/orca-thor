@@ -19,6 +19,9 @@ export type NativeChatSessionTransport = Pick<NativeChatApi, 'readSession' | 'su
 const RUNTIME_TOO_OLD =
   'This remote runtime is too old to show agent chat history. Update the remote runtime to view it.'
 
+/** Backoff before re-opening a dropped runtime chat stream. Exported for tests. */
+export const RUNTIME_NATIVE_CHAT_RECONNECT_MS = 2_000
+
 /** Map a runtime read failure to the message the read-error state renders. A
  *  version block (old runtime lacking the method, or the protocol-compat gate)
  *  gets the explicit "update the remote runtime" copy (R4); anything else — a
@@ -64,62 +67,88 @@ function createRuntimeNativeChatTransport(environmentId: string): NativeChatSess
       const { subscriptionId, agent, sessionId, transcriptPath } = args
       let cancelled = false
       let handleUnsubscribe: (() => void) | null = null
+      let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
-      void window.api.runtimeEnvironments
-        .subscribe(
-          {
-            selector: environmentId,
-            method: 'nativeChat.subscribe',
-            params: { subscriptionId, agent, sessionId, transcriptPath },
-            timeoutMs: 15_000
-          },
-          {
-            onResponse: (response) => {
-              if (cancelled) {
-                return
-              }
-              if (response.ok === false) {
-                return
-              }
-              const frame = response.result as {
-                type?: string
-                messages?: NativeChatAppendedMessages
-              }
-              if (frame?.type === 'appended' && Array.isArray(frame.messages)) {
-                onAppended(frame.messages)
-              }
+      // A mid-stream drop (runtime restart, network blip, relay reconnect) closes
+      // the dedicated stream socket. Re-open it after a short backoff so the live
+      // tail resumes without a manual chat toggle; the fresh drain re-emits the
+      // windowed tail, which merges by id so no turn is duplicated. An initial
+      // connect failure lands in `.catch` instead (and is surfaced through the
+      // parallel readSession error), so a too-old/absent runtime never spins here.
+      const scheduleReconnect = (): void => {
+        handleUnsubscribe = null
+        if (cancelled || reconnectTimer) {
+          return
+        }
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null
+          if (!cancelled) {
+            openStream()
+          }
+        }, RUNTIME_NATIVE_CHAT_RECONNECT_MS)
+      }
+
+      const openStream = (): void => {
+        void window.api.runtimeEnvironments
+          .subscribe(
+            {
+              selector: environmentId,
+              method: 'nativeChat.subscribe',
+              params: { subscriptionId, agent, sessionId, transcriptPath },
+              timeoutMs: 15_000
+            },
+            {
+              onResponse: (response) => {
+                if (cancelled) {
+                  return
+                }
+                if (response.ok === false) {
+                  return
+                }
+                const frame = response.result as {
+                  type?: string
+                  messages?: NativeChatAppendedMessages
+                }
+                if (frame?.type === 'appended' && Array.isArray(frame.messages)) {
+                  onAppended(frame.messages)
+                }
+              },
+              // Established-then-dropped: resume the tail. onClose also fires on our
+              // own teardown, but `cancelled` short-circuits the reconnect there.
+              onError: scheduleReconnect,
+              onClose: scheduleReconnect
             }
-          }
-        )
-        .then((handle) => {
-          handleUnsubscribe = handle.unsubscribe
-          // The stream resolved after teardown already ran — close it now so the
-          // late-arriving handle doesn't leak (same race as runtime-file-client).
-          if (cancelled) {
-            handle.unsubscribe()
-            handleUnsubscribe = null
-          }
-        })
-        .catch(() => {
-          // A failed subscribe surfaces through the parallel readSession's error
-          // mapping; the live tail simply never starts, nothing to tear down.
-        })
+          )
+          .then((handle) => {
+            handleUnsubscribe = handle.unsubscribe
+            // The stream resolved after teardown already ran — close it now so the
+            // late-arriving handle doesn't leak (same race as runtime-file-client).
+            if (cancelled) {
+              handle.unsubscribe()
+              handleUnsubscribe = null
+            }
+          })
+          .catch(() => {
+            // Initial subscribe failed (e.g. a too-old runtime lacking the method).
+            // The parallel readSession surfaces the error; don't reconnect-spin.
+          })
+      }
 
-      // Sync unsubscribe does two distinct jobs (KTD-6): (a) tear down the
-      // renderer dispatcher + runtime stream, and (b) reap the runtime-side
-      // fs-watcher, keyed by the SAME subscriptionId the subscribe sent (KTD-5).
+      openStream()
+
+      // Teardown closes the dedicated stream socket; the runtime reaps its
+      // fs-watcher on that connection's close (registerSubscriptionCleanup →
+      // cleanupSubscriptionsForConnection), so no explicit nativeChat.unsubscribe
+      // RPC is needed — and one would ride a different connection and never match
+      // the watcher's cleanup key anyway.
       return () => {
         cancelled = true
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer)
+          reconnectTimer = null
+        }
         handleUnsubscribe?.()
         handleUnsubscribe = null
-        void callRuntimeRpc<{ unsubscribed: boolean }>(
-          target,
-          'nativeChat.unsubscribe',
-          { subscriptionId },
-          { timeoutMs: 15_000 }
-        ).catch(() => {
-          // Best-effort: the watcher also reaps when the connection closes.
-        })
       }
     }
   }

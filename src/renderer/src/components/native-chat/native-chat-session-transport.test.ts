@@ -8,6 +8,7 @@ import {
 import { RUNTIME_COMPAT_BLOCK_CODE } from '@/runtime/runtime-protocol-compat'
 import {
   getNativeChatSessionTransport,
+  RUNTIME_NATIVE_CHAT_RECONNECT_MS,
   toRuntimeNativeChatErrorMessage
 } from './native-chat-session-transport'
 
@@ -88,16 +89,27 @@ describe('getNativeChatSessionTransport — selection', () => {
 })
 
 describe('runtime subscribe', () => {
-  function stubSubscribe(): { unsubscribe: ReturnType<typeof vi.fn>; deliver: (frame: unknown, ok?: boolean) => void } {
+  function stubSubscribe(): {
+    unsubscribe: ReturnType<typeof vi.fn>
+    deliver: (frame: unknown, ok?: boolean) => void
+    drop: () => void
+    subscribeCount: () => number
+  } {
     const unsubscribe = vi.fn()
+    let count = 0
     let onResponse: (r: { ok: boolean; result?: unknown }) => void = () => {}
+    let onClose: () => void = () => {}
     runtimeEnvironmentsSubscribe.mockImplementation((_args, callbacks) => {
+      count += 1
       onResponse = callbacks.onResponse
+      onClose = callbacks.onClose ?? (() => {})
       return Promise.resolve({ unsubscribe, sendBinary: vi.fn() })
     })
     return {
       unsubscribe,
-      deliver: (frame, ok = true) => onResponse(ok ? { ok: true, result: frame } : { ok: false })
+      deliver: (frame, ok = true) => onResponse(ok ? { ok: true, result: frame } : { ok: false }),
+      drop: () => onClose(),
+      subscribeCount: () => count
     }
   }
 
@@ -119,10 +131,9 @@ describe('runtime subscribe', () => {
     expect(onAppended).toHaveBeenCalledWith([message('m-1')])
   })
 
-  it('sync unsubscribe tears down the handle AND reaps the runtime watcher (KTD-6)', async () => {
+  it('sync unsubscribe closes the dedicated stream and issues no unsubscribe RPC (KTD-6)', async () => {
     markRuntimeEnvironmentCompatible(ENV)
     const { unsubscribe } = stubSubscribe()
-    runtimeEnvironmentsCall.mockResolvedValue(okEnvelope({ unsubscribed: true }))
     const transport = getNativeChatSessionTransport(ENV)
 
     const stop = transport.subscribe(
@@ -134,12 +145,39 @@ describe('runtime subscribe', () => {
     await flush()
 
     expect(unsubscribe).toHaveBeenCalledOnce()
-    expect(runtimeEnvironmentsCall).toHaveBeenCalledWith(
-      expect.objectContaining({
-        method: 'nativeChat.unsubscribe',
-        params: { subscriptionId: 's-1' }
-      })
+    // The runtime reaps the fs-watcher when the dedicated stream socket closes, so
+    // no nativeChat.unsubscribe RPC is sent — one would ride a different connection
+    // and never match the watcher's cleanup key.
+    expect(runtimeEnvironmentsCall).not.toHaveBeenCalledWith(
+      expect.objectContaining({ method: 'nativeChat.unsubscribe' })
     )
+  })
+
+  it('re-subscribes after a mid-stream drop and stops reconnecting on teardown', async () => {
+    vi.useFakeTimers()
+    try {
+      markRuntimeEnvironmentCompatible(ENV)
+      const { drop, subscribeCount } = stubSubscribe()
+      const transport = getNativeChatSessionTransport(ENV)
+
+      const stop = transport.subscribe(
+        { subscriptionId: 's-1', agent: 'claude', sessionId: 'sess-1' },
+        vi.fn()
+      )
+      await vi.advanceTimersByTimeAsync(0)
+      expect(subscribeCount()).toBe(1)
+
+      drop() // runtime restart / socket dropped mid-stream
+      await vi.advanceTimersByTimeAsync(RUNTIME_NATIVE_CHAT_RECONNECT_MS)
+      expect(subscribeCount()).toBe(2)
+
+      stop()
+      drop() // a late close after teardown must not reconnect
+      await vi.advanceTimersByTimeAsync(RUNTIME_NATIVE_CHAT_RECONNECT_MS)
+      expect(subscribeCount()).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('closes a stream that resolves after unsubscribe (cancel race)', async () => {
@@ -149,7 +187,6 @@ describe('runtime subscribe', () => {
     runtimeEnvironmentsSubscribe.mockImplementation(
       () => new Promise((resolve) => (resolveHandle = resolve))
     )
-    runtimeEnvironmentsCall.mockResolvedValue(okEnvelope({ unsubscribed: true }))
     const onAppended = vi.fn()
     const transport = getNativeChatSessionTransport(ENV)
 
@@ -187,7 +224,7 @@ describe('runtime readSession error mapping', () => {
 
     expect(
       toRuntimeNativeChatErrorMessage(
-        new RuntimeRpcCallError({ ok: false, error: { code: 'method_not_found', message: 'x' } })
+        new RuntimeRpcCallError({ id: 'r-1', ok: false, error: { code: 'method_not_found', message: 'x' } })
       )
     ).toEqual(tooOld)
 

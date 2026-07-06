@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NativeChatMessage } from '../../../../shared/native-chat-types'
 import { useAppStore } from '@/store'
 import { mergeNativeChatLiveSession } from './native-chat-live-status'
+import { NATIVE_CHAT_INITIAL_LIMIT } from './native-chat-pagination'
 
 // Mock the session transport so the hook's IO is observable and controllable
 // per owner id. Each distinct owner gets its own read/subscribe/unsubscribe mocks.
@@ -241,5 +242,43 @@ describe('useNativeChatLiveSession — transport routing', () => {
     const transport = getMockTransport(null)
     expect(transport.readSession).toHaveBeenCalledOnce()
     expect(transport.subscribe).toHaveBeenCalledOnce()
+  })
+
+  it('discards a load-earlier resolve from the previous owner after a flip', async () => {
+    // Fill the initial window so hasMore is true and load-earlier can fire.
+    const many = Array.from({ length: NATIVE_CHAT_INITIAL_LIMIT }, (_unused, n) =>
+      assistant(`m-${n}`, 't')
+    )
+    const first = getMockTransport('env-1')
+    first.readSession.mockResolvedValueOnce({ messages: many })
+    let resolveEarlier: (result: { messages: NativeChatMessage[] }) => void = () => {}
+    first.readSession.mockImplementationOnce(
+      () => new Promise((resolve) => (resolveEarlier = resolve))
+    )
+
+    const root = await render({
+      paneKey: PANE,
+      agent: AGENT,
+      sessionId: SESSION,
+      runtimeEnvironmentId: 'env-1'
+    })
+    // Kick off load-earlier against env-1, then flip the owner before it resolves.
+    await act(async () => {
+      latest?.loadEarlier()
+    })
+    await rerender(root, {
+      paneKey: PANE,
+      agent: AGENT,
+      sessionId: SESSION,
+      runtimeEnvironmentId: 'env-2'
+    })
+    // The stale env-1 page resolves now; the transport-identity guard must drop it
+    // so it can't paint the previous host's history into the env-2 pane.
+    await act(async () => {
+      resolveEarlier({ messages: [assistant('stale', 'from-env-1')] })
+      await Promise.resolve()
+    })
+
+    expect(latest?.messages.map((m) => m.id)).not.toContain('stale')
   })
 })
