@@ -117,6 +117,7 @@ import {
   setVisibleWorktreeIds,
   sidebarHasActiveFilters
 } from './visible-worktrees'
+import { getWorktreeIdsWithLiveAgent } from '@/lib/worktree-activity-state'
 import { getEmptyProjectPlaceholderRepoIds } from './empty-project-placeholder-repos'
 import {
   getVisibleWorktreeBrowserActivityTabs,
@@ -5543,6 +5544,14 @@ const WorktreeList = React.memo(function WorktreeList({
       tabsByWorktree,
       ptyIdsByTabId,
       browserTabsByWorktree,
+      // Why snapshot (not a subscribed selector): agent-status changes bump
+      // sortEpoch, so this memo already recomputes through `sortedIds` when a
+      // worktree gains/loses a running agent — reading getState() here keeps
+      // the sidebar off the full-map subscription its perf design avoids. #7197
+      worktreeIdsWithLiveAgent: getWorktreeIdsWithLiveAgent(
+        useAppStore.getState().agentStatusByPaneKey,
+        tabsByWorktree
+      ),
       hideDefaultBranchWorkspace,
       hideAutomationGeneratedWorkspaces,
       repoMap,
