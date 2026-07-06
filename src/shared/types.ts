@@ -2190,6 +2190,11 @@ export type ChangelogData = {
   releasesBehind: number | null
 }
 
+export type UpdateCheckOptions = {
+  includePrerelease?: boolean
+  includePerfPrerelease?: boolean
+}
+
 export type UpdateStatus =
   | { state: 'idle' }
   | { state: 'checking'; userInitiated?: boolean }
@@ -2763,6 +2768,10 @@ export type GlobalSettings = {
   /** Optional workspace ID override for OpenCode Go. When set, skips the
    *  workspaces lookup and fetches usage directly for this workspace. */
   opencodeWorkspaceId: string
+  /** Optional MiniMax group id. When empty, the usage fetcher extracts minimax_group_id_v2 from the cookie. */
+  minimaxGroupId: string
+  /** Comma-separated MiniMax model names to show in the status bar usage window. */
+  minimaxUsageModels: string
   /** Whether to extract OAuth credentials from the local Gemini CLI installation
    *  for rate-limit fetching. Disabled by default for explicit opt-in. */
   geminiCliOAuthEnabled: boolean
@@ -3109,6 +3118,7 @@ export type StatusBarItem =
   | 'gemini'
   | 'opencode-go'
   | 'kimi'
+  | 'minimax'
   | 'ssh'
   | 'resource-usage'
   | 'ports'
@@ -3222,6 +3232,8 @@ export type PersistedUIState = {
   _portsStatusBarDefaultAdded?: boolean
   /** One-shot migration flag for adding the default-on Kimi status item. */
   _kimiStatusBarDefaultAdded?: boolean
+  /** One-shot migration flag for adding the default-on MiniMax status item. */
+  _minimaxStatusBarDefaultAdded?: boolean
   statusBarItems: StatusBarItem[]
   statusBarVisible: boolean
   dismissedUpdateVersion: string | null

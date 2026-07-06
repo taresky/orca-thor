@@ -1228,27 +1228,33 @@ computeWorktreePathMock.mockImplementation(
 ensurePathWithinWorkspaceMock.mockImplementation((targetPath: string) => targetPath)
 
 describe('OrcaRuntimeService', () => {
-  it('projects worktree card display settings to paired clients', () => {
+  it('projects runtime-backed settings to paired clients', () => {
     const runtime = new OrcaRuntimeService({
       ...store,
       getSettings: () => ({
         ...store.getSettings(),
         experimentalNewWorktreeCardStyle: true,
-        compactWorktreeCards: true
+        compactWorktreeCards: true,
+        minimaxGroupId: 'group-42',
+        minimaxUsageModels: 'general,abab6.5'
       })
     } as never)
 
     expect(runtime.getClientSettings()).toMatchObject({
       experimentalNewWorktreeCardStyle: true,
-      compactWorktreeCards: true
+      compactWorktreeCards: true,
+      minimaxGroupId: 'group-42',
+      minimaxUsageModels: 'general,abab6.5'
     })
   })
 
-  it('accepts worktree card display setting updates from paired clients', () => {
+  it('accepts runtime-backed setting updates from paired clients', () => {
     let settings = {
       ...store.getSettings(),
       experimentalNewWorktreeCardStyle: false,
-      compactWorktreeCards: false
+      compactWorktreeCards: false,
+      minimaxGroupId: '',
+      minimaxUsageModels: 'general'
     }
     const updateSettings = vi.fn((updates: Partial<typeof settings>) => {
       settings = { ...settings, ...updates }
@@ -1263,19 +1269,30 @@ describe('OrcaRuntimeService', () => {
     expect(
       runtime.updateClientSettings({
         experimentalNewWorktreeCardStyle: true,
-        compactWorktreeCards: true
+        compactWorktreeCards: true,
+        minimaxGroupId: 'group-42',
+        minimaxUsageModels: 'general,abab6.5'
       })
     ).toMatchObject({
       experimentalNewWorktreeCardStyle: true,
-      compactWorktreeCards: true
+      compactWorktreeCards: true,
+      minimaxGroupId: 'group-42',
+      minimaxUsageModels: 'general,abab6.5'
     })
     expect(updateSettings).toHaveBeenCalledWith(
-      { experimentalNewWorktreeCardStyle: true, compactWorktreeCards: true },
+      {
+        experimentalNewWorktreeCardStyle: true,
+        compactWorktreeCards: true,
+        minimaxGroupId: 'group-42',
+        minimaxUsageModels: 'general,abab6.5'
+      },
       { notifyListeners: true }
     )
     expect(runtime.getClientSettings()).toMatchObject({
       experimentalNewWorktreeCardStyle: true,
-      compactWorktreeCards: true
+      compactWorktreeCards: true,
+      minimaxGroupId: 'group-42',
+      minimaxUsageModels: 'general,abab6.5'
     })
   })
 

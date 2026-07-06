@@ -866,7 +866,8 @@ export function useTerminalPaneLifecycle({
         pane.terminal.attachCustomKeyEventHandler((e) => {
           if (
             shouldSuppressTerminalImeKeyboardEvent(e, {
-              compositionActive: imeCompositionTracker.isActive()
+              compositionActive: imeCompositionTracker.isActive(),
+              isMac
             })
           ) {
             return false
