@@ -1398,7 +1398,7 @@ async function countWorkItemsForQuery(
     ],
     ghOptions
   )
-  return parseInt(stdout.trim(), 10) || 0
+  return Number.parseInt(stdout.trim(), 10) || 0
 }
 
 function sameOwnerRepo(left: OwnerRepo | null, right: OwnerRepo | null): boolean {
