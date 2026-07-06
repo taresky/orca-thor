@@ -42,26 +42,30 @@ type SessionParseCacheEntry = {
 // are rewritten in place, Kimi reads a state doc plus a sibling wire file, and
 // OpenCode reads SQLite rows or a doc plus a message dir — those formats keep
 // unchanged-file reuse only and re-parse whole when they change.
-function createResumableParseState(
+// Returns a factory (not a state) so steady-state resumes, which clone the
+// cached state instead, never pay for a throwaway accumulator.
+function resumableStateFactoryFor(
   candidate: SessionFileCandidate
-): ResumableSessionParseState | null {
+): (() => ResumableSessionParseState) | null {
   switch (candidate.agent) {
     case 'claude':
-      return createClaudeSessionResumeState(candidate.file)
+      return () => createClaudeSessionResumeState(candidate.file)
     case 'codex':
-      return createCodexSessionResumeState(candidate.file, candidate.codexHome)
+      return () => createCodexSessionResumeState(candidate.file, candidate.codexHome)
     case 'cursor':
-      return createCursorSessionResumeState(candidate.file)
+      return () => createCursorSessionResumeState(candidate.file)
     case 'copilot':
-      return createCopilotSessionResumeState(candidate.file)
+      return () => createCopilotSessionResumeState(candidate.file)
     case 'droid':
-      return createDroidSessionResumeState(candidate.file)
+      return () => createDroidSessionResumeState(candidate.file)
     case 'openclaw':
-    case 'pi':
-      return createMessageGraphSessionResumeState(candidate.agent, candidate.file)
+    case 'pi': {
+      const agent = candidate.agent
+      return () => createMessageGraphSessionResumeState(agent, candidate.file)
+    }
     case 'gemini':
       return candidate.file.path.endsWith('.jsonl')
-        ? createGeminiJsonlSessionResumeState(candidate.file)
+        ? () => createGeminiJsonlSessionResumeState(candidate.file)
         : null
     default:
       return null
@@ -126,14 +130,14 @@ export async function parseAgentSessionFileCached(
     return entry.session
   }
 
-  const freshState = createResumableParseState(candidate)
-  if (freshState) {
+  const stateFactory = resumableStateFactoryFor(candidate)
+  if (stateFactory) {
     const parsed = await parseResumableCandidate({
       candidate,
       platform,
       entry,
       stats,
-      freshState
+      stateFactory
     })
     storeEntry(file.path, parsed)
     return parsed.session
@@ -159,7 +163,7 @@ async function parseResumableCandidate(args: {
   platform: NodeJS.Platform
   entry: SessionParseCacheEntry | undefined
   stats?: SessionParseStats
-  freshState: ResumableSessionParseState
+  stateFactory: () => ResumableSessionParseState
 }): Promise<SessionParseCacheEntry> {
   const { file } = args.candidate
   const resume = args.entry?.platform === args.platform ? args.entry.resume : null
@@ -172,7 +176,7 @@ async function parseResumableCandidate(args: {
 
   // Clone before consuming: a failed read must not corrupt the cached state,
   // or the next resume would double-count the lines applied before the error.
-  const state = canResume ? resume.state.clone() : args.freshState
+  const state = canResume ? resume.state.clone() : args.stateFactory()
   const startOffset = canResume ? resume.byteOffset : 0
   if (args.stats) {
     if (canResume) {

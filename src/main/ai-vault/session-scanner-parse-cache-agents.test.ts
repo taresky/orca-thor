@@ -102,6 +102,35 @@ describe.each(allIncrementalAgentFixtures())('incremental parse parity: $agent',
     expect(stats.incremental).toBe(1)
     expect(completed).toEqual(await parseAgentSessionFile(grownCandidate, process.platform))
   })
+
+  it('tolerates a mid-write truncated trailing line and never double-counts it', async () => {
+    const root = await makeTempDir()
+    const path = join(root, fixture.fileName)
+    // A writer caught mid-record: the trailing line is invalid JSON.
+    await writeFile(path, `${fixture.seedLines.join('\n')}\n{"type":"user","mess`)
+
+    const shown = await parseAgentSessionFileCached(
+      await candidateFor(fixture.agent, path),
+      process.platform
+    )
+    expect(shown).toEqual(
+      await parseAgentSessionFile(await candidateFor(fixture.agent, path), process.platform)
+    )
+
+    // The writer "finishes" the interrupted record as unparseable junk (both
+    // the fold and a cold parse must skip it identically) and appends more.
+    await appendFile(path, `age": }\n${fixture.appendLines.join('\n')}\n`)
+    const stats = createSessionParseStats()
+    const completed = await parseAgentSessionFileCached(
+      await candidateFor(fixture.agent, path),
+      process.platform,
+      stats
+    )
+    expect(stats.incremental).toBe(1)
+    expect(completed).toEqual(
+      await parseAgentSessionFile(await candidateFor(fixture.agent, path), process.platform)
+    )
+  })
 })
 
 describe('codex-specific resume behavior', () => {
