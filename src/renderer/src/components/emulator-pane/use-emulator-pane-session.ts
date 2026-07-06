@@ -8,6 +8,7 @@ import {
   type SimulatorDeviceRow
 } from './emulator-pane-types'
 import { markSimulatorDeviceBooted, markSimulatorDeviceShutdown } from './emulator-device-state'
+import { toSimulatorDeviceRows, type RawEmulatorDevice } from './emulator-device-row-mapping'
 import { useEmulatorPaneControls } from './use-emulator-pane-controls'
 import { useEmulatorPaneSessionEvents } from './use-emulator-pane-session-events'
 import {
@@ -68,20 +69,12 @@ export function useEmulatorPaneSession({
   const refreshDevices = useCallback(async (bootedTarget?: string | null) => {
     try {
       // Unified list so Android devices/AVDs appear alongside iOS simulators.
-      const raw = (await callRuntimeRpc({ kind: 'local' }, 'emulator.listDevices', {})) as {
-        id: string
-        name: string
-        state: string
-        detail?: string
-        isAvailable?: boolean
-      }[]
-      const list: SimulatorDeviceRow[] = raw.map((device) => ({
-        name: device.name,
-        udid: device.id,
-        state: device.state === 'booted' ? 'Booted' : 'Shutdown',
-        runtime: device.detail,
-        isAvailable: device.isAvailable
-      }))
+      const raw = (await callRuntimeRpc(
+        { kind: 'local' },
+        'emulator.listDevices',
+        {}
+      )) as RawEmulatorDevice[]
+      const list = toSimulatorDeviceRows(raw)
       const next = markSimulatorDeviceBooted(list, bootedTarget)
       if (!mountedRef.current) {
         return next
