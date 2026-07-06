@@ -1,68 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import WebSocket from 'ws'
 import { CdpWsProxy } from './cdp-ws-proxy'
+import {
+  connect,
+  createMockWebContents,
+  getSendCommandCalls,
+  getSendCommandMethods,
+  sendAndReceive,
+  type MockWebContents
+} from './cdp-ws-proxy-test-harness'
 
 vi.mock('electron', () => ({
   webContents: { fromId: vi.fn() }
 }))
 
-type DebuggerListener = (...args: unknown[]) => void
-
-function createMockWebContents() {
-  const listeners = new Map<string, DebuggerListener[]>()
-  let debuggerAttached = false
-  let destroyed = false
-
-  const debuggerObj = {
-    isAttached: vi.fn(() => debuggerAttached),
-    attach: vi.fn(() => {
-      debuggerAttached = true
-    }),
-    detach: vi.fn(() => {
-      debuggerAttached = false
-    }),
-    sendCommand: vi.fn(
-      async (_method?: string, _params?: Record<string, unknown>, _sessionId?: string) => ({})
-    ),
-    on: vi.fn((event: string, handler: DebuggerListener) => {
-      const arr = listeners.get(event) ?? []
-      arr.push(handler)
-      listeners.set(event, arr)
-    }),
-    removeListener: vi.fn((event: string, handler: DebuggerListener) => {
-      const arr = listeners.get(event) ?? []
-      listeners.set(
-        event,
-        arr.filter((h) => h !== handler)
-      )
-    })
-  }
-
-  return {
-    webContents: {
-      debugger: debuggerObj,
-      isDestroyed: () => destroyed,
-      focus: vi.fn(),
-      printToPDF: vi.fn(async () => Buffer.from('%PDF-test')),
-      reload: vi.fn(),
-      reloadIgnoringCache: vi.fn(),
-      getTitle: vi.fn(() => 'Example'),
-      getURL: vi.fn(() => 'https://example.com')
-    },
-    listeners,
-    destroy() {
-      destroyed = true
-    },
-    emit(event: string, ...args: unknown[]) {
-      for (const handler of listeners.get(event) ?? []) {
-        handler(...args)
-      }
-    }
-  }
-}
-
 describe('CdpWsProxy', () => {
-  let mock: ReturnType<typeof createMockWebContents>
+  let mock: MockWebContents
   let proxy: CdpWsProxy
   let endpoint: string
 
@@ -76,39 +29,6 @@ describe('CdpWsProxy', () => {
   afterEach(async () => {
     await proxy.stop()
   })
-
-  function connect(): Promise<WebSocket> {
-    return new Promise((resolve) => {
-      const ws = new WebSocket(endpoint)
-      ws.on('open', () => resolve(ws))
-    })
-  }
-
-  function sendAndReceive(
-    ws: WebSocket,
-    msg: Record<string, unknown>
-  ): Promise<Record<string, unknown>> {
-    return new Promise((resolve) => {
-      ws.once('message', (data) => resolve(JSON.parse(data.toString())))
-      ws.send(JSON.stringify(msg))
-    })
-  }
-
-  type SendCommandCall = [string, Record<string, unknown>?, string?]
-
-  function getSendCommandCalls(): SendCommandCall[] {
-    const calls = mock.webContents.debugger.sendCommand.mock.calls as unknown as [
-      string,
-      Record<string, unknown>?,
-      string?
-    ][]
-    return calls
-  }
-
-  function getSendCommandMethods(): string[] {
-    const calls = getSendCommandCalls()
-    return calls.map((call) => call[0])
-  }
 
   function expectPdfStreamHandle(response: Record<string, unknown>): string {
     const result = response.result as Record<string, unknown>
@@ -141,7 +61,7 @@ describe('CdpWsProxy', () => {
   it('correlates CDP request/response IDs', async () => {
     mock.webContents.debugger.sendCommand.mockResolvedValueOnce({ tree: 'nodes' })
 
-    const ws = connect()
+    const ws = connect(endpoint)
     const client = await ws
     const response = await sendAndReceive(client, {
       id: 42,
@@ -157,7 +77,7 @@ describe('CdpWsProxy', () => {
   it('returns error response when sendCommand fails', async () => {
     mock.webContents.debugger.sendCommand.mockRejectedValueOnce(new Error('Node not found'))
 
-    const client = await connect()
+    const client = await connect(endpoint)
     const response = await sendAndReceive(client, {
       id: 7,
       method: 'DOM.describeNode',
@@ -170,7 +90,7 @@ describe('CdpWsProxy', () => {
   })
 
   it('returns an error instead of crashing when a command arrives after tab destruction', async () => {
-    const client = await connect()
+    const client = await connect(endpoint)
     mock.destroy()
 
     const response = await sendAndReceive(client, {
@@ -207,7 +127,7 @@ describe('CdpWsProxy', () => {
       })
       .mockResolvedValueOnce({ result: 'fast' })
 
-    const client = await connect()
+    const client = await connect(endpoint)
 
     const responses: Record<string, unknown>[] = []
     client.on('message', (data) => {
@@ -242,11 +162,11 @@ describe('CdpWsProxy', () => {
       )
       .mockResolvedValueOnce({ result: 'new-client' })
 
-    const firstClient = await connect()
+    const firstClient = await connect(endpoint)
     firstClient.send(JSON.stringify({ id: 1, method: 'DOM.enable', params: {} }))
     await new Promise((resolve) => setTimeout(resolve, 10))
 
-    const secondClient = await connect()
+    const secondClient = await connect(endpoint)
     const responses: Record<string, unknown>[] = []
     secondClient.on('message', (data) => {
       responses.push(JSON.parse(data.toString()))
@@ -268,7 +188,7 @@ describe('CdpWsProxy', () => {
   it('forwards sessionId to sendCommand for OOPIF support', async () => {
     mock.webContents.debugger.sendCommand.mockResolvedValueOnce({})
 
-    const client = await connect()
+    const client = await connect(endpoint)
     await sendAndReceive(client, {
       id: 1,
       method: 'DOM.enable',
@@ -287,7 +207,7 @@ describe('CdpWsProxy', () => {
   // ── Event forwarding ──
 
   it('forwards CDP events from debugger to client', async () => {
-    const client = await connect()
+    const client = await connect(endpoint)
 
     const eventPromise = new Promise<Record<string, unknown>>((resolve) => {
       client.on('message', (data) => resolve(JSON.parse(data.toString())))
@@ -302,7 +222,7 @@ describe('CdpWsProxy', () => {
   })
 
   it('forwards sessionId in events when present', async () => {
-    const client = await connect()
+    const client = await connect(endpoint)
 
     const eventPromise = new Promise<Record<string, unknown>>((resolve) => {
       client.on('message', (data) => resolve(JSON.parse(data.toString())))
@@ -316,7 +236,7 @@ describe('CdpWsProxy', () => {
   })
 
   it('does not focus the guest for Runtime.evaluate polling commands', async () => {
-    const client = await connect()
+    const client = await connect(endpoint)
 
     await sendAndReceive(client, {
       id: 9,
@@ -329,7 +249,7 @@ describe('CdpWsProxy', () => {
   })
 
   it('still focuses the guest for Input.insertText', async () => {
-    const client = await connect()
+    const client = await connect(endpoint)
 
     await sendAndReceive(client, {
       id: 10,
@@ -338,11 +258,16 @@ describe('CdpWsProxy', () => {
     })
 
     expect(mock.webContents.focus).toHaveBeenCalledTimes(1)
+    expect(getSendCommandMethods(mock)).toEqual([
+      'Page.enable',
+      'Page.addScriptToEvaluateOnNewDocument',
+      'Input.insertText'
+    ])
     client.close()
   })
 
   it('primes lifecycle events for Page.navigate', async () => {
-    const client = await connect()
+    const client = await connect(endpoint)
 
     const response = await sendAndReceive(client, {
       id: 11,
@@ -352,7 +277,7 @@ describe('CdpWsProxy', () => {
 
     expect(response.id).toBe(11)
     expect(response.result).toEqual({})
-    expect(getSendCommandMethods()).toEqual([
+    expect(getSendCommandMethods(mock)).toEqual([
       'Page.enable',
       'Page.addScriptToEvaluateOnNewDocument',
       'Network.enable',
@@ -364,7 +289,7 @@ describe('CdpWsProxy', () => {
   })
 
   it('primes lifecycle events for Page.reload and preserves response id', async () => {
-    const client = await connect()
+    const client = await connect(endpoint)
 
     const response = await sendAndReceive(client, {
       id: 12,
@@ -373,7 +298,7 @@ describe('CdpWsProxy', () => {
 
     expect(response.id).toBe(12)
     expect(response.result).toEqual({})
-    expect(getSendCommandMethods()).toEqual([
+    expect(getSendCommandMethods(mock)).toEqual([
       'Page.enable',
       'Page.addScriptToEvaluateOnNewDocument',
       'Network.enable',
@@ -381,12 +306,12 @@ describe('CdpWsProxy', () => {
       'Page.setLifecycleEventsEnabled'
     ])
     expect(mock.webContents.reload).toHaveBeenCalledTimes(1)
-    expect(getSendCommandMethods()).not.toContain('Page.reload')
+    expect(getSendCommandMethods(mock)).not.toContain('Page.reload')
     client.close()
   })
 
   it('preserves explicit Page.navigate session during lifecycle priming', async () => {
-    const client = await connect()
+    const client = await connect(endpoint)
 
     await sendAndReceive(client, {
       id: 14,
@@ -395,7 +320,7 @@ describe('CdpWsProxy', () => {
       sessionId: 'iframe-session-123'
     })
 
-    expect(getSendCommandCalls().slice(2)).toEqual([
+    expect(getSendCommandCalls(mock).slice(2)).toEqual([
       ['Network.enable', {}, 'iframe-session-123'],
       ['Page.enable', {}, 'iframe-session-123'],
       ['Page.setLifecycleEventsEnabled', { enabled: true }, 'iframe-session-123'],
@@ -405,7 +330,7 @@ describe('CdpWsProxy', () => {
   })
 
   it('forwards explicit Page.reload session after lifecycle priming', async () => {
-    const client = await connect()
+    const client = await connect(endpoint)
 
     await sendAndReceive(client, {
       id: 15,
@@ -414,7 +339,7 @@ describe('CdpWsProxy', () => {
       sessionId: 'iframe-session-123'
     })
 
-    expect(getSendCommandCalls().slice(2)).toEqual([
+    expect(getSendCommandCalls(mock).slice(2)).toEqual([
       ['Network.enable', {}, 'iframe-session-123'],
       ['Page.enable', {}, 'iframe-session-123'],
       ['Page.setLifecycleEventsEnabled', { enabled: true }, 'iframe-session-123'],
@@ -426,7 +351,7 @@ describe('CdpWsProxy', () => {
   })
 
   it('rejects root Page.reload params that direct webContents reload cannot honor', async () => {
-    const client = await connect()
+    const client = await connect(endpoint)
 
     const response = await sendAndReceive(client, {
       id: 16,
@@ -443,12 +368,12 @@ describe('CdpWsProxy', () => {
     })
     expect(mock.webContents.reload).not.toHaveBeenCalled()
     expect(mock.webContents.reloadIgnoringCache).not.toHaveBeenCalled()
-    expect(getSendCommandMethods()).not.toContain('Network.enable')
+    expect(getSendCommandMethods(mock)).not.toContain('Network.enable')
     client.close()
   })
 
   it('still reloads when lifecycle priming stalls', async () => {
-    const client = await connect()
+    const client = await connect(endpoint)
     mock.webContents.debugger.sendCommand.mockImplementation((method?: string) => {
       if (method === 'Network.enable') {
         return new Promise(() => {})
@@ -467,7 +392,7 @@ describe('CdpWsProxy', () => {
   })
 
   it('does not reload after the requesting client disconnects during priming', async () => {
-    const client = await connect()
+    const client = await connect(endpoint)
     mock.webContents.debugger.sendCommand.mockImplementation((method?: string) => {
       if (method === 'Network.enable') {
         return new Promise(() => {})
@@ -485,7 +410,7 @@ describe('CdpWsProxy', () => {
   })
 
   it('forwards Runtime.evaluate without lifecycle priming', async () => {
-    const client = await connect()
+    const client = await connect(endpoint)
 
     const response = await sendAndReceive(client, {
       id: 13,
@@ -495,7 +420,7 @@ describe('CdpWsProxy', () => {
 
     expect(response.id).toBe(13)
     expect(response.result).toEqual({})
-    expect(getSendCommandMethods()).toEqual([
+    expect(getSendCommandMethods(mock)).toEqual([
       'Page.enable',
       'Page.addScriptToEvaluateOnNewDocument',
       'Runtime.evaluate'
@@ -504,7 +429,7 @@ describe('CdpWsProxy', () => {
   })
 
   it('prints PDF data through native webContents printToPDF', async () => {
-    const client = await connect()
+    const client = await connect(endpoint)
 
     const response = await sendAndReceive(client, {
       id: 19,
@@ -541,12 +466,12 @@ describe('CdpWsProxy', () => {
       pageRanges: '1-2',
       preferCSSPageSize: true
     })
-    expect(getSendCommandMethods()).not.toContain('Page.printToPDF')
+    expect(getSendCommandMethods(mock)).not.toContain('Page.printToPDF')
     client.close()
   })
 
   it('keeps default PDF margins for omitted sides', async () => {
-    const client = await connect()
+    const client = await connect(endpoint)
 
     await sendAndReceive(client, {
       id: 20,
@@ -570,7 +495,7 @@ describe('CdpWsProxy', () => {
 
   it('supports streamed Page.printToPDF results for Playwright page.pdf', async () => {
     mock.webContents.printToPDF.mockResolvedValueOnce(Buffer.from('abcdef'))
-    const client = await connect()
+    const client = await connect(endpoint)
 
     const printResponse = await sendAndReceive(client, {
       id: 21,
@@ -619,7 +544,7 @@ describe('CdpWsProxy', () => {
 
   it('clears streamed PDF data when the client disconnects', async () => {
     mock.webContents.printToPDF.mockResolvedValueOnce(Buffer.from('abcdef'))
-    const client = await connect()
+    const client = await connect(endpoint)
 
     const printResponse = await sendAndReceive(client, {
       id: 26,
@@ -632,7 +557,7 @@ describe('CdpWsProxy', () => {
     client.close()
     await new Promise((resolve) => setTimeout(resolve, 10))
 
-    const nextClient = await connect()
+    const nextClient = await connect(endpoint)
     const staleRead = await sendAndReceive(nextClient, {
       id: 27,
       method: 'IO.read',
@@ -657,7 +582,7 @@ describe('CdpWsProxy', () => {
     const store = (proxy as unknown as { pdfStreams: { create: (b: Buffer) => string } }).pdfStreams
     const createSpy = vi.spyOn(store, 'create')
 
-    const client = await connect()
+    const client = await connect(endpoint)
     client.send(
       JSON.stringify({
         id: 30,
@@ -681,7 +606,7 @@ describe('CdpWsProxy', () => {
     mock.webContents.debugger.sendCommand
       .mockResolvedValueOnce({ data: 'trace-data', eof: false })
       .mockResolvedValueOnce({})
-    const client = await connect()
+    const client = await connect(endpoint)
 
     const readResponse = await sendAndReceive(client, {
       id: 28,
@@ -711,7 +636,7 @@ describe('CdpWsProxy', () => {
   // ── Cleanup ──
 
   it('detaches debugger and closes server on stop', async () => {
-    const client = await connect()
+    const client = await connect(endpoint)
     await proxy.stop()
 
     expect(mock.webContents.debugger.detach).toHaveBeenCalled()
@@ -726,7 +651,7 @@ describe('CdpWsProxy', () => {
   })
 
   it('detaches client websocket listeners after client close', async () => {
-    const client = await connect()
+    const client = await connect(endpoint)
     const serverClient = (proxy as unknown as { client: WebSocket | null }).client
     expect(serverClient).toBeTruthy()
     const offSpy = vi.spyOn(serverClient!, 'off')
@@ -756,7 +681,7 @@ describe('CdpWsProxy', () => {
         })
     )
 
-    const client = await connect()
+    const client = await connect(endpoint)
     client.send(JSON.stringify({ id: 1, method: 'Page.enable', params: {} }))
 
     await new Promise((r) => setTimeout(r, 10))

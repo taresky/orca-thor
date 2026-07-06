@@ -1424,7 +1424,9 @@ export function useIpcEvents(): void {
                     ...(launchAgent
                       ? {
                           launchAgent,
-                          ...initialAgentTabViewModeProps(store.settings)
+                          ...initialAgentTabViewModeProps(store.settings, {
+                            agent: launchAgent
+                          })
                         }
                       : {}),
                     ...(cwd ? { startupCwd: cwd } : {}),
@@ -1612,7 +1614,9 @@ export function useIpcEvents(): void {
             ? {
                 ...(shouldActivate ? {} : { activate: false, recordInteraction: false }),
                 launchAgent: data.launchAgent,
-                ...initialAgentTabViewModeProps(store.settings),
+                ...initialAgentTabViewModeProps(store.settings, {
+                  agent: data.launchAgent
+                }),
                 ...(data.cwd ? { startupCwd: data.cwd } : {})
               }
             : shouldActivate
@@ -2161,6 +2165,7 @@ export function useIpcEvents(): void {
             title: data.url,
             targetGroupId: data.activate ? undefined : activeBrowserUnifiedTab?.groupId,
             sessionProfileId: data.sessionProfileId,
+            sessionPartition: data.sessionPartition,
             activate: data.activate === true
           })
           // Why: registerGuest fires with the page ID (not workspace ID) as
@@ -2223,7 +2228,7 @@ export function useIpcEvents(): void {
           } else {
             destroyPersistentWebview(data.browserPageId)
           }
-          store.switchBrowserTabProfile(owningWorkspace.id, data.profileId)
+          store.switchBrowserTabProfile(owningWorkspace.id, data.profileId, data.sessionPartition)
           window.api.ui.replyTabSetProfile({ requestId: data.requestId })
         } catch (err) {
           window.api.ui.replyTabSetProfile({
