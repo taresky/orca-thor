@@ -27,7 +27,13 @@ export function getScrollTopToRevealBounds(
   const viewportTop = container.scrollTop + viewportTopInset
   const viewportBottom = container.scrollTop + container.clientHeight
   if (bounds.start < viewportTop) {
-    return bounds.start - viewportTopInset
+    const topAligned = bounds.start - viewportTopInset
+    // Why: honor the top inset, but never scroll a row that already fits so far up
+    // that its bottom leaves the viewport. In a viewport only slightly taller than
+    // the row (e.g. the current-workspace reveal), the inset would otherwise push
+    // the bottom out and make the reveal oscillate.
+    const rowFits = bounds.end - bounds.start <= container.clientHeight
+    return rowFits ? Math.max(topAligned, bounds.end - container.clientHeight) : topAligned
   }
   if (bounds.end > viewportBottom) {
     return bounds.end - container.clientHeight
@@ -76,7 +82,7 @@ export function revealElementInScrollContainer(
   if (settledBounds.end - settledBounds.start > container.clientHeight) {
     return true
   }
-  return (
-    getScrollTopToRevealBounds(container, settledBounds, WORKTREE_SIDEBAR_REVEAL_TOP_INSET) === null
-  )
+  // Verify raw visibility (no inset): a viewport barely taller than the row can't
+  // grant the top-inset clearance, so demanding it here would never converge.
+  return getScrollTopToRevealBounds(container, settledBounds) === null
 }
