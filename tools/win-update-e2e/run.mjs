@@ -5,7 +5,7 @@
 // machine-checkable assertions. Windows-only. See README.md for usage and the
 // design context in docs/windows-terminal-update-survival-plan.md (Phase 0).
 
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -13,6 +13,7 @@ import { assertWin32 } from './platform-guard.mjs'
 import { parseArgs } from './cli-args.mjs'
 import { preflight } from './preflight.mjs'
 import { resolveInstaller, silentInstall, silentUninstall } from './installer-steps.mjs'
+import { backupInstallState, restoreInstallState } from './registry-shortcut-backup.mjs'
 import {
   launchInstalledApp,
   waitForTerminalReady,
@@ -49,6 +50,9 @@ async function main() {
   }
   assertWin32('win-update-e2e')
 
+  const installDir = opts.installDir ?? null
+  const isolated = Boolean(installDir)
+
   const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const canary = `ORCA-E2E-CANARY-${runId}`
   const runDir = mkdtempSync(path.join(tmpdir(), `orca-win-update-e2e-${runId}-`))
@@ -59,16 +63,102 @@ async function main() {
   const heartbeatFile = path.join(runDir, 'heartbeat.txt')
   const created = { markerPid: null, daemonPids: new Set() }
 
-  log('setup', `runId=${runId} runDir=${runDir} profile=${opts.expect}`)
+  log(
+    'setup',
+    `runId=${runId} runDir=${runDir} profile=${opts.expect}${isolated ? ` installDir=${installDir}` : ''}`
+  )
+  if (isolated && opts.keepInstall) {
+    log(
+      'setup',
+      '--keep-install is ignored in isolated mode: the test install and its per-user ' +
+        'registry hijack are always cleaned up so the real install stays safe.'
+    )
+  }
 
   const { warnings, existingInstall } = preflight({
     baselinePath,
-    allowExistingInstall: opts.allowExistingInstall
+    allowExistingInstall: opts.allowExistingInstall,
+    installDir
   })
   const hadPreexistingInstall = Boolean(existingInstall)
   for (const w of warnings) {
     log('preflight-warning', w)
   }
+
+  // Isolated mode: snapshot the shared per-user registry keys + shortcuts BEFORE
+  // any install writes over them. Everything after this must run through the
+  // try/finally so the snapshot is always restored, even on failure.
+  let manifest = null
+  if (isolated) {
+    manifest = backupInstallState(runDir)
+    log('isolated', `backed up install registry/shortcut state -> ${manifest.backupDir}`)
+  }
+
+  const runArgs = {
+    opts,
+    installDir,
+    canary,
+    runDir,
+    userDataDir,
+    baselinePath,
+    watchOut,
+    markerPidFile,
+    heartbeatFile,
+    created
+  }
+
+  // Isolated mode ALWAYS restores registry/shortcuts and tears down the test
+  // install, whatever happens in the proof body. Non-isolated flow is unchanged:
+  // teardown runs after a successful body only (a thrown body surfaces as FATAL).
+  const ctx = { session: null }
+  if (isolated) {
+    let passed = false
+    try {
+      passed = await runProof(ctx, runArgs)
+    } finally {
+      await isolatedTeardown({
+        app: ctx.session?.app,
+        created,
+        userDataDir,
+        installDir,
+        manifest,
+        runDir
+      })
+    }
+    return passed ? 0 : 1
+  }
+
+  const passed = await runProof(ctx, runArgs)
+  await teardown({
+    app: ctx.session?.app,
+    created,
+    userDataDir,
+    keepInstall: opts.keepInstall,
+    hadPreexistingInstall,
+    installedExePath: ctx.installedExePath ?? null,
+    runDir
+  })
+  return passed ? 0 : 1
+}
+
+/**
+ * Run the install → drive → update → relaunch → assert proof. `ctx.session` is
+ * assigned as soon as each app launches so a caller's finally can tear down a
+ * partially-created session on failure. Returns whether every assertion passed.
+ */
+async function runProof(ctx, args) {
+  const {
+    opts,
+    installDir,
+    canary,
+    runDir,
+    userDataDir,
+    baselinePath,
+    watchOut,
+    markerPidFile,
+    heartbeatFile,
+    created
+  } = args
 
   const fromInstaller = resolveInstaller({
     localPath: opts.from,
@@ -76,11 +166,12 @@ async function main() {
     assetPattern: opts.assetPattern
   })
   log('install-base', `installing ${fromInstaller}`)
-  const base = silentInstall(fromInstaller)
+  const base = silentInstall(fromInstaller, { installDir })
   log('install-base', `installed ${base.exePath} (version ${base.version})`)
 
   // --- Base version: launch, create sessions, start marker, record daemon ---
   let session = await launchInstalledApp({ exePath: base.exePath, userDataDir })
+  ctx.session = session
   await waitForTerminalReady(session.page)
   await createTerminalTab(session.page)
   const tabIds = await listTabIds(session.page)
@@ -117,11 +208,15 @@ async function main() {
     assetPattern: opts.assetPattern
   })
   log('update', `installing ${toInstaller}`)
-  const updated = silentInstall(toInstaller)
+  const updated = silentInstall(toInstaller, { installDir })
+  // Record the exact dir the harness installed into so non-isolated teardown
+  // uninstalls THAT and never scan-discovers the developer's real install.
+  ctx.installedExePath = updated.exePath
   log('update', `installed ${updated.exePath} (version ${updated.version})`)
 
   // --- Relaunch and gather post-update evidence ---
   session = await launchInstalledApp({ exePath: updated.exePath, userDataDir })
+  ctx.session = session
   await waitForTerminalReady(session.page)
 
   const evidence = await gatherEvidence({
@@ -142,7 +237,7 @@ async function main() {
   const { events } = await watch.stop()
   log('watch', `recorded ${events.length} new-window events`)
 
-  const ctx = {
+  const assertionCtx = {
     profile: opts.expect,
     canary,
     watchEvents: events,
@@ -150,20 +245,11 @@ async function main() {
     daemonLog: readDaemonLog(userDataDir),
     ...evidence
   }
-  const assertions = buildAssertions(ctx)
+  const assertions = buildAssertions(assertionCtx)
   const passed = allPassed(assertions)
   console.log(renderTable(assertions))
   log('result', passed ? 'PASS' : 'FAIL')
-
-  await teardown({
-    app: session.app,
-    created,
-    userDataDir,
-    keepInstall: opts.keepInstall,
-    hadPreexistingInstall,
-    runDir
-  })
-  return passed ? 0 : 1
+  return passed
 }
 
 async function gatherEvidence(args) {
@@ -303,7 +389,71 @@ export function readDaemonLog(userDataDir) {
   return { path: logPath, errorLines, suppressedCount }
 }
 
-async function teardown({ app, created, userDataDir, keepInstall, hadPreexistingInstall, runDir }) {
+/**
+ * Isolated-mode teardown. The harness OWNS the isolated dir by construction, so
+ * it always uninstalls the test install, then ALWAYS restores the shared per-user
+ * registry keys + shortcuts the installer hijacked (the uninstaller clears the
+ * test install's copies; restore re-imports the real install's originals or
+ * deletes freshly-created keys). Finally removes the emptied install dir + runDir.
+ */
+async function isolatedTeardown({ app, created, userDataDir, installDir, manifest, runDir }) {
+  try {
+    await closeApp(app)
+  } catch {
+    /* already closed / never launched */
+  }
+  killPid(created.markerPid)
+  for (const pid of resolveScopedDaemon(userDataDir).pids) {
+    killPid(pid)
+  }
+  for (const pid of created.daemonPids) {
+    killPid(pid)
+  }
+
+  const uninstalled = silentUninstall(installDir)
+  log('isolated-teardown', `uninstalled test install: ${uninstalled}`)
+
+  try {
+    const restore = restoreInstallState(manifest)
+    log(
+      'isolated-teardown',
+      `registry restore verified=${restore.verified} imported=[${restore.imported.join(', ')}] ` +
+        `deleted=[${restore.deleted.join(', ')}] shortcutsRestored=${restore.shortcutsRestored.length} ` +
+        `shortcutsDeleted=${restore.shortcutsDeleted.length}`
+    )
+  } catch (err) {
+    // Restore must never be silently skipped — surface it loudly and point at the
+    // manifest so the shared keys can be recovered by hand.
+    console.error(
+      `\n*** WIN-UPDATE-E2E: registry/shortcut restore THREW: ${err.stack || err.message}\n` +
+        `    Recover manually from the backups under ${manifest?.backupDir}. ***\n`
+    )
+  }
+
+  removeDirIfEmpty(installDir)
+  rmSync(runDir, { recursive: true, force: true })
+}
+
+/** Remove a directory only if it is empty (best-effort; leaves non-empty dirs). */
+function removeDirIfEmpty(dir) {
+  try {
+    if (existsSync(dir) && readdirSync(dir).length === 0) {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  } catch {
+    /* leave it in place */
+  }
+}
+
+async function teardown({
+  app,
+  created,
+  userDataDir,
+  keepInstall,
+  hadPreexistingInstall,
+  installedExePath,
+  runDir
+}) {
   try {
     await closeApp(app)
   } catch {
@@ -332,9 +482,16 @@ async function teardown({ app, created, userDataDir, keepInstall, hadPreexisting
         '    --to version is now installed. Your prior build was NOT restored — reinstall\n' +
         '    your intended build if needed. Skipping uninstall. ***\n'
     )
-  } else {
-    const uninstalled = silentUninstall()
+  } else if (installedExePath) {
+    // Uninstall ONLY the exact directory the harness installed into this run,
+    // with the explicit default-location opt-in (non-isolated mode legitimately
+    // installs to the default path and owns it here). Never scan-and-discover.
+    const uninstalled = silentUninstall(path.dirname(installedExePath), {
+      allowDefaultLocation: true
+    })
     log('teardown', `uninstalled: ${uninstalled}`)
+  } else {
+    log('teardown', 'no install path recorded; skipping uninstall (nothing owned to remove)')
   }
   rmSync(runDir, { recursive: true, force: true })
 }

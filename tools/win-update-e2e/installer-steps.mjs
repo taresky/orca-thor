@@ -70,32 +70,40 @@ function findSetupExe(dir) {
  * Run an NSIS installer in one-click silent mode and wait for the installed exe
  * to appear. Returns { exePath, version }. The installer process returns before
  * copying finishes, so completion is confirmed by polling for the exe.
+ *
+ * When `installDir` is set (isolated-install mode), `/D=<path>` overrides the
+ * install location. `/D` is special in NSIS: it must be the LAST argument and
+ * cannot be quoted, so the path must be spaces-free (validated upstream) and is
+ * passed as a single unquoted argv entry.
  */
-export function silentInstall(setupExe, { timeoutMs = 180_000 } = {}) {
+export function silentInstall(setupExe, { timeoutMs = 180_000, installDir = null } = {}) {
   assertWin32('silentInstall')
   if (!existsSync(setupExe)) {
     throw new Error(`Installer not found: ${setupExe}`)
   }
   // /S is the NSIS silent switch; the electron-builder oneClick installer needs
-  // no other flags for a per-user install.
-  const proc = spawnSync(setupExe, ['/S'], { encoding: 'utf8' })
+  // no other flags for a per-user install. /D, when present, MUST be last.
+  const args = ['/S']
+  if (installDir) {
+    args.push(`/D=${installDir}`)
+  }
+  const proc = spawnSync(setupExe, args, { encoding: 'utf8' })
   if (proc.error) {
     throw new Error(`Failed to launch installer ${setupExe}: ${proc.error.message}`)
   }
 
-  const exePath = waitForInstalledExe(timeoutMs)
+  const exePath = waitForInstalledExe(timeoutMs, installDir)
   if (!exePath) {
-    throw new Error(
-      `Installed ${EXE_NAME} did not appear under ${programsRoot()} within ${timeoutMs}ms`
-    )
+    const where = installDir ?? programsRoot()
+    throw new Error(`Installed ${EXE_NAME} did not appear under ${where} within ${timeoutMs}ms`)
   }
   return { exePath, version: getExeVersion(exePath) }
 }
 
-function waitForInstalledExe(timeoutMs) {
+function waitForInstalledExe(timeoutMs, installDir = null) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    const exe = locateInstalledExe()
+    const exe = locateInstalledExe(installDir)
     if (exe) {
       return exe
     }
@@ -104,8 +112,16 @@ function waitForInstalledExe(timeoutMs) {
   return null
 }
 
-/** Locate the installed Orca.exe under %LOCALAPPDATA%\Programs (case-tolerant). */
-export function locateInstalledExe() {
+/**
+ * Locate the installed Orca.exe. In isolated mode (`installDir` set), the exe is
+ * at a known fixed path (<installDir>\Orca.exe). Otherwise it is discovered
+ * under %LOCALAPPDATA%\Programs (case-tolerant — casing is not guaranteed).
+ */
+export function locateInstalledExe(installDir = null) {
+  if (installDir) {
+    const exe = path.join(installDir, EXE_NAME)
+    return existsSync(exe) ? exe : null
+  }
   const root = programsRoot()
   if (!existsSync(root)) {
     return null
@@ -126,26 +142,53 @@ export function getExeVersion(exePath) {
 }
 
 /**
- * Silently uninstall via the NSIS-generated uninstaller. Best-effort: returns
- * false if no uninstaller is found rather than throwing, so teardown never
- * masks the real assertion result.
+ * Silently uninstall the test install at an EXPLICIT directory via its
+ * NSIS-generated uninstaller. Best-effort: returns false if no uninstaller is
+ * found rather than throwing, so teardown never masks the real assertion result.
+ *
+ * SAFETY: `installDir` is REQUIRED and must be the exact directory the harness
+ * installed into this run — there is deliberately no scan-and-discover fallback,
+ * because a `null` default once made this function locate and uninstall the
+ * developer's REAL Orca. It additionally refuses to run against the default
+ * per-user install location unless `allowDefaultLocation` is explicitly set (only
+ * the owns-the-install non-isolated teardown may do so).
  */
-export function silentUninstall() {
+export function silentUninstall(installDir, { allowDefaultLocation = false } = {}) {
   assertWin32('silentUninstall')
-  const exe = locateInstalledExe()
-  if (!exe) {
+  if (typeof installDir !== 'string' || installDir.trim() === '') {
+    throw new Error('silentUninstall requires an explicit install directory (no scan fallback)')
+  }
+  const resolved = path.resolve(installDir)
+  if (!allowDefaultLocation && pathsEqual(resolved, path.join(programsRoot(), PRODUCT_NAME))) {
+    throw new Error(
+      `Refusing to uninstall the default install location "${resolved}" — this is where a ` +
+        `developer's REAL Orca lives. Isolated mode must target a separate --install-dir.`
+    )
+  }
+  const exe = path.join(resolved, EXE_NAME)
+  if (!existsSync(exe)) {
     return false
   }
-  const installDir = path.dirname(exe)
-  const uninstaller = path.join(installDir, `Uninstall ${PRODUCT_NAME}.exe`)
+  const exeDir = resolved
+  const uninstaller = path.join(exeDir, `Uninstall ${PRODUCT_NAME}.exe`)
   if (!existsSync(uninstaller)) {
     return false
   }
   // NSIS uninstallers must be run from a copy (they relocate themselves); _?=
   // forces synchronous, in-place uninstall so we can assert completion.
-  spawnSync(uninstaller, ['/S', `_?=${installDir}`], { encoding: 'utf8' })
+  spawnSync(uninstaller, ['/S', `_?=${exeDir}`], { encoding: 'utf8' })
   sleepSync(2000)
   return !existsSync(exe)
+}
+
+/** Case-insensitive path equality after trailing-separator normalization. */
+function pathsEqual(a, b) {
+  const norm = (p) =>
+    path
+      .resolve(p)
+      .replace(/[\\/]+$/, '')
+      .toLowerCase()
+  return norm(a) === norm(b)
 }
 
 function sleepSync(ms) {
