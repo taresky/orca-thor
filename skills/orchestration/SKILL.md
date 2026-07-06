@@ -20,6 +20,21 @@ Orchestration is Orca's structured coordination layer for agent messages, task o
 
 Use this skill when coordination state matters. For lightweight terminal prompts or basic worktree/terminal/built-in-browser control, use `orca-cli`.
 
+## Tool Boundary
+
+If a task says to use Orca orchestration, the coordinator must create Orca runtime state with `orca orchestration task-create` and `orca orchestration dispatch --inject` or `orca orchestration run`.
+
+Do not substitute non-Orca subagent tools, generic agent-spawn APIs, or chat-only parallel worker features. Those may create useful workers, but they do not create Orca task/dispatch provenance, injected lifecycle preambles, `worker_done` authority, or decision gates.
+
+Before claiming a worker was orchestrated, verify the task/dispatch exists:
+
+```bash
+orca orchestration task-list --json
+orca orchestration dispatch-show --task <task_id> --json
+```
+
+If the work was accidentally run outside Orca orchestration, say so plainly. To repair provenance, rerun or revalidate the needed work through a fresh Orca terminal plus injected dispatch; do not retroactively describe the external worker as orchestrated.
+
 ## When To Use
 
 - Send/reply/ask between agent terminals with persistent messages.
