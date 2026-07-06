@@ -1,15 +1,8 @@
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-  writeFileSync
-} from 'node:fs'
+import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
+import { ensureRelocatedRuntime } from './install-dir-runtime-relocation'
 
 /**
  * Relocates node-pty's Windows native runtime (conpty.node, conpty.dll,
@@ -25,8 +18,6 @@ import { app } from 'electron'
  */
 export const NODE_PTY_NATIVE_DIR_ENV_VAR = 'ORCA_NODE_PTY_NATIVE_DIR'
 
-const RELOCATION_COMPLETE_MARKER = '.relocation-complete'
-
 export function resolveNodePtyNativeSourceDir(nodePtyPackageDir: string): string | null {
   // Packaged builds carry the rebuilt binding in build/Release; dev installs
   // (and the forced-relocation test path) load from prebuilds.
@@ -40,68 +31,6 @@ export function resolveNodePtyNativeSourceDir(nodePtyPackageDir: string): string
     }
   }
   return null
-}
-
-function copyRuntimeTree(sourceDir: string, destDir: string): void {
-  mkdirSync(destDir, { recursive: true })
-  for (const entry of readdirSync(sourceDir, { withFileTypes: true })) {
-    const sourcePath = join(sourceDir, entry.name)
-    const destPath = join(destDir, entry.name)
-    if (entry.isDirectory()) {
-      copyRuntimeTree(sourcePath, destPath)
-    } else if (entry.isFile() && !/\.pdb$/i.test(entry.name)) {
-      copyFileSync(sourcePath, destPath)
-    }
-  }
-}
-
-function removeStaleRuntimeVersions(destRoot: string, keepVersion: string): void {
-  let entries
-  try {
-    entries = readdirSync(destRoot, { withFileTypes: true })
-  } catch {
-    return
-  }
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name === keepVersion) {
-      continue
-    }
-    // Why: an adopted daemon from a previous version may still run (or later
-    // respawn) binaries out of its own version dir. Renaming a directory
-    // fails on Windows while anything inside is open, so a successful rename
-    // proves the dir is unused and safe to delete.
-    const doomedPath = join(destRoot, `${entry.name}.stale`)
-    try {
-      renameSync(join(destRoot, entry.name), doomedPath)
-      rmSync(doomedPath, { recursive: true, force: true })
-    } catch {
-      // Still in use (or already being cleaned) — retry on a future launch.
-    }
-  }
-}
-
-export function ensureRelocatedNodePtyNativeRuntime(options: {
-  sourceDir: string
-  destRoot: string
-  version: string
-}): string | null {
-  const { sourceDir, destRoot, version } = options
-  const destDir = join(destRoot, version)
-  try {
-    // Why: the marker is written only after a full copy, so a crash mid-copy
-    // leaves no marker and the next launch redoes the copy from scratch.
-    if (!existsSync(join(destDir, RELOCATION_COMPLETE_MARKER))) {
-      rmSync(destDir, { recursive: true, force: true })
-      copyRuntimeTree(sourceDir, destDir)
-      writeFileSync(join(destDir, RELOCATION_COMPLETE_MARKER), '')
-    }
-    removeStaleRuntimeVersions(destRoot, version)
-    return destDir
-  } catch {
-    // Fail open: node-pty keeps loading from the install dir, which is the
-    // pre-relocation behavior (sessions then don't survive updates).
-    return null
-  }
 }
 
 export function installRelocatedNodePtyNativeRuntime(): void {
@@ -126,10 +55,14 @@ export function installRelocatedNodePtyNativeRuntime(): void {
   if (!sourceDir) {
     return
   }
-  const destDir = ensureRelocatedNodePtyNativeRuntime({
+  const userData = app.getPath('userData')
+  const destDir = ensureRelocatedRuntime({
     sourceDir,
-    destRoot: join(app.getPath('userData'), 'node-pty-runtime'),
-    version: app.getVersion()
+    destRoot: join(userData, 'node-pty-runtime'),
+    version: app.getVersion(),
+    // Keyed to daemon-init's runtimeDir (userData/daemon), where surviving
+    // daemons write daemon-v<N>.pid recording the runtime version they pin.
+    daemonRuntimeDir: join(userData, 'daemon')
   })
   if (destDir) {
     process.env[NODE_PTY_NATIVE_DIR_ENV_VAR] = destDir

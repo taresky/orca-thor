@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { test, expect } from './helpers/orca-app'
 import { waitForSessionReady } from './helpers/store'
+import { openSourceControlForWorktree } from './helpers/worktree-registration'
 
 function createWorktreeWithStagedChange(repoPath: string): {
   branchName: string
@@ -50,80 +51,16 @@ test.describe('Source Control AI commit messages', () => {
 
     try {
       await waitForSessionReady(orcaPage)
-      await orcaPage.evaluate(
-        async ({ repoPath, worktreePath: targetWorktreePath, agentCommand: command }) => {
-          const store = window.__store
-          if (!store) {
-            throw new Error('window.__store is not available')
-          }
-          const state = store.getState()
-          await state.fetchRepos()
-          const repo = store.getState().repos.find((entry) => entry.path === repoPath)
-          if (!repo) {
-            throw new Error(`Seeded E2E repo was not registered: ${repoPath}`)
-          }
-          const normalizeMacTmpPath = (value: string): string =>
-            value.startsWith('/private/var/') ? value.slice('/private'.length) : value
-
-          // Why: worktrees:list serves a 5s detection-scan cache that a raw
-          // `git worktree add` (done outside Orca) does not invalidate, so the
-          // freshly-created worktree can be briefly absent from the boot scan.
-          // Poll until the cache refreshes and surfaces it.
-          const deadline = Date.now() + 10_000
-          let listedWorktrees = await window.api.worktrees.list({ repoId: repo.id })
-          let worktree = listedWorktrees.find(
-            (entry) => normalizeMacTmpPath(entry.path) === normalizeMacTmpPath(targetWorktreePath)
-          )
-          while (!worktree && Date.now() < deadline) {
-            await new Promise((resolve) => setTimeout(resolve, 250))
-            listedWorktrees = await window.api.worktrees.list({ repoId: repo.id })
-            worktree = listedWorktrees.find(
-              (entry) => normalizeMacTmpPath(entry.path) === normalizeMacTmpPath(targetWorktreePath)
-            )
-          }
-          store.setState((current) => ({
-            worktreesByRepo: {
-              ...current.worktreesByRepo,
-              [repo.id]: listedWorktrees
-            }
-          }))
-          if (!worktree) {
-            throw new Error(
-              `E2E worktree was not loaded: ${targetWorktreePath}; listed=${listedWorktrees
-                .map((entry) => entry.path)
-                .join(', ')}`
-            )
-          }
-
-          store.getState().setActiveWorktree(worktree.id)
-          await store.getState().updateSettings({
-            commitMessageAi: {
-              enabled: true,
-              agentId: 'custom',
-              selectedModelByAgent: {},
-              selectedThinkingByModel: {},
-              customPrompt: '',
-              customAgentCommand: command
-            }
-          })
-          const status = await window.api.git.status({ worktreePath: worktree.path })
-          store.getState().setGitStatus(worktree.id, status)
-          store.getState().setRightSidebarTab('source-control')
-          store.getState().setRightSidebarOpen(true)
-        },
-        { repoPath: testRepoPath, worktreePath, agentCommand }
-      )
-
-      await expect
-        .poll(
-          async () =>
-            orcaPage.evaluate(() => {
-              const state = window.__store?.getState()
-              return Boolean(state?.rightSidebarOpen && state?.rightSidebarTab === 'source-control')
-            }),
-          { timeout: 5_000 }
-        )
-        .toBe(true)
+      await openSourceControlForWorktree(orcaPage, testRepoPath, worktreePath, {
+        commitMessageAi: {
+          enabled: true,
+          agentId: 'custom',
+          selectedModelByAgent: {},
+          selectedThinkingByModel: {},
+          customPrompt: '',
+          customAgentCommand: agentCommand
+        }
+      })
 
       const textarea = orcaPage.getByRole('textbox', { name: 'Commit message' })
       await expect(textarea).toBeVisible({ timeout: 10_000 })

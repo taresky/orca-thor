@@ -113,10 +113,12 @@ async function typeHangulGanadaSlowly(
     await page.waitForTimeout(200)
   }
 
-  // Why: commit the composition the way a real IME does when the user accepts
-  // the buffer. Since #6238 the input defers persistence until compositionend,
-  // so without this the store never receives the composed syllables.
-  await session.send('Input.insertText', { text: `${committed}${pending}` })
+  // Why: a real IME commits the pending syllable (space/enter) at the end of a
+  // word, firing compositionend. Without this final commit the controlled
+  // input stays in composing state, so the component's defer-until-compositionend
+  // persist never runs. insertText replaces the composing region in place, so it
+  // finalizes to the same text rather than double-committing.
+  await session.send('Input.insertText', { text: committed + pending })
 }
 
 test.describe('Repository Display Name IME composition', () => {

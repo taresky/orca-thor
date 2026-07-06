@@ -413,43 +413,6 @@ async function pressShiftedRussianLayoutKey(page: Page): Promise<{
   })
 }
 
-// Why: handleRequestClosePane pops a "Close Terminal?" dialog when the pane
-// reports a running child process. Under E2E, a freshly split pane's
-// proc.process is briefly unset so the check returns true spuriously. Click
-// Close when the dialog appears so the test's chord-routing assertion stays
-// deterministic; no-op when it doesn't.
-async function closeActiveSplitPaneWithChord(
-  page: Page,
-  mod: string,
-  expectedCountAfter: number
-): Promise<void> {
-  // Guard: the split pane must still be present. Otherwise Cmd/Ctrl+W closes
-  // the last pane, which closes the tab and (on Linux) quits the whole app,
-  // surfacing later as a confusing "target page closed" instead of a clear
-  // "the split pane went away" signal.
-  await waitForPaneCount(page, expectedCountAfter + 1)
-  await focusActiveTerminal(page)
-  await page.keyboard.press(`${mod}+w`)
-  // The close is either immediate or gated behind a running-process
-  // confirmation dialog whose async hasChildProcesses check can surface it a
-  // beat late (a fixed short wait races it under CI load). Confirm the dialog
-  // whenever it appears and wait for the pane to actually drain.
-  await expect
-    .poll(
-      async () => {
-        // The running-process confirmation dialog's affirmative button is
-        // "Stop and Close" (not "Close").
-        const confirmButton = page.getByRole('button', { name: 'Stop and Close', exact: true })
-        if (await confirmButton.isVisible().catch(() => false)) {
-          await confirmButton.click().catch(() => {})
-        }
-        return countVisibleTerminalPanes(page)
-      },
-      { timeout: 10_000, message: 'split pane did not close after Cmd/Ctrl+W' }
-    )
-    .toBe(expectedCountAfter)
-}
-
 async function pressAndExpectWrite(
   page: Page,
   app: ElectronApplication,
@@ -481,6 +444,34 @@ const mod = isMac ? 'Meta' : 'Control'
 // and horizontal is Alt+Shift+D (Windows Terminal convention).
 const splitVerticalChord = isMac ? `${mod}+d` : `${mod}+Shift+d`
 const splitHorizontalChord = isMac ? `${mod}+Shift+d` : 'Alt+Shift+d'
+
+// Why: a freshly split pane can transiently still report a running child, so
+// poll for the confirm dialog and pane-count settling instead of a fixed wait.
+async function closeActivePaneAndSettle(page: Page, expectedCount: number): Promise<void> {
+  await focusActiveTerminal(page)
+  await page.keyboard.press(`${mod}+w`)
+  // The "Stop running command?" confirm surfaces a "Stop and Close" action when
+  // the pane still reports a running child.
+  const confirmButton = page.getByRole('button', { name: /Stop and Close/i })
+  await expect
+    .poll(
+      async () => {
+        if (await confirmButton.isVisible().catch(() => false)) {
+          // Why: surface a click failure so a real actionability/strict-mode
+          // error isn't hidden behind the generic pane-count timeout.
+          await confirmButton.click().catch((err) => {
+            console.warn('closeActivePaneAndSettle: confirm click failed', err)
+          })
+        }
+        return countVisibleTerminalPanes(page)
+      },
+      {
+        timeout: 10_000,
+        message: `Expected ${expectedCount} visible terminal panes after close`
+      }
+    )
+    .toBe(expectedCount)
+}
 
 // Why: serial mode is load-bearing. Tests mutate shared Electron app state
 // (pane layout, terminal buffer, expand toggle) and the pty:write spy log is
@@ -771,6 +762,9 @@ test.describe('Terminal Shortcuts', () => {
     await focusActiveTerminal(orcaPage)
     await orcaPage.keyboard.press(splitVerticalChord)
     await waitForPaneCount(orcaPage, panesBeforeSplit + 1)
+    // Why: ensure the new split pane's PTY is actually bound before we later
+    // close it, so the close cycle can't race an in-progress split.
+    await waitForActivePanePtyId(orcaPage)
 
     // Cmd/Ctrl+] and Cmd/Ctrl+[ cycle focus (no pane-count change).
     await focusActiveTerminal(orcaPage)
@@ -803,19 +797,15 @@ test.describe('Terminal Shortcuts', () => {
       .toBe(false)
 
     // Cmd/Ctrl+W closes the active split pane (not the whole tab: >1 pane).
-    // Why: the close handler checks hasChildProcesses async; a freshly
-    // spawned pane can transiently report a running child (node-pty's
-    // proc.process lags the spawn), which surfaces a confirmation dialog
-    // instead of closing immediately. Confirm it if it appears — the test
-    // only needs to prove the chord routed to the close handler.
-    await closeActiveSplitPaneWithChord(orcaPage, mod, panesBeforeSplit)
+    await closeActivePaneAndSettle(orcaPage, panesBeforeSplit)
 
     // Split horizontally (chord varies by platform — see splitHorizontalChord).
     const panesBeforeHSplit = await countVisibleTerminalPanes(orcaPage)
     await focusActiveTerminal(orcaPage)
     await orcaPage.keyboard.press(splitHorizontalChord)
     await waitForPaneCount(orcaPage, panesBeforeHSplit + 1)
-    await closeActiveSplitPaneWithChord(orcaPage, mod, panesBeforeHSplit)
+    await waitForActivePanePtyId(orcaPage)
+    await closeActivePaneAndSettle(orcaPage, panesBeforeHSplit)
 
     // Cmd/Ctrl+F toggles the search overlay.
     await focusActiveTerminal(orcaPage)

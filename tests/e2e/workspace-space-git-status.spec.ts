@@ -1,15 +1,21 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test, expect } from './helpers/orca-app'
+import { loadWorktreesUntilPathsPresent } from './helpers/worktree-registration'
 
 test.describe('Workspace Space git status checks', () => {
   test('checks every scanned deletable row, including rows after the first 50', async ({
     orcaPage,
     testRepoPath
   }) => {
-    const worktreeParent = mkdtempSync(path.join(os.tmpdir(), 'orca-space-git-status-'))
+    // Why: on symlinked tmpdirs (/var→/private/var on macOS, /tmp→… on CI) Orca
+    // registers worktrees under their realpath, so the parent must be canonical
+    // before `git worktree add` or the recorded paths won't match and rows drop.
+    const worktreeParent = realpathSync(
+      mkdtempSync(path.join(os.tmpdir(), 'orca-space-git-status-'))
+    )
     const worktreePaths = Array.from({ length: 60 }, (_, index) =>
       path.join(worktreeParent, `worktree-${index}`)
     )
@@ -21,54 +27,57 @@ test.describe('Workspace Space git status checks', () => {
           stdio: 'pipe'
         })
       }
+      const registeredWorktreePaths = worktreePaths.map((worktreePath) =>
+        realpathSync(worktreePath)
+      )
+
+      const repoId = await orcaPage.evaluate((testRepoPath) => {
+        const store = window.__store
+        if (!store) {
+          throw new Error('Expected e2e store to be exposed')
+        }
+        const repo = store.getState().repos.find((item) => item.path === testRepoPath)
+        if (!repo) {
+          throw new Error('Expected test repo to be loaded')
+        }
+        return repo.id
+      }, testRepoPath)
+
+      // Why: the 60 worktrees were added via raw git, so poll past the 5s scan
+      // cache TTL until every path registers before deriving the space rows.
+      await loadWorktreesUntilPathsPresent(orcaPage, repoId, registeredWorktreePaths)
+
       await orcaPage.evaluate(
-        async ({ testRepoPath, worktreeParent, expectedCount }) => {
+        async ({ testRepoPath, worktreePaths }) => {
           const store = window.__store
           if (!store) {
             throw new Error('Expected e2e store to be exposed')
           }
 
-          const repo = store.getState().repos.find((item) => item.path === testRepoPath)
+          const initialState = store.getState()
+          const repo = initialState.repos.find((item) => item.path === testRepoPath)
           if (!repo) {
             throw new Error('Expected test repo to be loaded')
           }
+          await window.api.git.status({ worktreePath: worktreePaths[0] })
 
-          // Why: worktrees are created via raw `git worktree add`, which git
-          // records with the path as given (not symlink-canonicalized), so
-          // match against the git-reported store paths rather than realpathSync'd
-          // ones — otherwise on macOS the /var vs /private/var mismatch makes
-          // git:status reject the probe as an unregistered path. Also poll:
-          // fetchWorktrees serves a 5s scan cache that raw adds don't invalidate.
-          const normalizeMacTmpPath = (value: string): string =>
-            value.startsWith('/private/var/') ? value.slice('/private'.length) : value
-          const parentKey = normalizeMacTmpPath(worktreeParent)
-          const deadline = Date.now() + 20_000
-          const findCreatedWorktrees = () =>
-            (store.getState().worktreesByRepo[repo.id] ?? []).filter((worktree) =>
-              normalizeMacTmpPath(worktree.path).startsWith(`${parentKey}/`)
-            )
-          await store.getState().fetchWorktrees(repo.id)
-          let worktrees = findCreatedWorktrees()
-          while (worktrees.length < expectedCount && Date.now() < deadline) {
-            await new Promise((resolve) => setTimeout(resolve, 250))
-            await store.getState().fetchWorktrees(repo.id)
-            worktrees = findCreatedWorktrees()
-          }
-          if (worktrees.length !== expectedCount) {
+          const state = store.getState()
+          const expectedPaths = new Set(worktreePaths)
+          const worktrees = (state.worktreesByRepo[repo.id] ?? []).filter((worktree) =>
+            expectedPaths.has(worktree.path)
+          )
+          if (worktrees.length !== worktreePaths.length) {
             throw new Error(
-              `Expected ${expectedCount} registered worktrees, got ${
+              `Expected ${worktreePaths.length} registered worktrees, got ${
                 worktrees.length
-              } from ${(store.getState().worktreesByRepo[repo.id] ?? []).length}: ${(
-                store.getState().worktreesByRepo[repo.id] ?? []
+              } from ${(state.worktreesByRepo[repo.id] ?? []).length}: ${(
+                state.worktreesByRepo[repo.id] ?? []
               )
                 .slice(0, 5)
                 .map((worktree) => worktree.path)
                 .join(', ')}`
             )
           }
-          // Probe with a git-reported store path (a registered worktree root).
-          await window.api.git.status({ worktreePath: worktrees[0].path })
-
           const rows = worktrees.map((worktree, index) => ({
             worktreeId: worktree.id,
             repoId: repo.id,
@@ -121,7 +130,7 @@ test.describe('Workspace Space git status checks', () => {
           })
           store.getState().openSpacePage()
         },
-        { testRepoPath, worktreeParent, expectedCount: worktreePaths.length }
+        { testRepoPath, worktreePaths: registeredWorktreePaths }
       )
 
       await expect

@@ -19,7 +19,6 @@
  * crash in whatever replaces it.
  */
 
-import { execFileSync } from 'node:child_process'
 import type { ConsoleMessage } from '@stablyai/playwright-test'
 import { test, expect } from './helpers/orca-app'
 import {
@@ -217,23 +216,11 @@ test.describe('Create Workspace', () => {
 
   test('reuses a resolved pasted GitHub URL when quick create submits', async ({
     electronApp,
-    orcaPage,
-    testRepoPath
+    orcaPage
   }) => {
     const title = `E2E smart URL resolution ${Date.now()}`
     const url = 'https://github.com/stablyai/orca/pull/2049'
     const linkedWorkspacePattern = new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-
-    // Why: create builds from whatever base resolvePrBase resolves to. The
-    // disposable fixture repo has no `origin`, so a remote-tracking base like
-    // `origin/main` can't resolve. Resolve to the fixture's actual local HEAD
-    // branch instead so `git worktree add` succeeds offline — without adding an
-    // origin remote, which would perturb the pasted-URL work-item lookup below.
-    const baseBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-      cwd: testRepoPath
-    })
-      .toString()
-      .trim()
 
     try {
       await orcaPage.getByRole('button', { name: 'New workspace', exact: true }).click()
@@ -243,7 +230,7 @@ test.describe('Create Workspace', () => {
       await expect(dialog.locator('[data-workspace-name-input="true"]')).toBeVisible()
 
       await electronApp.evaluate(
-        ({ ipcMain }, { title, url, baseBranch }) => {
+        ({ ipcMain }, { title, url }) => {
           const counters = globalThis as unknown as {
             __smartGitHubLookupCount: number
             __smartResolvePrBaseCount: number
@@ -276,40 +263,21 @@ test.describe('Create Workspace', () => {
             }
           )
           ipcMain.removeHandler('worktrees:resolvePrBase')
+          // Why: the fixture repo has no remote and its default branch name
+          // depends on the host's git init.defaultBranch (main vs master), so
+          // resolve the PR base to HEAD, which always exists regardless.
           ipcMain.handle('worktrees:resolvePrBase', () => {
             counters.__smartResolvePrBaseCount += 1
-            return { baseBranch }
+            return { baseBranch: 'HEAD' }
           })
         },
-        { title, url, baseBranch }
+        { title, url }
       )
 
       const nameInput = dialog.getByPlaceholder(/Type a name/i)
       await expect(nameInput).toBeVisible()
       await nameInput.fill(url)
 
-      // Why: wait for the pasted URL to resolve via a single work-item lookup.
-      // The base resolution (resolvePrBase) fires separately and its timing
-      // relative to this point is not deterministic, so only the lookup is
-      // asserted here; the reuse invariant is checked in full after create.
-      await expect
-        .poll(() =>
-          electronApp.evaluate(() => {
-            const counters = globalThis as unknown as { __smartGitHubLookupCount?: number }
-            return counters.__smartGitHubLookupCount ?? -1
-          })
-        )
-        .toBe(1)
-      const createButton = dialog.getByRole('button', { name: /Create (Workspace|Worktree)/i })
-      await expect(createButton).toBeEnabled()
-      await createButton.click()
-
-      await expect(dialog).toBeHidden({ timeout: 15_000 })
-      await expect(orcaPage.getByRole('option', { name: linkedWorkspacePattern })).toBeVisible({
-        timeout: 10_000
-      })
-      await expect(orcaPage.getByRole('option', { name: url })).toHaveCount(0)
-      await expect(orcaPage.getByText('Linked PR #2049')).toBeVisible()
       await expect
         .poll(() =>
           electronApp.evaluate(() => {
@@ -323,8 +291,34 @@ test.describe('Create Workspace', () => {
             }
           })
         )
-        // Why: counts are unchanged from before create — the submit reused the
-        // already-resolved URL/base instead of looking them up again.
+        .toEqual({ githubLookupCount: 1, resolvePrBaseCount: 0 })
+      const createButton = dialog.getByRole('button', { name: /Create (Workspace|Worktree)/i })
+      await expect(createButton).toBeEnabled()
+      await createButton.click()
+
+      await expect(dialog).toBeHidden({ timeout: 15_000 })
+      await expect(orcaPage.getByRole('option', { name: linkedWorkspacePattern })).toBeVisible({
+        timeout: 10_000
+      })
+      await expect(orcaPage.getByRole('option', { name: url })).toHaveCount(0)
+      await expect(orcaPage.getByText('Linked PR #2049')).toBeVisible()
+      // Why: quick create reuses the single GitHub lookup from typing (no
+      // redundant re-fetch), and since #5733 ("Create PR worktrees from the PR
+      // head") it resolves the PR start point exactly once at submit time — so
+      // the base resolves once here rather than being skipped.
+      await expect
+        .poll(() =>
+          electronApp.evaluate(() => {
+            const counters = globalThis as unknown as {
+              __smartGitHubLookupCount?: number
+              __smartResolvePrBaseCount?: number
+            }
+            return {
+              githubLookupCount: counters.__smartGitHubLookupCount ?? -1,
+              resolvePrBaseCount: counters.__smartResolvePrBaseCount ?? -1
+            }
+          })
+        )
         .toEqual({ githubLookupCount: 1, resolvePrBaseCount: 1 })
     } finally {
       await orcaPage
@@ -371,9 +365,10 @@ test.describe('Create Workspace', () => {
             })
           )
           ipcMain.removeHandler('worktrees:resolvePrBase')
-          // Why: the fixture repo's default branch is master and has no
-          // remote; resolve the PR base to a ref that actually exists.
-          ipcMain.handle('worktrees:resolvePrBase', () => ({ baseBranch: 'master' }))
+          // Why: the fixture repo has no remote and its default branch name
+          // depends on the host's git init.defaultBranch (main vs master), so
+          // resolve the PR base to HEAD, which always exists regardless.
+          ipcMain.handle('worktrees:resolvePrBase', () => ({ baseBranch: 'HEAD' }))
         },
         { title, url }
       )
