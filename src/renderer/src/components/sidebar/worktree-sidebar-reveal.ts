@@ -27,13 +27,7 @@ export function getScrollTopToRevealBounds(
   const viewportTop = container.scrollTop + viewportTopInset
   const viewportBottom = container.scrollTop + container.clientHeight
   if (bounds.start < viewportTop) {
-    const topAligned = bounds.start - viewportTopInset
-    // Why: honor the top inset, but never scroll a row that already fits so far up
-    // that its bottom leaves the viewport. In a viewport only slightly taller than
-    // the row (e.g. the current-workspace reveal), the inset would otherwise push
-    // the bottom out and make the reveal oscillate.
-    const rowFits = bounds.end - bounds.start <= container.clientHeight
-    return rowFits ? Math.max(topAligned, bounds.end - container.clientHeight) : topAligned
+    return bounds.start - viewportTopInset
   }
   if (bounds.end > viewportBottom) {
     return bounds.end - container.clientHeight
@@ -57,8 +51,8 @@ export function revealElementInScrollContainer(
   if (nextScrollTop === null) {
     return true
   }
-  // Why: honor the user's reduced-motion preference by jumping instantly instead
-  // of animating a smooth scroll (also makes the reveal deterministic in headless
+  // Why: honor the user's reduced-motion preference by jumping instantly instead of
+  // animating a smooth scroll (also makes the reveal deterministic in headless
   // environments that never tick the smooth-scroll animation).
   const prefersReducedMotion =
     typeof window !== 'undefined' &&
@@ -66,23 +60,5 @@ export function revealElementInScrollContainer(
   const resolvedBehavior: ScrollBehavior =
     behavior === 'smooth' && prefersReducedMotion ? 'auto' : behavior
   container.scrollTo({ top: Math.max(0, nextScrollTop), behavior: resolvedBehavior })
-
-  // Why: a smooth scroll settles over many frames, so we can't verify it here.
-  if (resolvedBehavior !== 'auto') {
-    return true
-  }
-  // Why: an instant scroll applies synchronously, but the browser clamps it to
-  // scrollHeight, which can momentarily lag a freshly measured (just-activated)
-  // row's real height — leaving the row clipped short. Report "not fully
-  // revealed" so the caller re-stages via the virtualizer and retries on the next
-  // frame instead of clearing while the row is still clipped. A row taller than
-  // the viewport can never fully fit, so treat that as done to avoid an endless
-  // retry.
-  const settledBounds = getElementScrollBounds(container, element)
-  if (settledBounds.end - settledBounds.start > container.clientHeight) {
-    return true
-  }
-  // Verify raw visibility (no inset): a viewport barely taller than the row can't
-  // grant the top-inset clearance, so demanding it here would never converge.
-  return getScrollTopToRevealBounds(container, settledBounds) === null
+  return true
 }
