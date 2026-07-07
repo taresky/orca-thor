@@ -65,6 +65,9 @@ importers:
       expo-image-picker:
         specifier: ^55.0.20
         version: 55.0.20(expo@55.0.27)
+      expo-keep-awake:
+        specifier: 55.0.8
+        version: 55.0.8(expo@55.0.27)(react@19.2.6)
       expo-linking:
         specifier: ^55.0.15
         version: 55.0.15(expo@55.0.27)(react-native@0.83.9(@babel/core@7.29.7)(@react-native/metro-config@0.85.2(@babel/core@7.29.7))(@types/react@19.2.14)(react@19.2.6))(react@19.2.6)
