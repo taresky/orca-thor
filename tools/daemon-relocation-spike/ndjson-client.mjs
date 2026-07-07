@@ -71,6 +71,15 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+// Strip CSI / OSC / two-char VT escapes so the marker regex can match executed
+// PTY output that ConPTY interleaves with cursor-move and SGR color codes.
+// eslint-disable-next-line no-control-regex -- ANSI escapes are control chars by definition
+const ANSI_ESCAPE = /\[[0-9;?]*[ -/]*[@-~]|\][^]*?|[@-Z\\-_]/g
+
+function stripAnsi(text) {
+  return text.replace(ANSI_ESCAPE, '')
+}
+
 // Race a promise against a timeout so a dead daemon can't wedge the failure
 // path (an unanswered RPC would otherwise hang until the CI job limit).
 function withTimeout(promise, ms, label) {
@@ -82,7 +91,7 @@ function withTimeout(promise, ms, label) {
 }
 
 /**
- * Connect a control+stream client, create a session, write `command\r\n`, and
+ * Connect a control+stream client, create a session, submit `command` + CR, and
  * resolve once `expectRe` matches the accumulated PTY output (or reject on
  * timeout). Returns { output, diagnostics } on success. On timeout/error the
  * rejected Error carries `.diagnostics` and `.output` so the caller can tell
@@ -214,7 +223,9 @@ export async function runPtyEcho(options) {
             if (msg.sessionId === sessionId) {
               diagnostics.ourDataFrames++
               output += data
-              if (expectRe.test(output) && !settled) {
+              // Test against the ANSI-stripped stream: ConPTY interleaves the
+              // executed marker with cursor-move / SGR codes.
+              if (expectRe.test(stripAnsi(output)) && !settled) {
                 settled = true
                 clearTimeout(timer)
                 resolve({ output, diagnostics })
@@ -237,7 +248,10 @@ export async function runPtyEcho(options) {
           diagnostics.createResponse = payload
           return delay(writeDelayMs)
         })
-        .then(() => rpc('write', { sessionId, data: `${command}\r\n` }))
+        // Submit with a lone CR: PSReadLine treats CRLF as a soft newline
+        // (multiline continuation) and leaves the command typed but unexecuted;
+        // a bare CR is Enter.
+        .then(() => rpc('write', { sessionId, data: `${command}\r` }))
         .catch((err) => {
           rejectWith(err instanceof Error ? err : new Error(String(err)))
         })
