@@ -3361,8 +3361,9 @@ describe('registerPtyHandlers', () => {
         (call) => call[0] === 'pty:data' && (call[1] as { id: string }).id === result.id
       )
       expect(dataSends.length).toBeGreaterThan(0)
-      // Total chars ever handed to the renderer for this pty stay far below the
-      // 5 MB produced — the old backlog was trimmed, not buffered unbounded.
+      // Sanity bound only: with no acks the sent total is already gated by the
+      // pre-existing in-flight high-water caps, so this holds independent of the
+      // trim. The actual retained-backlog cap is proven by droppedBacklog below.
       const totalChars = dataSends.reduce(
         (sum, call) => sum + (call[1] as { data: string }).data.length,
         0
