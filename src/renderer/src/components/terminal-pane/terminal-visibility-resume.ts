@@ -144,11 +144,15 @@ export function recoverVisibleTerminalWindowWake({
     // Why: only a genuine wake may wipe the shared glyph atlas. The wipe makes
     // every same-config pane re-rasterize at once, and xterm's atlas page-merge
     // clear-model flag is consumed by one renderer (xterm.js #4480), so panes
-    // that lose that race paint garbled glyphs mid-stream. A plain refocus
-    // keeps the warm atlas and relies on the reveal repaint below.
+    // that lose that race paint garbled glyphs mid-stream.
     resetAndRefreshAllTerminalWebglAtlases()
+    manager.scheduleRevealRepaint()
+  } else {
+    // Why: the reveal repaint clears each pane's texture atlas (a shared,
+    // same-config wipe), so a plain refocus must use the atlas-preserving
+    // present instead — otherwise it re-arms the same mid-stream garble race.
+    manager.scheduleRevealPresent()
   }
-  manager.scheduleRevealRepaint()
 }
 
 function requestLightTabBacklogRecovery(manager: PaneManager): void {

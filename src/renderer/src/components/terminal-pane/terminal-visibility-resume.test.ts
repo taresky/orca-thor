@@ -31,13 +31,15 @@ type FakeManager = {
   getPanes: ReturnType<typeof vi.fn>
   resumeRendering: ReturnType<typeof vi.fn>
   scheduleRevealRepaint: ReturnType<typeof vi.fn>
+  scheduleRevealPresent: ReturnType<typeof vi.fn>
 }
 
 function createManager(order: string[] = []): FakeManager {
   return {
     getPanes: vi.fn(() => []),
     resumeRendering: vi.fn(() => order.push('resume-rendering')),
-    scheduleRevealRepaint: vi.fn(() => order.push('reveal-repaint'))
+    scheduleRevealRepaint: vi.fn(() => order.push('reveal-repaint')),
+    scheduleRevealPresent: vi.fn(() => order.push('reveal-present'))
   }
 }
 
@@ -79,7 +81,7 @@ describe('resumeTerminalVisibility reveal repaint', () => {
     expect(order).toEqual(['resume-rendering', 'reveal-repaint'])
   })
 
-  it('schedules the repaint on window-wake recovery', () => {
+  it('schedules the atlas-clearing repaint on genuine wake recovery', () => {
     const manager = createManager()
     recoverVisibleTerminalWindowWake({
       manager: manager as never as PaneManager,
@@ -88,6 +90,7 @@ describe('resumeTerminalVisibility reveal repaint', () => {
     })
 
     expect(manager.scheduleRevealRepaint).toHaveBeenCalledTimes(1)
+    expect(manager.scheduleRevealPresent).not.toHaveBeenCalled()
   })
 
   it('clears shared glyph atlases only on genuine wake recovery', async () => {
@@ -108,7 +111,9 @@ describe('resumeTerminalVisibility reveal repaint', () => {
     // Deliberate reversal of the #6354 focus-clear: wiping the shared atlas on
     // every refocus forces a mass re-rasterization that can hit xterm's atlas
     // page-merge race (#4480) and garble streaming panes. Focus recovery must
-    // still resume rendering and schedule the pane-scoped repaint.
+    // resume rendering and present WITHOUT the atlas-clearing reveal repaint —
+    // scheduleRevealRepaint clears each pane's (shared) atlas, so the refocus
+    // path must route to the atlas-preserving present instead.
     const { resetAndRefreshAllTerminalWebglAtlases } = vi.mocked(
       await import('@/lib/pane-manager/pane-manager-registry')
     )
@@ -121,6 +126,7 @@ describe('resumeTerminalVisibility reveal repaint', () => {
 
     expect(resetAndRefreshAllTerminalWebglAtlases).not.toHaveBeenCalled()
     expect(manager.resumeRendering).toHaveBeenCalledTimes(1)
-    expect(manager.scheduleRevealRepaint).toHaveBeenCalledTimes(1)
+    expect(manager.scheduleRevealPresent).toHaveBeenCalledTimes(1)
+    expect(manager.scheduleRevealRepaint).not.toHaveBeenCalled()
   })
 })
