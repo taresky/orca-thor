@@ -13,6 +13,10 @@ import { joinRemotePath } from '../ssh/ssh-remote-platform'
 import { sessionSortTime } from './session-scanner-accumulator'
 import type { FileWithMtime } from './session-scanner-types'
 import { errorMessage } from './session-scanner-values'
+import {
+  readCachedRemoteSessionParse,
+  storeRemoteSessionParse
+} from './remote-session-scanner-parse-cache'
 import { remoteSessionSources } from './remote-session-scanner-sources'
 import type {
   RemoteScannerContext,
@@ -194,13 +198,25 @@ async function parseRemoteSessionCandidate(
   context: RemoteScannerContext,
   issues: AiVaultScanIssue[]
 ): Promise<AiVaultSession | null> {
+  // A (mtime,size)-unchanged file skips the SSH body transfer and re-parse
+  // entirely; rescans previously re-read every candidate in full. Like the
+  // local cache, an unchanged Codex transcript keeps its cached index title.
+  const cached = readCachedRemoteSessionParse(context.executionHostId, candidate.file)
+  if (cached) {
+    return cached.session
+  }
   try {
     const read = await context.provider.readFile(candidate.file.path)
     if (read.isBinary) {
+      storeRemoteSessionParse(context.executionHostId, candidate.file, null)
       return null
     }
-    return candidate.source.parse(candidate.file, read.content, context)
+    const session = await candidate.source.parse(candidate.file, read.content, context)
+    storeRemoteSessionParse(context.executionHostId, candidate.file, session)
+    return session
   } catch (err) {
+    // Failures stay uncached so the issue resurfaces on every scan and a
+    // transient read error retries next time.
     issues.push({
       executionHostId: context.executionHostId,
       agent: candidate.source.agent,
@@ -247,7 +263,12 @@ async function statRemoteFile(
   try {
     const stat = await provider.stat(path)
     const mtimeMs = remoteStatMtimeMs(stat)
-    return { path, mtimeMs, modifiedAt: new Date(mtimeMs).toISOString() }
+    return {
+      path,
+      mtimeMs,
+      modifiedAt: new Date(mtimeMs).toISOString(),
+      sizeBytes: Number.isFinite(stat.size) ? stat.size : undefined
+    }
   } catch (err) {
     issues.push({ executionHostId, agent, path, message: errorMessage(err) })
     return null
