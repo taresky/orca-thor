@@ -6,59 +6,10 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger
 } from '@/components/ui/dropdown-menu'
-import {
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  ArrowUp,
-  Columns2,
-  PanelBottomClose,
-  PanelRightClose
-} from 'lucide-react'
-import type { TabSplitDirection } from '../../store/slices/tabs'
+import { PanelBottomClose, PanelRightClose, SquareTerminal } from 'lucide-react'
 import { translate } from '@/i18n/i18n'
-import { canMoveTabToNewPaneColumn, moveTabToNewPaneColumn } from './tab-move-to-pane-column'
+import { TabWorkspaceLayoutMenuSection } from './TabWorkspaceLayoutMenuSection'
 import { requestActiveTerminalPaneSplit } from './request-active-terminal-pane-split'
-
-const PANE_COLUMN_DIRECTIONS: TabSplitDirection[] = ['right', 'left', 'down', 'up']
-
-function moveTabDirectionIcon(direction: TabSplitDirection): React.JSX.Element {
-  switch (direction) {
-    case 'right':
-      return <ArrowRight className="size-3.5 shrink-0" />
-    case 'left':
-      return <ArrowLeft className="size-3.5 shrink-0" />
-    case 'down':
-      return <ArrowDown className="size-3.5 shrink-0" />
-    case 'up':
-      return <ArrowUp className="size-3.5 shrink-0" />
-  }
-}
-
-function moveTabDirectionLabel(direction: TabSplitDirection): string {
-  switch (direction) {
-    case 'right':
-      return translate(
-        'auto.components.tab.bar.TerminalTabSplitMenuSection.moveTabRight',
-        'Move tab right'
-      )
-    case 'left':
-      return translate(
-        'auto.components.tab.bar.TerminalTabSplitMenuSection.moveTabLeft',
-        'Move tab left'
-      )
-    case 'down':
-      return translate(
-        'auto.components.tab.bar.TerminalTabSplitMenuSection.moveTabDown',
-        'Move tab down'
-      )
-    case 'up':
-      return translate(
-        'auto.components.tab.bar.TerminalTabSplitMenuSection.moveTabUp',
-        'Move tab up'
-      )
-  }
-}
 
 export function TerminalTabSplitMenuSection({
   unifiedTabId,
@@ -79,8 +30,6 @@ export function TerminalTabSplitMenuSection({
   splitDownShortcut: string
   trailingSeparator?: boolean
 }): React.JSX.Element {
-  const canMoveTab = canMoveTabToNewPaneColumn(unifiedTabId, groupId)
-
   const splitActiveTerminalPane = (direction: 'vertical' | 'horizontal'): void => {
     if (!isActive) {
       onActivate(tabId)
@@ -90,26 +39,16 @@ export function TerminalTabSplitMenuSection({
 
   return (
     <>
+      <TabWorkspaceLayoutMenuSection unifiedTabId={unifiedTabId} groupId={groupId} />
       <DropdownMenuSub>
         <DropdownMenuSubTrigger className="[&>svg:last-child]:size-3.5">
-          <Columns2 className="size-3.5 shrink-0" />
-          {translate('auto.components.tab.bar.TerminalTabSplitMenuSection.split', 'Split')}
+          <SquareTerminal className="size-3.5 shrink-0" />
+          {translate(
+            'auto.components.tab.bar.TerminalTabSplitMenuSection.splitTerminal',
+            'Split terminal'
+          )}
         </DropdownMenuSubTrigger>
         <DropdownMenuSubContent className="min-w-[12rem]">
-          {canMoveTab
-            ? PANE_COLUMN_DIRECTIONS.map((direction) => (
-                <DropdownMenuItem
-                  key={direction}
-                  onSelect={() => {
-                    moveTabToNewPaneColumn({ unifiedTabId, groupId, direction })
-                  }}
-                >
-                  {moveTabDirectionIcon(direction)}
-                  {moveTabDirectionLabel(direction)}
-                </DropdownMenuItem>
-              ))
-            : null}
-          {canMoveTab ? <DropdownMenuSeparator /> : null}
           <DropdownMenuItem onSelect={() => splitActiveTerminalPane('vertical')}>
             <PanelRightClose className="size-3.5 shrink-0" />
             {translate(

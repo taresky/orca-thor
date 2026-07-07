@@ -2773,11 +2773,7 @@
             "a768f428f1": "탭 닫기"
           },
           "TerminalTabSplitMenuSection": {
-            "moveTabRight": "Move tab right",
-            "moveTabLeft": "Move tab left",
-            "moveTabDown": "Move tab down",
-            "moveTabUp": "Move tab up",
-            "split": "Split"
+            "splitTerminal": "Split terminal"
           }
         }
       },

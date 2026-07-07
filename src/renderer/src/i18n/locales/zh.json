@@ -2773,11 +2773,7 @@
             "a768f428f1": "关闭选项卡"
           },
           "TerminalTabSplitMenuSection": {
-            "moveTabRight": "Move tab right",
-            "moveTabLeft": "Move tab left",
-            "moveTabDown": "Move tab down",
-            "moveTabUp": "Move tab up",
-            "split": "Split"
+            "splitTerminal": "Split terminal"
           }
         }
       },

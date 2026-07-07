@@ -227,9 +227,10 @@ describe('SortableTabContextMenu', () => {
     storeMock.dropUnifiedTab.mockReturnValue(true)
     const { container } = renderMenu()
 
-    expect(container.textContent).toContain('Split')
+    expect(container.textContent).toContain('Move Tab to Split')
+    expect(container.textContent).toContain('Split terminal')
 
-    act(() => getButton(container, 'Move tab right').click())
+    act(() => getButton(container, 'Right').click())
     expect(storeMock.dropUnifiedTab).toHaveBeenCalledWith('tab-1', {
       groupId: 'group-1',
       splitDirection: 'right'
@@ -252,7 +253,7 @@ describe('SortableTabContextMenu', () => {
     }
     const { container } = renderMenu()
 
-    expect(container.textContent).not.toContain('Move tab right')
+    expect(container.textContent).not.toContain('Move Tab to Split')
     expect(container.textContent).toContain('Split terminal right')
   })
 })

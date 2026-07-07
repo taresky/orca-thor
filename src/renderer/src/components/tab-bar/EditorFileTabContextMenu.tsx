@@ -130,13 +130,13 @@ export function EditorFileTabContextMenu({
             onOpenRenameInput()
           }}
         >
-          <Pencil className="mr-1.5 size-3.5" />
+          <Pencil className="size-3.5" />
           {translate('auto.components.tab.bar.EditorFileTabContextMenu.68cc610e7f', 'Rename')}
           {renameShortcut ? <DropdownMenuShortcut>{renameShortcut}</DropdownMenuShortcut> : null}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={onTogglePin}>
-          {isPinned ? <PinOff className="mr-1.5 size-3.5" /> : <Pin className="mr-1.5 size-3.5" />}
+          {isPinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
           {isPinned
             ? translate('auto.components.tab.bar.EditorFileTabContextMenu.8e9d603a09', 'Unpin Tab')
             : translate('auto.components.tab.bar.EditorFileTabContextMenu.fdd29eb669', 'Pin Tab')}
@@ -196,7 +196,7 @@ export function EditorFileTabContextMenu({
             void window.api.ui.writeClipboardText(file.filePath)
           }}
         >
-          <Copy className="w-3.5 h-3.5 mr-1.5" />
+          <Copy className="size-3.5" />
           {translate('auto.components.tab.bar.EditorFileTabContextMenu.5b85754786', 'Copy Path')}
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -204,7 +204,7 @@ export function EditorFileTabContextMenu({
             void window.api.ui.writeClipboardText(file.relativePath)
           }}
         >
-          <Copy className="w-3.5 h-3.5 mr-1.5" />
+          <Copy className="size-3.5" />
           {translate(
             'auto.components.tab.bar.EditorFileTabContextMenu.52ce4f4605',
             'Copy Relative Path'
@@ -226,7 +226,7 @@ export function EditorFileTabContextMenu({
             window.api.shell.openPath(file.filePath)
           }}
         >
-          <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+          <ExternalLink className="size-3.5" />
           {revealLabel}
         </DropdownMenuItem>
       </DropdownMenuContent>
