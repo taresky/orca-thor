@@ -14435,6 +14435,66 @@ describe('connectPanePty', () => {
         shellForeground: false
       })
     })
+
+    it('re-confirms rather than trusting a leaked 133;D that races the recovery read', async () => {
+      // Why: an idle reattached agent (no launchAgent/hook/title) schedules the
+      // visible-pty recovery read. A full-screen agent's nested shell then leaks a
+      // 133;D onto the main PTY. Trusting that D would mark the pane shell-
+      // foreground and the sample gate would latch it, hiding the agent icon
+      // forever — instead the leak must re-confirm the foreground.
+      vi.useFakeTimers()
+      const { connectPanePty } = await import('./pty-connection')
+      const getForegroundProcess = vi.mocked(window.api.pty.getForegroundProcess)
+      getForegroundProcess.mockResolvedValue('codex')
+      const ptyId = 'pty-reattach-idle-codex-leaked-d'
+      const tabId = `tab-${ptyId}`
+      const dataCallbackRef: { current: ((data: string) => void) | null } = { current: null }
+      const transport = createMockTransport(ptyId)
+      transport.connect.mockImplementation(
+        async ({ sessionId, callbacks }: { sessionId?: string; callbacks?: ConnectCallbacks }) => {
+          dataCallbackRef.current = callbacks?.onData ?? null
+          return sessionId ? { id: sessionId } : null
+        }
+      )
+      transportFactoryQueue.push(transport)
+      const deps = createDeps({
+        tabId,
+        restoredLeafId: LEAF_1,
+        restoredPtyIdByLeafId: { [LEAF_1]: ptyId }
+      })
+      connectPanePty(createPane(1) as never, createManager(1) as never, deps as never)
+      await vi.advanceTimersByTimeAsync(20)
+      await flushAsyncTicks(20)
+
+      const cacheKey = makePaneKey(tabId, LEAF_1)
+      dataCallbackRef.current?.('\x1b]133;D;0\x07')
+
+      await advanceVisibleForegroundRead()
+
+      expect(mockStoreState.setPaneForegroundAgent).not.toHaveBeenCalledWith(cacheKey, {
+        agent: null,
+        shellForeground: true
+      })
+      expect(mockStoreState.setPaneForegroundAgent).toHaveBeenCalledWith(cacheKey, {
+        agent: 'codex',
+        shellForeground: false
+      })
+    })
+
+    it('never probes the foreground for a visible remote/SSH restored pane', async () => {
+      // Why: foreground reads are local-only (expensive RPCs, replayed OSC
+      // streams). isTrackablePtyId must keep remote/SSH panes off the recovery
+      // probe entirely, so the fix stays local-only.
+      vi.useFakeTimers()
+      const getForegroundProcess = vi.mocked(window.api.pty.getForegroundProcess)
+      getForegroundProcess.mockResolvedValue('codex')
+      const ptyId = 'remote:web-env-1@@pty-remote-idle-agent'
+
+      await connectRestoredPaneForForegroundSampling({ ptyId, tabId: 'tab-remote-idle-agent' })
+      await advanceVisibleForegroundRead()
+
+      expect(foregroundReadCallsFor(ptyId)).toHaveLength(0)
+    })
   })
 
   describe('terminal input liveness IPC gating (perf)', () => {
