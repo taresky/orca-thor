@@ -135,7 +135,8 @@ describe('createRuntimeClientEventsSync', () => {
         getDesiredEnvironmentIds: () => desired,
         subscribe,
         onEvent: vi.fn(),
-        retryDelayMs: 10
+        retryDelayMs: 10,
+        random: () => 1
       })
 
       sync.sync()
@@ -152,6 +153,155 @@ describe('createRuntimeClientEventsSync', () => {
       desired = []
       sync.sync()
       expect(unsubscribe).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('backs off exponentially with a cap while an environment keeps failing', async () => {
+    vi.useFakeTimers()
+    try {
+      const subscribe = vi.fn(
+        (): Promise<RuntimeClientEventSubscriptionHandle> =>
+          Promise.reject(new Error('unreachable'))
+      )
+      const sync = createRuntimeClientEventsSync({
+        getDesiredEnvironmentIds: () => ['A'],
+        subscribe,
+        onEvent: vi.fn(),
+        retryDelayMs: 10,
+        retryMaxDelayMs: 40,
+        random: () => 1
+      })
+
+      sync.sync()
+      await Promise.resolve()
+      expect(subscribe).toHaveBeenCalledTimes(1)
+
+      // Attempt 2 after 10ms (base).
+      await vi.advanceTimersByTimeAsync(10)
+      expect(subscribe).toHaveBeenCalledTimes(2)
+      // Attempt 3 after 20ms more (doubled) — not before.
+      await vi.advanceTimersByTimeAsync(19)
+      expect(subscribe).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(subscribe).toHaveBeenCalledTimes(3)
+      // Attempt 4 after 40ms more (doubled again, hits cap).
+      await vi.advanceTimersByTimeAsync(40)
+      expect(subscribe).toHaveBeenCalledTimes(4)
+      // Attempt 5 stays at the 40ms cap.
+      await vi.advanceTimersByTimeAsync(39)
+      expect(subscribe).toHaveBeenCalledTimes(4)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(subscribe).toHaveBeenCalledTimes(5)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('applies jitter below the full backoff delay', async () => {
+    vi.useFakeTimers()
+    try {
+      const subscribe = vi.fn(
+        (): Promise<RuntimeClientEventSubscriptionHandle> =>
+          Promise.reject(new Error('unreachable'))
+      )
+      const sync = createRuntimeClientEventsSync({
+        getDesiredEnvironmentIds: () => ['A'],
+        subscribe,
+        onEvent: vi.fn(),
+        retryDelayMs: 10,
+        random: () => 0
+      })
+
+      sync.sync()
+      await Promise.resolve()
+      expect(subscribe).toHaveBeenCalledTimes(1)
+
+      // random() => 0 halves the delay: retry at 5ms instead of 10ms.
+      await vi.advanceTimersByTimeAsync(5)
+      expect(subscribe).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('starts a fresh backoff epoch after a successful subscribe', async () => {
+    vi.useFakeTimers()
+    try {
+      let desired = ['A']
+      let failing = true
+      const unsubscribe = vi.fn()
+      const subscribe = vi.fn((): Promise<RuntimeClientEventSubscriptionHandle> => {
+        if (failing) {
+          return Promise.reject(new Error('unreachable'))
+        }
+        return Promise.resolve({ unsubscribe })
+      })
+      const sync = createRuntimeClientEventsSync({
+        getDesiredEnvironmentIds: () => desired,
+        subscribe,
+        onEvent: vi.fn(),
+        retryDelayMs: 10,
+        random: () => 1
+      })
+
+      // Two failures escalate the delay to 20ms.
+      sync.sync()
+      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(10)
+      expect(subscribe).toHaveBeenCalledTimes(2)
+
+      // Third attempt succeeds — failure count resets.
+      failing = false
+      await vi.advanceTimersByTimeAsync(20)
+      await Promise.resolve()
+      expect(subscribe).toHaveBeenCalledTimes(3)
+
+      // Env leaves and re-enters the desired set, then fails again: the first
+      // retry is back at the 10ms base, not the escalated delay.
+      desired = []
+      sync.sync()
+      desired = ['A']
+      failing = true
+      sync.sync()
+      await Promise.resolve()
+      expect(subscribe).toHaveBeenCalledTimes(4)
+      await vi.advanceTimersByTimeAsync(9)
+      expect(subscribe).toHaveBeenCalledTimes(4)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(subscribe).toHaveBeenCalledTimes(5)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('an external sync retries a waiting environment immediately (recovery path)', async () => {
+    vi.useFakeTimers()
+    try {
+      const subscribe = vi.fn(
+        (): Promise<RuntimeClientEventSubscriptionHandle> =>
+          Promise.reject(new Error('unreachable'))
+      )
+      const sync = createRuntimeClientEventsSync({
+        getDesiredEnvironmentIds: () => ['A'],
+        subscribe,
+        onEvent: vi.fn(),
+        retryDelayMs: 10_000,
+        random: () => 1
+      })
+
+      sync.sync()
+      // Let the rejection propagate through the then/catch chain so the retry
+      // timer is armed before the external sync fires.
+      await vi.advanceTimersByTimeAsync(0)
+      expect(subscribe).toHaveBeenCalledTimes(1)
+
+      // A reachable-set transition calls sync() directly; the pending backoff
+      // timer must not delay this immediate re-attempt.
+      sync.sync()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(subscribe).toHaveBeenCalledTimes(2)
     } finally {
       vi.useRealTimers()
     }
