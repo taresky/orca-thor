@@ -86,7 +86,7 @@ export const getGeneralEditorSearchEntries = createLocalizedCatalog(() => [
     ),
     description: translate(
       'auto.components.settings.general.search.be7ff2a967',
-      'Power editor typing with the Chromium EditContext API. Leave this off if typing ever stops working in the editor; the classic input path is more reliable.'
+      'Use a newer text-input engine (EditContext) for editors. If typing ever stops working, turn this off to use the classic input path, which is more reliable.'
     ),
     keywords: [
       ...translateSearchKeyword(

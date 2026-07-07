@@ -5222,7 +5222,7 @@
           "b82f86d7d2": "Corrector ortográfico de Rich Markdown",
           "5195f0b9ef": "Muestra subrayados y sugerencias ortográficas del navegador al editar Rich Markdown.",
           "30baaa4a0f": "Experimental Editor Input",
-          "f5663213a9": "Power editor typing with the Chromium EditContext API. Leave this off if typing ever stops working in the editor; the classic input path is more reliable."
+          "f5663213a9": "Use a newer text-input engine (EditContext) for editors. If typing ever stops working, turn this off to use the classic input path, which is more reliable."
         },
         "AdvancedNetworkSettingsSection": {
           "3e431564b5": "localhost, 127.0.0.1, *.internal",
@@ -7486,7 +7486,7 @@
             "d2d2d929c0": "Corrector ortográfico de Rich Markdown",
             "4497e2e2bb": "Muestra subrayados y sugerencias ortográficas del navegador al editar Rich Markdown.",
             "86dc23cb35": "Experimental Editor Input",
-            "be7ff2a967": "Power editor typing with the Chromium EditContext API. Leave this off if typing ever stops working in the editor; the classic input path is more reliable.",
+            "be7ff2a967": "Use a newer text-input engine (EditContext) for editors. If typing ever stops working, turn this off to use the classic input path, which is more reliable.",
             "7bf4b9e46d": "editcontext",
             "713c107d7b": "input",
             "7fe71eb34c": "typing",
