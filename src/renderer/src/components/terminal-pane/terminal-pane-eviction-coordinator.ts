@@ -31,15 +31,25 @@ import {
   shallowEqualBooleanMap
 } from './terminal-pane-eviction-inputs'
 import { logTerminalPaneEvictionBreadcrumb } from './terminal-pane-eviction-breadcrumbs'
+import { scheduleCancelableIdleCallback } from './cancelable-idle-callback'
+import {
+  __resetTerminalPaneEvictionSignalForTest,
+  bumpTeardownGeneration,
+  clearTabEvictingSignal,
+  markTabEvicting,
+  pruneTabEvictionSignal,
+  teardownGeneration
+} from './terminal-pane-eviction-signal'
+
+// Re-exported so the pane lifecycle keeps its single import site (gate #1).
+export { consumeTerminalPaneEviction } from './terminal-pane-eviction-signal'
 
 type ManagedTab = { worktreeId: string }
 
 const managedTabs = new Map<string, ManagedTab>()
 const lastVisibleAt = new Map<string, number>()
 const visibleTabIds = new Set<string>()
-const generationByTab = new Map<string, number>()
 const pendingTeardowns = new Map<string, { generation: number; cancel: () => void }>()
-const evictingTabIds = new Set<string>()
 
 let dwellTimer: ReturnType<typeof setTimeout> | null = null
 let recomputeScheduled = false
@@ -47,28 +57,6 @@ let initialized = false
 let storeUnsubscribe: (() => void) | null = null
 let selfDisableUnsubscribe: (() => void) | null = null
 let lastInputSignature = ''
-
-function scheduleIdle(callback: () => void): () => void {
-  // Why: requestIdleCallback is this-sensitive — an extracted unbound reference
-  // throws "Illegal invocation" in Chromium, so always invoke as a method.
-  const target = globalThis as {
-    requestIdleCallback?: (cb: () => void) => number
-    cancelIdleCallback?: (id: number) => void
-  }
-  if (
-    typeof target.requestIdleCallback === 'function' &&
-    typeof target.cancelIdleCallback === 'function'
-  ) {
-    const id = target.requestIdleCallback(callback)
-    return () => target.cancelIdleCallback?.(id)
-  }
-  const timer = setTimeout(callback, 0)
-  return () => clearTimeout(timer)
-}
-
-function bumpGeneration(tabId: string): void {
-  generationByTab.set(tabId, (generationByTab.get(tabId) ?? 0) + 1)
-}
 
 function cancelTeardown(tabId: string): void {
   const pending = pendingTeardowns.get(tabId)
@@ -130,8 +118,7 @@ function pruneClosedManagedTabs(state: StoreState): void {
       cancelTeardown(tabId)
       // Why: drop the per-tab generation and any stale eviction signal too, so a
       // closed tab leaves no residual coordinator state for the session.
-      generationByTab.delete(tabId)
-      evictingTabIds.delete(tabId)
+      pruneTabEvictionSignal(tabId)
     }
   }
   // Why: a tab closed while visible never reports hidden, so prune stale visible
@@ -145,8 +132,7 @@ function pruneClosedManagedTabs(state: StoreState): void {
         lastVisibleAt.delete(tabId)
         // Why: a tab closed while visible is never in managedTabs, so drop its
         // generation + eviction-signal here too (the managed loop above cannot).
-        generationByTab.delete(tabId)
-        evictingTabIds.delete(tabId)
+        pruneTabEvictionSignal(tabId)
       }
     }
   }
@@ -183,8 +169,8 @@ function scheduleTeardown(tabId: string): void {
   if (pendingTeardowns.has(tabId)) {
     return
   }
-  const generation = generationByTab.get(tabId) ?? 0
-  const cancel = scheduleIdle(() => {
+  const generation = teardownGeneration(tabId)
+  const cancel = scheduleCancelableIdleCallback(() => {
     pendingTeardowns.delete(tabId)
     fireTeardown(tabId, generation)
   })
@@ -194,7 +180,7 @@ function scheduleTeardown(tabId: string): void {
 function fireTeardown(tabId: string, scheduledGeneration: number): void {
   // Gate #9: a teardown queued for generation N is a no-op once the pane
   // re-warmed or a remount claimed it (both bump the generation).
-  if ((generationByTab.get(tabId) ?? 0) !== scheduledGeneration) {
+  if (teardownGeneration(tabId) !== scheduledGeneration) {
     return
   }
   if (!managedTabs.has(tabId) || visibleTabIds.has(tabId)) {
@@ -213,10 +199,10 @@ function fireTeardown(tabId: string, scheduledGeneration: number): void {
   const worktreeId = managedTabs.get(tabId)?.worktreeId
   // Signal the eviction to the pane lifecycle BEFORE the unmounting store write
   // so the React cleanup reads it and chooses park() over detach()/destroy().
-  evictingTabIds.add(tabId)
+  markTabEvicting(tabId)
   managedTabs.delete(tabId)
   lastVisibleAt.delete(tabId)
-  bumpGeneration(tabId)
+  bumpTeardownGeneration(tabId)
   logTerminalPaneEvictionBreadcrumb('evict', {
     tabId,
     worktreeId,
@@ -352,13 +338,13 @@ export function noteTerminalPaneVisibility(
   if (isVisible) {
     visibleTabIds.add(tabId)
     // Re-warm / remount claim: invalidate any queued teardown (gate #9).
-    bumpGeneration(tabId)
+    bumpTeardownGeneration(tabId)
     cancelTeardown(tabId)
     managedTabs.delete(tabId)
     // Why: a teardown that fired while this tab was already re-revealed can leave a
     // stale eviction signal; clear it on re-warm so a later close/reparent of the
     // tab is not misread as an eviction (park instead of destroy/detach).
-    evictingTabIds.delete(tabId)
+    clearTabEvictingSignal(tabId)
   } else {
     visibleTabIds.delete(tabId)
     managedTabs.set(tabId, { worktreeId })
@@ -396,14 +382,6 @@ export function seedTerminalPaneEvictionWarmSetOnEnable(): void {
   scheduleRecompute()
 }
 
-/** Read-and-clear the eviction signal for a tab. The pane lifecycle calls this
- *  during React cleanup to choose park() over detach()/destroy() (gate #1). */
-export function consumeTerminalPaneEviction(tabId: string): boolean {
-  const wasEvicting = evictingTabIds.has(tabId)
-  evictingTabIds.delete(tabId)
-  return wasEvicting
-}
-
 export function isTerminalPaneEvictionActive(): boolean {
   return managedTabs.size > 0 || evictedPaneCount() > 0
 }
@@ -417,8 +395,7 @@ export function __resetTerminalPaneEvictionCoordinatorForTest(): void {
   managedTabs.clear()
   lastVisibleAt.clear()
   visibleTabIds.clear()
-  generationByTab.clear()
-  evictingTabIds.clear()
+  __resetTerminalPaneEvictionSignalForTest()
   clearDwellTimer()
   recomputeScheduled = false
   lastInputSignature = ''
