@@ -103,6 +103,12 @@ export class DaemonServer {
   private lastInputAtBySessionId = new Map<string, number>()
   private stopStreamBacklogProbe: () => void = () => {}
   private idleExit: DaemonIdleExit | null = null
+  // Why: sockets accepted but not yet past hello are invisible to `clients`,
+  // so shutdown could otherwise strand them: a late hello would resurrect a
+  // half-shut server, and an open pre-hello socket would hold server.close()
+  // (and thus idle exit) open forever.
+  private openSockets = new Set<Socket>()
+  private shuttingDown = false
 
   // Why: main-process PTY IPC has the same recent-input bypass, but daemon
   // output reaches main only after this stream layer. Keeping the window here
@@ -139,7 +145,16 @@ export class DaemonServer {
         isIdle: () => this.clients.size === 0 && this.host.sessionCount() === 0,
         onExpired: () => {
           console.warn('[daemon] No sessions and no clients for the idle grace period — exiting')
-          void this.shutdown().then(() => onIdleExit())
+          // Why: idleness was just verified, so exiting after a failed
+          // shutdown cannot lose sessions — but staying alive would strand a
+          // half-shut daemon that can never re-arm its idle countdown.
+          void this.shutdown().then(
+            () => onIdleExit(),
+            (err) => {
+              console.error('[daemon] Idle shutdown failed — exiting anyway:', err)
+              onIdleExit()
+            }
+          )
         }
       })
     }
@@ -173,6 +188,10 @@ export class DaemonServer {
   }
 
   async shutdown(): Promise<void> {
+    // Why: hard barrier, set synchronously before any teardown — after this,
+    // no accepted socket may become a client and no RPC may create a session,
+    // so shutdown can never race a live PTY into a half-shut server.
+    this.shuttingDown = true
     this.stopStreamBacklogProbe()
     this.transientFactRelay.dispose()
     // Why: dispose before teardown mutates client/session counts, so the idle
@@ -186,6 +205,13 @@ export class DaemonServer {
       client.streamSocket?.destroy()
     }
     this.clients.clear()
+
+    // Why: pre-hello sockets are not in `clients`; leaving them open would
+    // hold server.close() — and therefore the idle-exit callback — forever.
+    for (const socket of this.openSockets) {
+      socket.destroy()
+    }
+    this.openSockets.clear()
 
     return new Promise<void>((resolve) => {
       if (this.server) {
@@ -203,6 +229,12 @@ export class DaemonServer {
   }
 
   private handleConnection(socket: Socket): void {
+    if (this.shuttingDown) {
+      socket.destroy()
+      return
+    }
+    this.openSockets.add(socket)
+    socket.once('close', () => this.openSockets.delete(socket))
     // Why: clients can send multibyte prompt/input text split across socket
     // chunks; keep UTF-8 sequences intact before NDJSON parsing.
     const decoder = new StringDecoder('utf8')
@@ -222,6 +254,13 @@ export class DaemonServer {
     msg: unknown,
     _parser: ReturnType<typeof createNdjsonParser>
   ): void {
+    // Why: a hello queued before shutdown destroyed its socket can still be
+    // delivered in the same tick; accepting it would register a client on a
+    // server whose host and listener are already torn down.
+    if (this.shuttingDown) {
+      socket.destroy()
+      return
+    }
     const hello = msg as HelloMessage
     if (hello.type !== 'hello') {
       this.log.log('client-hello-rejected', { reason: 'expected-hello' })
@@ -359,6 +398,9 @@ export class DaemonServer {
   }
 
   private async routeRequest(clientId: string, request: DaemonRequest): Promise<unknown> {
+    if (this.shuttingDown) {
+      throw new Error('Daemon server is shutting down')
+    }
     const client = this.clients.get(clientId)
 
     switch (request.type) {
