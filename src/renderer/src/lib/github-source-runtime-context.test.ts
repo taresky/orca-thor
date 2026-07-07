@@ -120,4 +120,26 @@ describe('getGitHubMutationRoutingSettings', () => {
       })
     ).toEqual({ kind: 'environment', environmentId: 'owner-runtime' })
   })
+
+  it('never routes a repo without an explicit owner to the globally focused runtime', () => {
+    const noOwnerRepo: RepoRuntimeOwnerState = {
+      settings: { activeRuntimeEnvironmentId: 'focused-runtime' },
+      repos: [{ id: 'repo-1', connectionId: null, executionHostId: null }]
+    }
+    expect(
+      resolveTarget(noOwnerRepo, 'repo-1', {
+        ...runtimeSourceContext,
+        hostId: 'local',
+        repoId: 'repo-1'
+      })
+    ).toEqual({ kind: 'local' })
+    expect(resolveTarget(noOwnerRepo, 'repo-1', null)).toEqual({ kind: 'local' })
+    expect(
+      resolveTarget(noOwnerRepo, 'repo-1', {
+        ...runtimeSourceContext,
+        hostId: 'runtime:source-runtime',
+        repoId: 'repo-1'
+      })
+    ).toEqual({ kind: 'environment', environmentId: 'source-runtime' })
+  })
 })
