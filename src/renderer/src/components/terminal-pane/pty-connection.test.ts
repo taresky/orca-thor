@@ -3711,12 +3711,17 @@ describe('connectPanePty', () => {
     // replay write grows the buffer and follows to the bottom, as xterm does.
     const remountPane = createPane(1)
     const remountBuffer = remountPane.terminal.buffer.active
+    // Model real xterm: write() queues and parses on a later macrotask (the
+    // WriteBuffer setTimeout path), so buffer state must NOT change until then.
+    // A synchronous mock hides the empty-buffer enforce bug this test pins.
     remountPane.terminal.write = vi.fn((data: string, callback?: () => void) => {
-      if (data.includes('parked-history')) {
-        remountBuffer.baseY = 40
-        remountBuffer.viewportY = 40
-      }
-      callback?.()
+      setTimeout(() => {
+        if (data.includes('parked-history')) {
+          remountBuffer.baseY = 40
+          remountBuffer.viewportY = 40
+        }
+        callback?.()
+      }, 0)
     }) as never
     const remountTracking = attachTerminalScrollIntentTracking(
       remountPane.terminal as never,
@@ -3734,6 +3739,11 @@ describe('connectPanePty', () => {
         'parked-history\r\n',
         expect.any(Function)
       )
+      // Yield real macrotasks so the deferred xterm-style parse callbacks run
+      // (flushAsyncTicks pumps microtasks only), then flush the enforce .then.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await flushAsyncTicks(10)
       // The empty pre-replay buffer must not be captured as the scroll target:
       // that pins the viewport to row 0 AND overwrites the durable intent to 0.
       expect(remountPane.terminal.scrollToLine).not.toHaveBeenCalledWith(0)
