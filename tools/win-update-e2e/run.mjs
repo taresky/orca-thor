@@ -197,13 +197,16 @@ async function runProof(ctx, args) {
   const tabIds = await listTabIds(session.page)
   log('sessions', `terminal ready; tab ids: ${tabIds.join(', ')}`)
 
+  // Baseline typed-input on the IDLE shell, before the perpetual marker loop
+  // takes over the foreground (a command typed against a running loop can't
+  // execute, so this must precede startMarker to be meaningful).
+  const echoBeforeUpdate = await probeEcho(session.page, runDir, 'echo-pre')
+  log('sessions', `pre-update echo interactive: ${echoBeforeUpdate}`)
+
   await startMarker(session.page, { canary, pidFile: markerPidFile, heartbeatFile })
   const markerLive = await probeHeartbeatAdvancing(heartbeatFile)
   created.markerPid = readIntFile(markerPidFile)
   log('marker', `pid=${created.markerPid} heartbeatAdvancing=${markerLive}`)
-
-  const echoBeforeUpdate = await probeEcho(session.page, runDir, 'echo-pre')
-  log('sessions', `pre-update echo interactive: ${echoBeforeUpdate}`)
 
   const preDaemon = resolveScopedDaemon(userDataDir)
   preDaemon.pids.forEach((p) => created.daemonPids.add(p))
