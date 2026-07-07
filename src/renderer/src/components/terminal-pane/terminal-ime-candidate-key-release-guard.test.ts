@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import type { XtermBypassEvent } from './xterm-bypass-policy'
 import {
   armTerminalImePendingCandidateKeyRelease,
   clearTerminalImePendingCandidateKeyRelease,
@@ -8,20 +7,7 @@ import {
   shouldApplyTerminalImePendingCandidateKeyRelease
 } from './terminal-ime-candidate-key-release-guard'
 import { TERMINAL_IME_CANDIDATE_GUARD_POST_COMPOSITION_MS } from './terminal-ime-composition-tracker'
-
-function event(overrides: Partial<XtermBypassEvent>): XtermBypassEvent {
-  return {
-    type: 'keydown',
-    key: '',
-    code: '',
-    defaultPrevented: false,
-    metaKey: false,
-    ctrlKey: false,
-    altKey: false,
-    shiftKey: false,
-    ...overrides
-  }
-}
+import { event } from './xterm-bypass-event-fixture'
 
 describe('terminal IME candidate key release guard', () => {
   it('recognizes only unmodified Space and digit candidate selectors', () => {

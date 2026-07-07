@@ -2,23 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   shouldBypassXtermKeyboardEvent,
   shouldPreventDefaultTerminalImeCandidateKey,
-  shouldSuppressTerminalImeKeyboardEvent,
-  type XtermBypassEvent
+  shouldSuppressTerminalImeKeyboardEvent
 } from './xterm-bypass-policy'
-
-function event(overrides: Partial<XtermBypassEvent>): XtermBypassEvent {
-  return {
-    type: 'keydown',
-    key: '',
-    code: '',
-    defaultPrevented: false,
-    metaKey: false,
-    ctrlKey: false,
-    altKey: false,
-    shiftKey: false,
-    ...overrides
-  }
-}
+import { event } from './xterm-bypass-event-fixture'
 
 describe('shouldBypassXtermKeyboardEvent — Windows/Linux', () => {
   const withSel = { isMac: false, hasSelection: true }
@@ -325,6 +311,15 @@ describe('shouldSuppressTerminalImeKeyboardEvent — Windows/Linux', () => {
       expect(
         shouldSuppressTerminalImeKeyboardEvent(
           event({ key: ' ', code: 'Space', ctrlKey: true }),
+          linuxPostCompositionGuard
+        )
+      ).toBe(false)
+    })
+
+    it('does not treat Shift+Space (fcitx full-/half-width toggle) as a candidate key', () => {
+      expect(
+        shouldSuppressTerminalImeKeyboardEvent(
+          event({ key: ' ', code: 'Space', shiftKey: true }),
           linuxPostCompositionGuard
         )
       ).toBe(false)
