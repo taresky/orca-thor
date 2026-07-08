@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { getExecutionHostLabel, type ExecutionHostId } from '../../../shared/execution-host'
-import type { ExecutionHostRegistryEntry } from '../../../shared/execution-host-registry'
+import type {
+  ExecutionHostHealth,
+  ExecutionHostRegistryEntry
+} from '../../../shared/execution-host-registry'
 import {
   PROJECT_HOST_SETUP_RUNTIME_CAPABILITY,
   WORKSPACE_RUN_CONTEXT_RUNTIME_CAPABILITY
@@ -215,6 +218,30 @@ describe('buildProjectHostSetupOptions', () => {
       })
     ])
   })
+
+  it.each([
+    ['connecting' as const, 'Connecting to host'],
+    ['disconnected' as const, 'Connect this host to set up projects'],
+    ['error' as const, 'Host connection needs attention']
+  ])(
+    'marks %s hosts unavailable before project setup guidance',
+    (health: ExecutionHostHealth, detail: string) => {
+      const options = buildProjectHostSetupOptions({
+        projectId: 'project-1',
+        eligibleRepos: [repo('local-repo')],
+        hosts: [host('local'), host('ssh:builder', { label: 'Builder', health })],
+        projectHostSetups: [setup('local', 'project-1', 'local', 'local-repo')]
+      })
+
+      expect(options.at(-1)).toMatchObject({
+        id: 'needs-setup:ssh:builder',
+        kind: 'needs-setup',
+        label: 'Builder',
+        detail,
+        isAvailable: false
+      })
+    }
+  )
 
   it('shows pending setup status for known hosts with non-ready setup metadata', () => {
     const options = buildProjectHostSetupOptions({

@@ -188,6 +188,15 @@ function getHostSetupAvailability(host: ExecutionHostRegistryEntry): {
       detail: 'Orca server version is incompatible'
     }
   }
+  // Why: disconnected hosts cannot confirm project setup or runtime capabilities,
+  // so connection state needs to win over setup guidance.
+  const healthUnavailableDetail = getHostHealthUnavailableDetail(host.health)
+  if (healthUnavailableDetail) {
+    return {
+      isAvailable: false,
+      detail: healthUnavailableDetail
+    }
+  }
   if (host.kind === 'runtime') {
     if (!host.capabilities) {
       return {
@@ -208,6 +217,23 @@ function getHostSetupAvailability(host: ExecutionHostRegistryEntry): {
   return {
     isAvailable: true,
     detail: ''
+  }
+}
+
+function getHostHealthUnavailableDetail(
+  health: ExecutionHostRegistryEntry['health']
+): string | null {
+  switch (health) {
+    case 'connecting':
+      return 'Connecting to host'
+    case 'disconnected':
+      return 'Connect this host to set up projects'
+    case 'error':
+      return 'Host connection needs attention'
+    case 'available':
+    case 'blocked':
+    case 'local':
+      return null
   }
 }
 
