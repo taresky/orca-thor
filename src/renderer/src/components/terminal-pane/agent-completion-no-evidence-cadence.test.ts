@@ -44,7 +44,8 @@ function createCoordinator(
 describe('agent completion no-evidence inspection cadence', () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    // Pin cadence jitter to 1.0 so tick counts are exact.
+    // Math.random = 0.5 makes the ±10% jitter factor exactly 1.0, so tick
+    // counts below are exact.
     vi.spyOn(Math, 'random').mockReturnValue(0.5)
   })
 
