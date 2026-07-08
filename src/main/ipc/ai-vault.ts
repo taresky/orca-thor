@@ -151,6 +151,7 @@ async function scanSshAiVaultSessions(
     executionHostId: hostInfo.executionHostId,
     remoteHome: hostInfo.remoteHome,
     hostPlatform: hostInfo.hostPlatform,
+    connectionIdentity: hostInfo.connectionIdentity,
     limit: args?.limit,
     scopePaths: args?.scopePaths
   })

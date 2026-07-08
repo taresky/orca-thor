@@ -20,12 +20,17 @@ const CLAUDE_ONE = '/home/ada/.claude/projects/repo/one.jsonl'
 const CLAUDE_TWO = '/home/ada/.claude/projects/repo/two.jsonl'
 const CODEX_A = '/home/ada/.codex/sessions/codex-a.jsonl'
 
-function scan(provider: MemoryRemoteProvider, executionHostId: ExecutionHostId = 'ssh:dev-box') {
+function scan(
+  provider: MemoryRemoteProvider,
+  executionHostId: ExecutionHostId = 'ssh:dev-box',
+  connectionIdentity: string | null = null
+) {
   return scanRemoteAiVaultSessions({
     provider,
     executionHostId,
     remoteHome: '/home/ada',
-    hostPlatform: getRemoteHostPlatform('linux-x64')
+    hostPlatform: getRemoteHostPlatform('linux-x64'),
+    connectionIdentity
   })
 }
 
@@ -150,25 +155,63 @@ describe('remote session parse cache', () => {
     expect(provider.readFileCalls).toEqual([CLAUDE_ONE])
   })
 
+  it('drops entries when the same target id points at a different machine', async () => {
+    // Same target id, same path, same (mtime,size) — only the machine behind
+    // the connection changed (ssh:updateTarget / config import / reprovision).
+    const content = claudeTranscript({ sessionId: 'one', title: 'Machine A session' })
+    const machineA = new MemoryRemoteProvider()
+    machineA.addFile(CLAUDE_ONE, content, 10)
+    await scan(machineA, 'ssh:dev-box', 'identity-a')
+    machineA.clearReadFileCalls()
+    await scan(machineA, 'ssh:dev-box', 'identity-a')
+    expect(machineA.readFileCalls).toEqual([])
+
+    const machineB = new MemoryRemoteProvider()
+    const contentB = claudeTranscript({ sessionId: 'one', title: 'Machine B session' })
+    // Equal size + equal mtime: only the identity gate can force the re-read.
+    expect(contentB.length).toBe(content.length)
+    machineB.addFile(CLAUDE_ONE, contentB, 10)
+    const repointed = await scan(machineB, 'ssh:dev-box', 'identity-b')
+    expect(machineB.readFileCalls).toEqual([CLAUDE_ONE])
+    expect(repointed.sessions[0]?.title).toBe('Machine B session')
+
+    // The new identity now caches normally.
+    machineB.clearReadFileCalls()
+    await scan(machineB, 'ssh:dev-box', 'identity-b')
+    expect(machineB.readFileCalls).toEqual([])
+  })
+
   it('bounds entries per host, evicting least recently used first', () => {
-    storeRemoteSessionParse('ssh:host-b', fileAt('/other-host'), null)
+    storeRemoteSessionParse('ssh:host-b', null, fileAt('/other-host'), null)
     for (let index = 0; index < REMOTE_PARSE_CACHE_MAX_ENTRIES_PER_HOST; index++) {
-      storeRemoteSessionParse('ssh:host-a', fileAt(`/f${index}`), null)
+      storeRemoteSessionParse('ssh:host-a', null, fileAt(`/f${index}`), null)
     }
 
     // Reading /f0 refreshes its recency, so the overflow evicts /f1 instead.
-    expect(readCachedRemoteSessionParse('ssh:host-a', fileAt('/f0'))).not.toBeNull()
-    storeRemoteSessionParse('ssh:host-a', fileAt('/overflow'), null)
+    expect(readCachedRemoteSessionParse('ssh:host-a', null, fileAt('/f0'))).not.toBeNull()
+    storeRemoteSessionParse('ssh:host-a', null, fileAt('/overflow'), null)
 
-    expect(readCachedRemoteSessionParse('ssh:host-a', fileAt('/f1'))).toBeNull()
-    expect(readCachedRemoteSessionParse('ssh:host-a', fileAt('/f0'))).not.toBeNull()
-    expect(readCachedRemoteSessionParse('ssh:host-a', fileAt('/overflow'))).not.toBeNull()
-    expect(readCachedRemoteSessionParse('ssh:host-b', fileAt('/other-host'))).not.toBeNull()
+    expect(readCachedRemoteSessionParse('ssh:host-a', null, fileAt('/f1'))).toBeNull()
+    expect(readCachedRemoteSessionParse('ssh:host-a', null, fileAt('/f0'))).not.toBeNull()
+    expect(readCachedRemoteSessionParse('ssh:host-a', null, fileAt('/overflow'))).not.toBeNull()
+    expect(readCachedRemoteSessionParse('ssh:host-b', null, fileAt('/other-host'))).not.toBeNull()
   })
 
   it('misses when the stat changed and when the host was never scanned', () => {
-    storeRemoteSessionParse('ssh:host-a', fileAt('/f', 1), null)
-    expect(readCachedRemoteSessionParse('ssh:host-a', fileAt('/f', 2))).toBeNull()
-    expect(readCachedRemoteSessionParse('ssh:host-c', fileAt('/f', 1))).toBeNull()
+    storeRemoteSessionParse('ssh:host-a', null, fileAt('/f', 1), null)
+    expect(readCachedRemoteSessionParse('ssh:host-a', null, fileAt('/f', 2))).toBeNull()
+    expect(readCachedRemoteSessionParse('ssh:host-c', null, fileAt('/f', 1))).toBeNull()
+  })
+
+  it('only serves entries whose connection identity matches exactly', () => {
+    storeRemoteSessionParse('ssh:host-a', 'identity-a', fileAt('/f'), null)
+    expect(readCachedRemoteSessionParse('ssh:host-a', 'identity-b', fileAt('/f'))).toBeNull()
+    expect(readCachedRemoteSessionParse('ssh:host-a', null, fileAt('/f'))).toBeNull()
+    expect(readCachedRemoteSessionParse('ssh:host-a', 'identity-a', fileAt('/f'))).not.toBeNull()
+
+    // Storing under a new identity resets the host, so switching back misses.
+    storeRemoteSessionParse('ssh:host-a', 'identity-b', fileAt('/g'), null)
+    expect(readCachedRemoteSessionParse('ssh:host-a', 'identity-a', fileAt('/f'))).toBeNull()
+    expect(readCachedRemoteSessionParse('ssh:host-a', 'identity-b', fileAt('/g'))).not.toBeNull()
   })
 })
