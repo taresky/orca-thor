@@ -51,9 +51,10 @@ export function createPromptEchoScanner(pastedContent: string): PromptEchoScanne
   const folded = foldTerminalTextForEchoMatch(pastedContent)
   const head = folded.slice(0, SAMPLE_LENGTH)
   const tail = folded.length > SAMPLE_LENGTH ? folded.slice(-SAMPLE_LENGTH) : ''
-  // Why: only content that folds to nothing (punctuation/whitespace-only
-  // prompts) is genuinely impossible to match — treat any post-paste render as
-  // echo there rather than blocking delivery forever. Short-but-nonempty
+  // Why: only content that folds to nothing (no letters or digits — e.g.
+  // punctuation, whitespace, or symbol/emoji-only prompts) is genuinely
+  // impossible to match, so treat any post-paste render as echo there rather
+  // than blocking delivery forever. Short-but-nonempty
   // prompts (e.g. "fix ci") must still match on the head sample below so a
   // swallow screen that renders none of their characters withholds the submit
   // (#7466); firing on an arbitrary redraw would resubmit the exact bug.
