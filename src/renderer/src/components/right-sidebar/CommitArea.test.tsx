@@ -7,6 +7,7 @@ import {
 } from './source-control-primary-action'
 import { resolveDropdownItems, type DropdownActionKind } from './source-control-dropdown-items'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { deriveSourceControlPushRecovery } from './source-control-push-recovery'
 
 function buildInputs(overrides: Partial<PrimaryActionInputs> = {}): PrimaryActionInputs {
   return {
@@ -31,8 +32,7 @@ function baseProps(overrides: Partial<PrimaryActionInputs> = {}) {
     commitMessage: 'feat: add commit area',
     commitError: null as string | null,
     commitFailureRecoveryPrompt: null as string | null,
-    pushFailureRawError: null as string | null,
-    pushFailureRecoveryPrompt: null as string | null,
+    pushRecovery: null as ReturnType<typeof deriveSourceControlPushRecovery>,
     remoteActionError: null as string | null,
     isCommitting: inputs.isCommitting,
     isFixingCommitFailureWithAI: false,
@@ -57,6 +57,29 @@ function baseProps(overrides: Partial<PrimaryActionInputs> = {}) {
     onPrimaryAction: vi.fn(),
     onDropdownAction: vi.fn() as (kind: DropdownActionKind) => void
   }
+}
+
+function buildPushRecovery(
+  rawError: string
+): NonNullable<ReturnType<typeof deriveSourceControlPushRecovery>> {
+  const recovery = deriveSourceControlPushRecovery({
+    actionError: {
+      kind: 'push',
+      message: 'Push blocked',
+      rawError,
+      branchName: 'main',
+      worktreePath: '/repo',
+      entriesSnapshot: [],
+      entriesSnapshotTotalCount: 0,
+      sequence: 1
+    },
+    currentBranchName: 'main',
+    currentSequence: 1
+  })
+  if (!recovery) {
+    throw new Error('push recovery was not derived')
+  }
+  return recovery
 }
 
 function renderCommitArea(props: Parameters<typeof CommitArea>[0]): string {
@@ -251,8 +274,7 @@ describe('CommitArea', () => {
       "error: failed to push some refs to 'origin'\nhusky - pre-push hook exited with code 1\neslint found 2 errors"
     const markup = renderCommitArea({
       ...baseProps(),
-      pushFailureRawError: raw,
-      pushFailureRecoveryPrompt: 'Fix this push failure.'
+      pushRecovery: buildPushRecovery(raw)
     })
 
     expect(markup).toContain('id="commit-area-push-error"')
@@ -266,8 +288,7 @@ describe('CommitArea', () => {
   it('hides push failure AI actions when Source Control AI actions are hidden', () => {
     const markup = renderCommitArea({
       ...baseProps(),
-      pushFailureRawError: 'husky - pre-push hook failed',
-      pushFailureRecoveryPrompt: 'Fix this push failure.',
+      pushRecovery: buildPushRecovery('husky - pre-push hook failed'),
       sourceControlAiActionsVisible: false
     })
 

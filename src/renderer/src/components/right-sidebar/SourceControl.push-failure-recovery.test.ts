@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   appendPushFailureCustomInstruction,
-  buildFixPushFailurePrompt,
-  buildPushFailureAgentCommandInput
-} from './SourceControl'
+  buildFixPushFailurePrompt
+} from '../../../../shared/source-control-push-failure'
+import { buildPushFailureAgentCommandInput } from '../../../../shared/source-control-push-failure-agent-command'
 
 describe('SourceControl push failure recovery prompt', () => {
   it('leaves blank launch templates blank so the launcher can reject them', () => {

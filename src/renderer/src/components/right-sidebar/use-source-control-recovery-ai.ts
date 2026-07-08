@@ -1,28 +1,26 @@
 import { useCallback, useMemo, useState } from 'react'
-import type { GitStatusEntry } from '../../../../shared/types'
 import type {
   SourceControlActionRecipe,
   SourceControlLaunchActionId
 } from '../../../../shared/source-control-ai-actions'
-import { buildFixCommitFailurePrompt, buildFixPushFailurePrompt } from './source-control-ai-prompts'
+import type { GitStatusEntry } from '../../../../shared/types'
+import { buildFixCommitFailurePrompt } from './source-control-ai-prompts'
 import { summarizeCommitFailure } from './commit-failure-summary'
-import { isPushHookFailure, summarizePushFailure } from './push-failure-summary'
-import { launchCommitFailureAgentWithDefault } from './source-control-ai-commit-failure-launch'
-import { launchPushFailureAgentWithDefault } from './source-control-ai-push-failure-launch'
+import {
+  getDefaultSourceControlRecoveryLaunchCopy,
+  launchSourceControlRecoveryAgentWithDefault
+} from './source-control-ai-recovery-launch'
 import type { SourceControlAiStoreSnapshot } from './source-control-ai-controller-types'
 
 type SourceControlRecoveryAiParams = {
   activeWorktreeId: string | null | undefined
-  activeConnectionId: string | null | undefined
   activeGroupId: string | null | undefined
   activeSourceControlLaunchPlatform: NodeJS.Platform
   sourceRepoConnectionId?: string | null
   worktreePath: string | null
   commitMessage: string
   commitError: string | null
-  pushFailureRawError: string | null
-  pushFailureEntries: Pick<GitStatusEntry, 'path' | 'status' | 'area'>[]
-  branchName: string | null
+  pushRecoveryPrompt: string | null
   stagedEntries: Pick<GitStatusEntry, 'path' | 'status' | 'area'>[]
   getLaunchActionRecipe: (actionId: SourceControlLaunchActionId) => SourceControlActionRecipe
   getStoreState: () => SourceControlAiStoreSnapshot
@@ -30,16 +28,13 @@ type SourceControlRecoveryAiParams = {
 
 export function useSourceControlRecoveryAi({
   activeWorktreeId,
-  activeConnectionId,
   activeGroupId,
   activeSourceControlLaunchPlatform,
   sourceRepoConnectionId,
   worktreePath,
   commitMessage,
   commitError,
-  pushFailureRawError,
-  pushFailureEntries,
-  branchName,
+  pushRecoveryPrompt,
   stagedEntries,
   getLaunchActionRecipe,
   getStoreState
@@ -60,20 +55,6 @@ export function useSourceControlRecoveryAi({
         : null,
     [commitError, commitMessage, stagedEntries, worktreePath]
   )
-  const pushFailureRecoveryPrompt = useMemo(
-    () =>
-      pushFailureRawError && isPushHookFailure(pushFailureRawError)
-        ? buildFixPushFailurePrompt({
-            summary: summarizePushFailure(pushFailureRawError),
-            error: pushFailureRawError,
-            entries: pushFailureEntries,
-            worktreePath,
-            branchName
-          })
-        : null,
-    [branchName, pushFailureEntries, pushFailureRawError, worktreePath]
-  )
-
   const handleFixCommitFailureWithAI = useCallback(
     async (promptOverride?: string): Promise<boolean> => {
       if (isLaunchingCommitFailureAgent || !activeWorktreeId || !commitError) {
@@ -82,15 +63,17 @@ export function useSourceControlRecoveryAi({
 
       setIsLaunchingCommitFailureAgent(true)
       try {
-        return await launchCommitFailureAgentWithDefault({
+        return await launchSourceControlRecoveryAgentWithDefault({
           activeWorktreeId,
           activeGroupId,
           activeSourceControlLaunchPlatform,
-          sourceRepoConnectionId: activeConnectionId ?? sourceRepoConnectionId ?? null,
-          commitFailureRecoveryPrompt,
+          sourceRepoConnectionId,
+          actionId: 'fixCommitFailure',
+          basePrompt: commitFailureRecoveryPrompt,
           promptOverride,
           getLaunchActionRecipe,
-          getStoreState
+          getStoreState,
+          copy: getDefaultSourceControlRecoveryLaunchCopy('commit')
         })
       } finally {
         setIsLaunchingCommitFailureAgent(false)
@@ -98,7 +81,6 @@ export function useSourceControlRecoveryAi({
     },
     [
       activeGroupId,
-      activeConnectionId,
       activeWorktreeId,
       activeSourceControlLaunchPlatform,
       commitError,
@@ -112,21 +94,23 @@ export function useSourceControlRecoveryAi({
 
   const handleFixPushFailureWithAI = useCallback(
     async (promptOverride?: string): Promise<boolean> => {
-      if (isLaunchingPushFailureAgent || !activeWorktreeId || !pushFailureRawError) {
+      if (isLaunchingPushFailureAgent || !activeWorktreeId || !pushRecoveryPrompt) {
         return false
       }
 
       setIsLaunchingPushFailureAgent(true)
       try {
-        return await launchPushFailureAgentWithDefault({
+        return await launchSourceControlRecoveryAgentWithDefault({
           activeWorktreeId,
           activeGroupId,
           activeSourceControlLaunchPlatform,
-          sourceRepoConnectionId: activeConnectionId ?? sourceRepoConnectionId ?? null,
-          pushFailureRecoveryPrompt,
+          sourceRepoConnectionId,
+          actionId: 'fixPushFailure',
+          basePrompt: pushRecoveryPrompt,
           promptOverride,
           getLaunchActionRecipe,
-          getStoreState
+          getStoreState,
+          copy: getDefaultSourceControlRecoveryLaunchCopy('push')
         })
       } finally {
         setIsLaunchingPushFailureAgent(false)
@@ -134,14 +118,12 @@ export function useSourceControlRecoveryAi({
     },
     [
       activeGroupId,
-      activeConnectionId,
       activeWorktreeId,
       activeSourceControlLaunchPlatform,
       getLaunchActionRecipe,
       getStoreState,
       isLaunchingPushFailureAgent,
-      pushFailureRawError,
-      pushFailureRecoveryPrompt,
+      pushRecoveryPrompt,
       sourceRepoConnectionId
     ]
   )
@@ -150,7 +132,7 @@ export function useSourceControlRecoveryAi({
     isLaunchingCommitFailureAgent,
     isLaunchingPushFailureAgent,
     commitFailureRecoveryPrompt,
-    pushFailureRecoveryPrompt,
+    pushFailureRecoveryPrompt: pushRecoveryPrompt,
     handleFixCommitFailureWithAI,
     handleFixPushFailureWithAI
   }

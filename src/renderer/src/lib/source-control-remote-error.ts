@@ -9,6 +9,8 @@ import {
 
 const REMOTE_OPERATION_FAILED_MESSAGE = 'Remote operation failed'
 const REMOTE_OPERATION_DETAIL_MAX_LENGTH = 200
+const SYNC_PUSH_STAGE_ERROR = Symbol('source-control-sync-push-stage-error')
+type SyncPushStageMarkedError = Error & { [SYNC_PUSH_STAGE_ERROR]?: true }
 
 // Why: arbitrarily long git stderr lines (for instance, a multi-kilobyte
 // server-side pre-receive hook message) should not blow up the toast. Cap the
@@ -86,9 +88,26 @@ export type RemoteOperationErrorOptions = {
   isPush?: boolean
   isForcePush?: boolean
   isSync?: boolean
+  isSyncPushStage?: boolean
   isFetch?: boolean
   isFastForward?: boolean
   isRebase?: boolean
+}
+
+export function markSyncPushStageError<T>(error: T): T {
+  if (error instanceof Error) {
+    Object.defineProperty(error, SYNC_PUSH_STAGE_ERROR, {
+      configurable: true,
+      value: true
+    })
+  }
+  return error
+}
+
+export function isSyncPushStageError(error: unknown): boolean {
+  return (
+    error instanceof Error && (error as SyncPushStageMarkedError)[SYNC_PUSH_STAGE_ERROR] === true
+  )
 }
 
 export function resolveRemoteOperationErrorMessage(
@@ -145,14 +164,13 @@ export function resolveRemoteOperationErrorMessage(
     }
   }
 
-  if (
-    (options?.isPush || options?.isForcePush || options?.publish || options?.isSync) &&
-    isPushHookFailure(error.message)
-  ) {
+  const isPushLikeOperation =
+    options?.isPush || options?.isForcePush || options?.publish || options?.isSyncPushStage
+  if (isPushLikeOperation && isPushHookFailure(error.message)) {
     const summary = summarizePushFailure(error.message)
     const operationLabel = options?.publish
       ? 'Publish Branch'
-      : options?.isSync
+      : options?.isSyncPushStage
         ? 'Sync'
         : options?.isForcePush
           ? 'Force Push'

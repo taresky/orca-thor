@@ -1,7 +1,4 @@
-import {
-  DEFAULT_SOURCE_CONTROL_ACTION_COMMAND_TEMPLATES,
-  renderSourceControlActionCommandTemplate
-} from './source-control-ai-actions'
+import { buildSourceControlRecoveryAgentCommandInput } from './source-control-recovery-agent-command'
 
 export function buildPushFailureAgentCommandInput({
   promptOverride,
@@ -12,11 +9,10 @@ export function buildPushFailureAgentCommandInput({
   commandInputTemplate?: string | null
   basePrompt: string
 }): string {
-  return (
-    promptOverride ??
-    renderSourceControlActionCommandTemplate(
-      commandInputTemplate ?? DEFAULT_SOURCE_CONTROL_ACTION_COMMAND_TEMPLATES.fixPushFailure,
-      { basePrompt }
-    )
-  ).trim()
+  return buildSourceControlRecoveryAgentCommandInput({
+    actionId: 'fixPushFailure',
+    promptOverride,
+    commandInputTemplate,
+    basePrompt
+  })
 }
