@@ -44,9 +44,12 @@ export function sanitizeBracketedPasteContent(content: string): string {
 // or (2) the launch fails outright. The hard timeout caps the wait so a
 // stuck launch doesn't pin a Promise forever.
 const READINESS_TIMEOUT_MS = 8000
-// Why: a live composer repaints the pasted text within one frame; the window
-// only needs to absorb remote-PTY round-trips and slow first paints.
-const ECHO_VERIFY_TIMEOUT_MS = 3000
+// Why: readiness can fire on the shell's own bracketed-paste handshake while
+// the agent binary is still booting — the paste then sits in the TTY buffer
+// and only renders when the TUI drains stdin, several seconds later. The
+// window must absorb that cold boot (plus remote-PTY round-trips); a slow
+// verdict is safe because the submit Enter stays withheld until the echo.
+const ECHO_VERIFY_TIMEOUT_MS = 10_000
 
 export type PasteDeliveryTimeoutReason = 'readiness-timeout' | 'echo-timeout'
 

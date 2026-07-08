@@ -122,6 +122,26 @@ describe('pasteDraftWhenAgentReady echo verification', () => {
     expect(onTimeout).not.toHaveBeenCalled()
   })
 
+  it('verifies a late echo from an agent that was still booting when the paste landed', async () => {
+    const { promise, onTimeout } = startVerifiedPaste()
+    await flushMicrotasks()
+
+    testState.ptyObserver?.(`${DECSET_BRACKETED_PASTE}${CODEX_COMPOSER_PROMPT_RENDER}`)
+    await flushMicrotasks()
+    expect(testState.sendRuntimePtyInputVerified).toHaveBeenCalledTimes(1)
+
+    // Cold-booting agents drain the buffered paste seconds later; the echo
+    // must still verify and submit once it renders.
+    await vi.advanceTimersByTimeAsync(6000)
+    testState.ptyObserver?.(CODEX_VERBATIM_ECHO)
+    await flushMicrotasks()
+    await vi.advanceTimersByTimeAsync(50)
+
+    await expect(promise).resolves.toBe(true)
+    expect(testState.sendRuntimePtyInputVerified).toHaveBeenNthCalledWith(2, {}, 'pty-1', '\r')
+    expect(onTimeout).not.toHaveBeenCalled()
+  })
+
   it('withholds the Enter and reports echo-timeout when the paste never renders', async () => {
     const { promise, onTimeout } = startVerifiedPaste()
     await flushMicrotasks()
@@ -132,7 +152,7 @@ describe('pasteDraftWhenAgentReady echo verification', () => {
 
     // Trust/update screens only redraw; the pasted characters never render.
     testState.ptyObserver?.(TRUST_SCREEN_REDRAW)
-    await vi.advanceTimersByTimeAsync(3000)
+    await vi.advanceTimersByTimeAsync(10_000)
 
     await expect(promise).resolves.toBe(false)
     expect(testState.sendRuntimePtyInputVerified).toHaveBeenCalledTimes(1)
