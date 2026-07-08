@@ -113,6 +113,10 @@ import {
   type ExecutionHostId
 } from '../shared/execution-host'
 import { toRelaySshPtyId } from './providers/ssh-pty-id'
+import {
+  migrateUiHostScopeSshTargetId,
+  migrateWorkspaceSessionSshTargetId
+} from './ssh/ssh-target-id-migration'
 import { isWslUncPath } from '../shared/wsl-paths'
 import {
   isTerminalLeafId,
@@ -6130,13 +6134,60 @@ export class Store {
         metaChanged = true
       }
     }
-    // Why: repo-row rewrites can affect host-setup compatibility, but meta-only
-    // rewrites cannot — keep that sync under the repo gate. Persist whenever
-    // either repos OR metas changed, so meta-only re-points aren't lost on quit.
-    if (repoCount > 0) {
+    // Why: the old id also survives in session pty ids, the startup reconnect
+    // list, sleeping-agent records, host setups, host-scope UI, and pty leases;
+    // any un-migrated carrier later throws `SSH target not found` (STA-1468).
+    let carrierChanged = migrateWorkspaceSessionSshTargetId(
+      this.state.workspaceSession,
+      oldTargetId,
+      newTargetId
+    )
+    for (const session of Object.values(this.state.workspaceSessionsByHostId ?? {})) {
+      if (session && migrateWorkspaceSessionSshTargetId(session, oldTargetId, newTargetId)) {
+        carrierChanged = true
+      }
+    }
+    if (migrateUiHostScopeSshTargetId(this.state.ui, oldTargetId, newTargetId)) {
+      carrierChanged = true
+    }
+    for (const lease of this.state.sshRemotePtyLeases ?? []) {
+      if (lease.targetId === oldTargetId) {
+        lease.targetId = newTargetId
+        carrierChanged = true
+      }
+    }
+    let setupsChanged = false
+    const keptSetups: ProjectHostSetup[] = []
+    for (const setup of this.state.projectHostSetups) {
+      if (setup.hostId !== oldHostId) {
+        keptSetups.push(setup)
+        continue
+      }
+      const duplicate = this.state.projectHostSetups.some(
+        (entry) =>
+          entry !== setup && entry.projectId === setup.projectId && entry.hostId === newHostId
+      )
+      // Why: a setup already exists for the re-added host — the old row is a
+      // stale ghost that would violate the (projectId, hostId) uniqueness.
+      if (duplicate) {
+        setupsChanged = true
+        continue
+      }
+      setup.hostId = newHostId
+      setup.updatedAt = Date.now()
+      keptSetups.push(setup)
+      setupsChanged = true
+    }
+    if (setupsChanged) {
+      this.state.projectHostSetups = keptSetups
+    }
+    // Why: repo-row and host-setup rewrites can affect host-setup compatibility,
+    // but meta-only rewrites cannot — keep that sync under this gate. Persist
+    // whenever anything changed, so partial re-points aren't lost on quit.
+    if (repoCount > 0 || setupsChanged) {
       this.syncProjectHostSetupCompatibilityState()
     }
-    if (repoCount > 0 || metaChanged) {
+    if (repoCount > 0 || metaChanged || carrierChanged || setupsChanged) {
       this.scheduleSave()
     }
     return repoCount

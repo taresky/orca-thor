@@ -3188,6 +3188,91 @@ describe('Store', () => {
     expect(reloaded.getWorktreeMeta('r1::/remote/wt')?.hostId).toBe('ssh:ssh-new')
   })
 
+  it('reassignSshTargetId migrates session pty ids, reconnect list, leases, and host scope', async () => {
+    const store = await createStore()
+    store.addRepo(makeRepo({ id: 'r1', connectionId: 'ssh-old', executionHostId: 'ssh:ssh-old' }))
+    store.setWorkspaceSession({
+      activeRepoId: 'r1',
+      activeWorktreeId: 'r1::/wt',
+      activeTabId: 'tab1',
+      tabsByWorktree: {
+        'r1::/wt': [makeTerminalTab({ id: 'tab1', ptyId: 'ssh:ssh-old@@pty-2' })]
+      },
+      terminalLayoutsByTabId: {},
+      remoteSessionIdsByTabId: { tab1: 'ssh:ssh-old@@pty-2' },
+      activeConnectionIdsAtShutdown: ['ssh-old']
+    })
+    store.upsertSshRemotePtyLease({ targetId: 'ssh-old', ptyId: 'pty-2', state: 'detached' })
+    store.updateUI({
+      workspaceHostScope: 'ssh:ssh-old',
+      visibleWorkspaceHostIds: ['local', 'ssh:ssh-old'],
+      workspaceHostOrder: ['ssh:ssh-old', 'local']
+    })
+
+    store.reassignSshTargetId('ssh-old', 'ssh-new')
+    store.flush()
+
+    const reloaded = await createStore()
+    const session = reloaded.getWorkspaceSession()
+    expect(session.tabsByWorktree['r1::/wt'][0].ptyId).toBe('ssh:ssh-new@@pty-2')
+    expect(session.remoteSessionIdsByTabId).toEqual({ tab1: 'ssh:ssh-new@@pty-2' })
+    expect(session.activeConnectionIdsAtShutdown).toEqual(['ssh-new'])
+    expect(reloaded.getSshRemotePtyLeases('ssh-new')).toHaveLength(1)
+    expect(reloaded.getSshRemotePtyLeases('ssh-old')).toHaveLength(0)
+    const ui = reloaded.getUI()
+    expect(ui.workspaceHostScope).toBe('ssh:ssh-new')
+    expect(ui.visibleWorkspaceHostIds).toEqual(['local', 'ssh:ssh-new'])
+    expect(ui.workspaceHostOrder).toEqual(['ssh:ssh-new', 'local'])
+  })
+
+  it('reassignSshTargetId re-points an independent provisioned host setup', async () => {
+    const store = await createStore()
+    store.addRepo({
+      ...makeRepo({ id: 'r1', displayName: 'Cloud Project' }),
+      upstream: { owner: 'stablyai', repo: 'cloud-project' }
+    })
+    store.createProjectHostSetup({
+      projectId: 'github:stablyai/cloud-project',
+      hostId: 'ssh:ssh-old',
+      setupId: 'cloud-project::ssh-old',
+      setupMethod: 'provisioned'
+    })
+
+    // Meta-only re-adoption (no repo pinned to the old id) must still migrate
+    // the provisioned setup, or new worktrees would be born on a dead host id.
+    store.reassignSshTargetId('ssh-old', 'ssh-new')
+
+    const setups = store.getProjectHostSetups()
+    const provisioned = setups.find((entry) => entry.id === 'cloud-project::ssh-old')
+    expect(provisioned?.hostId).toBe('ssh:ssh-new')
+  })
+
+  it('reassignSshTargetId drops a stale setup when the new host already has one', async () => {
+    const store = await createStore()
+    store.addRepo({
+      ...makeRepo({ id: 'r1', displayName: 'Cloud Project' }),
+      upstream: { owner: 'stablyai', repo: 'cloud-project' }
+    })
+    store.createProjectHostSetup({
+      projectId: 'github:stablyai/cloud-project',
+      hostId: 'ssh:ssh-old',
+      setupId: 'setup-old',
+      setupMethod: 'provisioned'
+    })
+    store.createProjectHostSetup({
+      projectId: 'github:stablyai/cloud-project',
+      hostId: 'ssh:ssh-new',
+      setupId: 'setup-new',
+      setupMethod: 'provisioned'
+    })
+
+    store.reassignSshTargetId('ssh-old', 'ssh-new')
+
+    const setups = store.getProjectHostSetups()
+    expect(setups.find((entry) => entry.id === 'setup-old')).toBeUndefined()
+    expect(setups.find((entry) => entry.id === 'setup-new')?.hostId).toBe('ssh:ssh-new')
+  })
+
   // ── 7. updateRepo ──────────────────────────────────────────────────
 
   it('updateRepo modifies the repo in place', async () => {
