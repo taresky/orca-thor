@@ -154,7 +154,7 @@ test.describe('reattach mouse-mode leak', () => {
       const probe = await secondLaunch.page.evaluate(async () => {
         // An SGR mouse report is `ESC [ < params (M|m)`; the `ESC [ <` prefix is
         // unambiguous, so substring matching avoids a control-char regex.
-        const isMouseReport = (data) => data.includes('\x1b[<')
+        const isMouseReport = (data: string): boolean => data.includes('\x1b[<')
         const state = window.__store?.getState()
         const worktreeId = state?.activeWorktreeId
         const tabId =
