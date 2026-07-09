@@ -719,6 +719,10 @@ jobs:
               ~/.cache/electron-builder
 
     runs-on: ${{ matrix.os }}
+    # Why: hosted runners hard-cap jobs at 6h; the Windows SignPath waits
+    # (1h inner + 4h installer) are budgeted to fit under this with the
+    # build itself, so a slow approval can't kill the job mid-flow.
+    timeout-minutes: 360
 
     permissions:
       actions: read
@@ -1072,8 +1076,10 @@ jobs:
           Invoke-RestMethod -Method Post -Uri $env:SLACK_WEBHOOK_URL -ContentType 'application/json' -Body $payload
 
       # Why gate on the notify outcome too: if nobody was told to approve,
-      # don't hold the release for the 4-hour approval window — fall through
-      # and ship like today instead.
+      # don't hold the release for the approval window — fall through and
+      # ship like today instead. The 1h wait (vs the installer's 4h) keeps
+      # both waits plus the build inside the 360-minute job cap; missing it
+      # falls through to today's unsigned-inner flow rather than blocking.
       - name: Download signed inner binaries from SignPath
         id: download-signed-inner
         if: matrix.platform == 'win' && steps.submit-inner-signing.outcome == 'success' && steps.notify-inner-signing.outcome == 'success'
@@ -1089,7 +1095,7 @@ jobs:
             -SigningRequestId $env:SIGNPATH_REQUEST_ID `
             -OutputArtifactPath signed-inner.zip `
             -Force `
-            -WaitForCompletionTimeoutInSeconds 14400
+            -WaitForCompletionTimeoutInSeconds 3600
 
           New-Item -ItemType Directory -Path signed-inner -Force
           Expand-Archive -Path signed-inner.zip -DestinationPath signed-inner -Force
@@ -1305,40 +1311,48 @@ jobs:
             exit 0
           }
 
-          $report = New-Object System.Collections.Generic.List[string]
-          $failures = New-Object System.Collections.Generic.List[string]
+          # Why try/catch: while the gate is warn-only, even an unexpected
+          # script error (extraction hiccup, missing file) must not block
+          # the release — only the flip to required makes failures fatal.
+          try {
+            $report = New-Object System.Collections.Generic.List[string]
+            $failures = New-Object System.Collections.Generic.List[string]
 
-          # Why: verify the files a user actually gets on disk, not the build
-          # tree — 7z parses the NSIS exe directly as its embedded payload.
-          $7za = 'node_modules/7zip-bin/win/x64/7za.exe'
-          New-Item -ItemType Directory -Path inner-evidence-extract -Force | Out-Null
-          & $7za x 'dist/orca-windows-setup.exe' '-oinner-evidence-extract' -y | Out-Null
+            # Why: verify the files a user actually gets on disk, not the build
+            # tree — 7z parses the NSIS exe directly as its embedded payload.
+            $7za = 'node_modules/7zip-bin/win/x64/7za.exe'
+            New-Item -ItemType Directory -Path inner-evidence-extract -Force | Out-Null
+            & $7za x 'dist/orca-windows-setup.exe' '-oinner-evidence-extract' -y | Out-Null
 
-          $root = Resolve-Path 'inner-evidence-extract'
-          foreach ($relative in Get-Content 'inner-signing-list.txt') {
-            $path = Join-Path $root $relative
-            if (-not (Test-Path $path)) {
-              $failures.Add("missing from installer payload: $relative")
-              continue
+            $root = Resolve-Path 'inner-evidence-extract'
+            foreach ($relative in Get-Content 'inner-signing-list.txt') {
+              $path = Join-Path $root $relative
+              if (-not (Test-Path $path)) {
+                $failures.Add("missing from installer payload: $relative")
+                continue
+              }
+              $signature = Get-AuthenticodeSignature -FilePath $path
+              $subject = if ($null -eq $signature.SignerCertificate) { '<none>' } else { $signature.SignerCertificate.Subject }
+              $line = "{0,-14} {1}  <{2}>" -f $signature.Status, $relative, $subject
+              $report.Add($line)
+              Write-Host $line
+              if ($signature.Status -ne 'Valid' -or $subject -notlike '*CN=SignPath Foundation*') {
+                $failures.Add("not signed by SignPath Foundation: $relative ($($signature.Status), $subject)")
+              }
             }
-            $signature = Get-AuthenticodeSignature -FilePath $path
-            $subject = if ($null -eq $signature.SignerCertificate) { '<none>' } else { $signature.SignerCertificate.Subject }
-            $line = "{0,-14} {1}  <{2}>" -f $signature.Status, $relative, $subject
-            $report.Add($line)
-            Write-Host $line
-            if ($signature.Status -ne 'Valid' -or $subject -notlike '*CN=SignPath Foundation*') {
-              $failures.Add("not signed by SignPath Foundation: $relative ($($signature.Status), $subject)")
-            }
-          }
 
-          Set-Content -Path 'inner-signing-evidence.txt' -Value ($report -join "`n")
-          if ($failures.Count -gt 0) {
-            $failures | ForEach-Object { Write-Host "::warning::$_" }
-            $message = "Windows inner-binary evidence gate found $($failures.Count) problems."
-            if ($required) { throw $message }
-            Write-Host "::warning::$message Fail-open until ORCA_WINDOWS_INNER_SIGNATURE_REQUIRED is 'true'."
-          } else {
-            Write-Host "All $((Get-Content 'inner-signing-list.txt').Count) inner binaries in the shipped installer are signed by SignPath Foundation."
+            Set-Content -Path 'inner-signing-evidence.txt' -Value ($report -join "`n")
+            if ($failures.Count -gt 0) {
+              $failures | ForEach-Object { Write-Host "::warning::$_" }
+              $message = "Windows inner-binary evidence gate found $($failures.Count) problems."
+              if ($required) { throw $message }
+              Write-Host "::warning::$message Fail-open until ORCA_WINDOWS_INNER_SIGNATURE_REQUIRED is 'true'."
+            } else {
+              Write-Host "All $((Get-Content 'inner-signing-list.txt').Count) inner binaries in the shipped installer are signed by SignPath Foundation."
+            }
+          } catch {
+            if ($required) { throw }
+            Write-Host "::warning::Windows inner-binary evidence gate errored: $_ (fail-open, issue #7785)."
           }
 
       - name: Upload Windows inner signing evidence

@@ -41,6 +41,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # Why: nothing here pushes; keep the token out of .git/config.
+          persist-credentials: false
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -180,7 +183,7 @@ jobs:
             -SigningRequestId $env:SIGNPATH_REQUEST_ID `
             -OutputArtifactPath signed-inner.zip `
             -Force `
-            -WaitForCompletionTimeoutInSeconds 14400
+            -WaitForCompletionTimeoutInSeconds 3600
           New-Item -ItemType Directory -Path signed-inner -Force
           Expand-Archive -Path signed-inner.zip -DestinationPath signed-inner -Force
 
