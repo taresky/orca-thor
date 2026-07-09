@@ -11,6 +11,14 @@ const onSet = vi.fn((callback: (data: AgentStatusIpcPayload) => void) => {
 const claudeStatus = vi.fn()
 const codexStatus = vi.fn()
 
+const storeState = vi.hoisted(() => ({
+  agentStatusByPaneKey: {} as Record<string, { agentType?: string }>
+}))
+
+vi.mock('@/store', () => ({
+  useAppStore: { getState: () => storeState }
+}))
+
 function emit(partial: Partial<AgentStatusIpcPayload>): void {
   const payload = {
     paneKey: 'tab-1:leaf-1',
@@ -143,6 +151,13 @@ describe('agent-prompt-submit-receipt', () => {
   })
 
   describe('isPromptReceiptEligible', () => {
+    beforeEach(() => {
+      storeState.agentStatusByPaneKey = {
+        'tab-9:leaf-1': { agentType: 'claude' },
+        'tab-8:leaf-1': { agentType: 'codex' }
+      }
+    })
+
     it('requires the managed hook service to be installed', async () => {
       claudeStatus.mockResolvedValue({ state: 'installed' })
       await expect(isPromptReceiptEligible('claude')).resolves.toBe(true)
@@ -151,6 +166,18 @@ describe('agent-prompt-submit-receipt', () => {
       await expect(isPromptReceiptEligible('codex')).resolves.toBe(false)
 
       codexStatus.mockResolvedValue({ state: 'error' })
+      await expect(isPromptReceiptEligible('codex')).resolves.toBe(false)
+    })
+
+    it('requires an observed hook status from the agent this session', async () => {
+      // Why: codex silently drops untrusted hooks.json configs while the
+      // install check still passes — without observed evidence the strict
+      // verdict would false-fail every launch for affected users.
+      claudeStatus.mockResolvedValue({ state: 'installed' })
+      codexStatus.mockResolvedValue({ state: 'installed' })
+      storeState.agentStatusByPaneKey = { 'tab-9:leaf-1': { agentType: 'claude' } }
+
+      await expect(isPromptReceiptEligible('claude')).resolves.toBe(true)
       await expect(isPromptReceiptEligible('codex')).resolves.toBe(false)
     })
 

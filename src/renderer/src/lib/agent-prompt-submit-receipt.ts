@@ -1,3 +1,4 @@
+import { useAppStore } from '@/store'
 import type { AgentStatusIpcPayload } from '../../../shared/agent-status-types'
 import type { TuiAgent } from '../../../shared/types'
 
@@ -20,8 +21,27 @@ export const PROMPT_RECEIPT_TIMEOUT_MS = 15_000
 // receipts from a previous turn.
 const RECEIPT_CLOCK_SLACK_MS = 2_000
 
+// Why: "installed" is not proof the channel speaks — codex silently drops
+// hooks.json configs it does not trust while the install check still passes
+// (live-reproduced: fresh managed home → zero hook events → every launch
+// would false-fail). Require at least one observed hook status from the
+// agent this session before trusting its receipts; until then the launch
+// keeps the optimistic legacy verdict, which is today's behavior.
+function hasObservedHookStatusForAgent(agent: TuiAgent): boolean {
+  const statuses = useAppStore.getState().agentStatusByPaneKey ?? {}
+  for (const status of Object.values(statuses)) {
+    if (status?.agentType === agent) {
+      return true
+    }
+  }
+  return false
+}
+
 export async function isPromptReceiptEligible(agent: TuiAgent | undefined): Promise<boolean> {
   if (!agent || !RECEIPT_ELIGIBLE_AGENTS.has(agent)) {
+    return false
+  }
+  if (!hasObservedHookStatusForAgent(agent)) {
     return false
   }
   try {
