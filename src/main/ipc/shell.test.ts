@@ -321,27 +321,22 @@ describe('registerShellHandlers', () => {
       ])
     })
 
-    it('forwards WSL remote arguments with spaces through the Windows launcher shim', async () => {
-      const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')
-      Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
-      const workspacePath = '\\\\wsl.localhost\\Ubuntu Preview\\home\\Ada Lovelace\\project'
-      const codeShim = 'C:\\Tools\\CODE.CMD'
-      resolveCliCommandMock.mockReturnValueOnce(codeShim)
-      const handler = getHandler('shell:openInExternalEditor')
+    it.runIf(process.platform === 'win32')(
+      'forwards WSL remote arguments with spaces through the Windows launcher shim',
+      async () => {
+        const workspacePath = '\\\\wsl.localhost\\Ubuntu Preview\\home\\Ada Lovelace\\project'
+        const codeShim = 'C:\\Tools\\CODE.CMD'
+        resolveCliCommandMock.mockReturnValueOnce(codeShim)
+        const handler = getHandler('shell:openInExternalEditor')
 
-      try {
         await expect(handler({}, workspacePath, 'code')).resolves.toEqual({ ok: true })
         expect(getSpawnArgsForWindowsMock).toHaveBeenCalledWith(codeShim, [
           '--remote',
           'wsl+Ubuntu Preview',
           '/home/Ada Lovelace/project'
         ])
-      } finally {
-        if (platformDescriptor) {
-          Object.defineProperty(process, 'platform', platformDescriptor)
-        }
       }
-    })
+    )
 
     it('shows the Windows console for NeoVim executable launchers on Windows', async () => {
       const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')
