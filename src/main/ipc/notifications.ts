@@ -24,6 +24,7 @@ import type {
 import { getRepoIdFromWorktreeId } from '../../shared/worktree-id'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 import { buildNotificationOptions } from './notification-options'
+import { readNotificationAuthorizationStatus } from './notification-authorization-status'
 import { parsePaneKey } from '../../shared/stable-pane-id'
 
 const NOTIFICATION_COOLDOWN_MS = 5000
@@ -106,24 +107,30 @@ const NOTIFICATION_PROBE_BANNER_CLOSE_DELAY_MS = 4000
 // can change between runs, and a stale positive renders a false green card.
 let lastObservedDeliveryOutcome: 'delivered' | 'failed' | null = null
 let deliveryProbeInFlight: Promise<NotificationDeliveryProbeResult> | null = null
+// Why: firing one probe notification is what instantiates Electron's
+// presenter and pops the macOS permission dialog. Once per session is enough
+// while the authorization readout reports the decision as pending.
+let permissionDialogTriggeredThisSession = false
 
 /**
- * Schedules a silent probe notification and reports whether macOS accepted
- * it. 'failed' means the request was rejected (permission denied, or an
- * unsigned build). On a fresh install the probe also instantiates Electron's
- * notification presenter, which is what makes macOS pop the "Allow
- * notifications?" dialog.
+ * Fallback signal for hosts without the native helper. Schedules a silent
+ * probe notification and reports whether macOS accepted it. 'failed' means
+ * the request was rejected (permission denied, or an unsigned build). On a
+ * fresh install the probe also instantiates Electron's notification
+ * presenter, which is what makes macOS pop the "Allow notifications?" dialog.
  *
  * Known ambiguity with no public API to resolve it (verified on macOS 26):
  * while the dialog is unanswered — and when notifications are toggled off in
  * System Settings after being authorized — macOS still accepts requests and
  * silently swallows them, so 'delivered' can over-report. 'failed' fires for
- * hard rejections (unsigned builds, dialog-level denial).
+ * hard rejections (unsigned builds, dialog-level denial). The bundled
+ * notification-status helper exists precisely to avoid this ambiguity.
  */
 function probeNotificationDelivery(): Promise<NotificationDeliveryProbeResult> {
   if (deliveryProbeInFlight) {
     return deliveryProbeInFlight
   }
+  permissionDialogTriggeredThisSession = true
 
   const probe = new Notification({
     title: 'Orca notifications are on',
@@ -153,7 +160,7 @@ function probeNotificationDelivery(): Promise<NotificationDeliveryProbeResult> {
         timeoutTimer = null
       }
       lastObservedDeliveryOutcome = state === 'delivered' ? 'delivered' : 'failed'
-      resolve({ state })
+      resolve({ state, authoritative: false })
     }
 
     function onShow(): void {
@@ -182,7 +189,7 @@ function probeNotificationDelivery(): Promise<NotificationDeliveryProbeResult> {
     timeoutTimer = setTimeout(() => {
       if (!settled) {
         settled = true
-        resolve({ state: 'blocked' })
+        resolve({ state: 'blocked', authoritative: false })
         releaseProbe()
       }
     }, NOTIFICATION_PROBE_RESULT_TIMEOUT_MS)
@@ -308,6 +315,8 @@ export function registerNotificationHandlers(store: Store, runtime?: OrcaRuntime
   // Why: handler registration marks a fresh session — permission evidence
   // from a previous registration must not leak into the new one.
   lastObservedDeliveryOutcome = null
+  deliveryProbeInFlight = null
+  permissionDialogTriggeredThisSession = false
 
   ipcMain.removeHandler('notifications:openSystemSettings')
   ipcMain.removeHandler('notifications:getPermissionStatus')
@@ -332,26 +341,46 @@ export function registerNotificationHandlers(store: Store, runtime?: OrcaRuntime
   ipcMain.handle('notifications:getPermissionStatus', getPermissionStatus)
   ipcMain.handle(
     'notifications:probeDelivery',
-    (
-      _event,
-      args?: { force?: boolean }
-    ): Promise<NotificationDeliveryProbeResult> | NotificationDeliveryProbeResult => {
+    async (_event, args?: { force?: boolean }): Promise<NotificationDeliveryProbeResult> => {
       // Why: macOS-only. Windows/Linux have no equivalent first-use permission
       // dialog, so the onboarding card that consumes this never renders there.
       if (process.platform !== 'darwin' || !Notification.isSupported()) {
-        return { state: 'unsupported' }
+        return { state: 'unsupported', authoritative: false }
       }
-      // Why: the probe instantiates the notification presenter, which fires
-      // the macOS permission dialog on fresh installs — mark the one-shot
-      // startup registration as done so it can't fire a second prompt later.
+      // Why: probes (and the native helper's first-launch path) surface the
+      // macOS permission dialog — mark the one-shot startup registration as
+      // done so it can't fire a second prompt later.
       if (store.getUI().notificationPermissionRequested !== true) {
         store.updateUI({ notificationPermissionRequested: true })
       }
-      // Why: no persisted cache on purpose — OS-level permission changes
-      // between sessions, and a stale "delivered" here shows a false green
-      // card. Session evidence is enough to avoid repeat probe banners.
+      // Preferred source: the bundled helper reads the real
+      // UNUserNotificationCenter authorization. Silent, so polling with it
+      // tracks System Settings changes live without flashing banners.
+      const authorization = await readNotificationAuthorizationStatus()
+      if (authorization === 'authorized') {
+        lastObservedDeliveryOutcome = 'delivered'
+        return { state: 'delivered', authoritative: true }
+      }
+      if (authorization === 'denied') {
+        lastObservedDeliveryOutcome = 'failed'
+        return { state: 'blocked', authoritative: true }
+      }
+      if (authorization === 'not-determined') {
+        // Why: the dialog only appears once something asks — fire a single
+        // probe per session to trigger it, then report the pending decision.
+        if (!permissionDialogTriggeredThisSession) {
+          void probeNotificationDelivery()
+        }
+        return { state: 'awaiting-decision', authoritative: true }
+      }
+      // Helper unavailable ('unknown' status is also unusable evidence):
+      // fall back to scheduling-based probes with session caching, which
+      // avoids repeated probe banners when delivery works.
       if (!args?.force && lastObservedDeliveryOutcome !== null) {
-        return { state: lastObservedDeliveryOutcome === 'delivered' ? 'delivered' : 'blocked' }
+        return {
+          state: lastObservedDeliveryOutcome === 'delivered' ? 'delivered' : 'blocked',
+          authoritative: false
+        }
       }
       return probeNotificationDelivery()
     }
@@ -546,8 +575,18 @@ export function registerNotificationHandlers(store: Store, runtime?: OrcaRuntime
       notification.show()
 
       if (displayConfirmation) {
-        return displayConfirmation.then((displayed) => {
+        return displayConfirmation.then(async (displayed) => {
           if (!displayed) {
+            release()
+            return { delivered: false, reason: 'not-displayed' }
+          }
+          // Why: macOS accepts scheduling even while suppressing display
+          // (permission dialog pending, or notifications toggled off), so a
+          // confirmed 'show' still needs the authorization readout to avoid
+          // claiming the user saw a notification they never got.
+          const authorization = await readNotificationAuthorizationStatus()
+          if (authorization === 'denied' || authorization === 'not-determined') {
+            lastObservedDeliveryOutcome = 'failed'
             release()
             return { delivered: false, reason: 'not-displayed' }
           }

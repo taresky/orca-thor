@@ -70,6 +70,17 @@ vi.mock('electron', () => ({
   }
 }))
 
+const { readAuthorizationStatusMock } = vi.hoisted(() => ({
+  readAuthorizationStatusMock: vi.fn(
+    (): Promise<'authorized' | 'denied' | 'not-determined' | 'unknown' | null> =>
+      Promise.resolve(null)
+  )
+}))
+
+vi.mock('./notification-authorization-status', () => ({
+  readNotificationAuthorizationStatus: readAuthorizationStatusMock
+}))
+
 import {
   registerNotificationHandlers,
   triggerStartupNotificationRegistration
@@ -1317,6 +1328,8 @@ describe('notifications:probeDelivery', () => {
     notificationRemoveListenerMock.mockClear()
     notificationIsSupportedMock.mockReset()
     notificationIsSupportedMock.mockReturnValue(true)
+    readAuthorizationStatusMock.mockReset()
+    readAuthorizationStatusMock.mockResolvedValue(null)
     Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
   })
 
@@ -1324,14 +1337,52 @@ describe('notifications:probeDelivery', () => {
     Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true })
   })
 
-  it('reports unsupported on non-darwin platforms without probing', () => {
+  it('reports unsupported on non-darwin platforms without probing', async () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
     const store = createStore()
     registerNotificationHandlers(store as never)
 
-    expect(getProbeDeliveryHandler()({})).toEqual({ state: 'unsupported' })
+    await expect(getProbeDeliveryHandler()({})).resolves.toEqual({
+      state: 'unsupported',
+      authoritative: false
+    })
     expect(notificationCtorMock).not.toHaveBeenCalled()
     expect(store.updateUI).not.toHaveBeenCalled()
+  })
+
+  it('reports authoritative states straight from the authorization readout', async () => {
+    const store = createStore()
+    registerNotificationHandlers(store as never)
+    const handler = getProbeDeliveryHandler()
+
+    readAuthorizationStatusMock.mockResolvedValue('authorized')
+    await expect(handler({})).resolves.toEqual({ state: 'delivered', authoritative: true })
+
+    readAuthorizationStatusMock.mockResolvedValue('denied')
+    await expect(handler({})).resolves.toEqual({ state: 'blocked', authoritative: true })
+
+    // No probe notifications were needed for either readout.
+    expect(notificationCtorMock).not.toHaveBeenCalled()
+  })
+
+  it('fires one dialog-trigger probe per session while the decision is pending', async () => {
+    const store = createStore()
+    registerNotificationHandlers(store as never)
+    const handler = getProbeDeliveryHandler()
+    readAuthorizationStatusMock.mockResolvedValue('not-determined')
+
+    await expect(handler({})).resolves.toEqual({
+      state: 'awaiting-decision',
+      authoritative: true
+    })
+    expect(notificationCtorMock).toHaveBeenCalledTimes(1)
+
+    // Polling again while pending must not spam more probe notifications.
+    await expect(handler({}, { force: true })).resolves.toEqual({
+      state: 'awaiting-decision',
+      authoritative: true
+    })
+    expect(notificationCtorMock).toHaveBeenCalledTimes(1)
   })
 
   it('marks the one-shot permission registration as done so startup cannot re-prompt', async () => {
@@ -1339,21 +1390,23 @@ describe('notifications:probeDelivery', () => {
     registerNotificationHandlers(store as never)
 
     const result = getProbeDeliveryHandler()({}) as Promise<unknown>
+    await vi.advanceTimersByTimeAsync(0)
     expect(store.updateUI).toHaveBeenCalledWith({ notificationPermissionRequested: true })
 
     getProbeOnceEventHandler('failed')({}, 'not allowed')
-    await expect(result).resolves.toEqual({ state: 'blocked' })
+    await expect(result).resolves.toEqual({ state: 'blocked', authoritative: false })
   })
 
-  it('resolves delivered when the probe show event fires', async () => {
+  it('falls back to delivery probes when the readout is unavailable', async () => {
     const store = createStore()
     registerNotificationHandlers(store as never)
 
     const result = getProbeDeliveryHandler()({}) as Promise<unknown>
+    await vi.advanceTimersByTimeAsync(0)
     expect(notificationShowMock).toHaveBeenCalledTimes(1)
 
     getProbeOnceEventHandler('show')()
-    await expect(result).resolves.toEqual({ state: 'delivered' })
+    await expect(result).resolves.toEqual({ state: 'delivered', authoritative: false })
     // No persisted confirmation on purpose: OS permission changes between runs.
     expect(store.updateUI).not.toHaveBeenCalledWith({ notificationDeliveryConfirmed: true })
   })
@@ -1364,19 +1417,21 @@ describe('notifications:probeDelivery', () => {
     const handler = getProbeDeliveryHandler()
 
     const probeResult = handler({}) as Promise<unknown>
+    await vi.advanceTimersByTimeAsync(0)
     getProbeOnceEventHandler('show')()
-    await expect(probeResult).resolves.toEqual({ state: 'delivered' })
+    await expect(probeResult).resolves.toEqual({ state: 'delivered', authoritative: false })
     expect(notificationCtorMock).toHaveBeenCalledTimes(1)
 
     // Cached session evidence answers non-force calls with no new probe.
-    expect(handler({})).toEqual({ state: 'delivered' })
+    await expect(handler({})).resolves.toEqual({ state: 'delivered', authoritative: false })
     expect(notificationCtorMock).toHaveBeenCalledTimes(1)
 
     // Force bypasses the cache and schedules a fresh probe.
     const forced = handler({}, { force: true }) as Promise<unknown>
+    await vi.advanceTimersByTimeAsync(0)
     expect(notificationCtorMock).toHaveBeenCalledTimes(2)
     getProbeOnceEventHandler('show')()
-    await expect(forced).resolves.toEqual({ state: 'delivered' })
+    await expect(forced).resolves.toEqual({ state: 'delivered', authoritative: false })
   })
 
   it('serves cached failure evidence after a rejected probe', async () => {
@@ -1385,10 +1440,11 @@ describe('notifications:probeDelivery', () => {
     const handler = getProbeDeliveryHandler()
 
     const probeResult = handler({}, { force: true }) as Promise<unknown>
+    await vi.advanceTimersByTimeAsync(0)
     getProbeOnceEventHandler('failed')({}, 'Notifications are not allowed for this application')
-    await expect(probeResult).resolves.toEqual({ state: 'blocked' })
+    await expect(probeResult).resolves.toEqual({ state: 'blocked', authoritative: false })
 
-    expect(handler({})).toEqual({ state: 'blocked' })
+    await expect(handler({})).resolves.toEqual({ state: 'blocked', authoritative: false })
     expect(notificationCtorMock).toHaveBeenCalledTimes(1)
   })
 
@@ -1399,14 +1455,15 @@ describe('notifications:probeDelivery', () => {
 
     const probeResult = handler({}) as Promise<unknown>
     await vi.advanceTimersByTimeAsync(3001)
-    await expect(probeResult).resolves.toEqual({ state: 'blocked' })
+    await expect(probeResult).resolves.toEqual({ state: 'blocked', authoritative: false })
     expect(notificationCloseMock).toHaveBeenCalledTimes(1)
 
     // A timeout is ambiguous evidence, so the next non-force call probes again.
     const secondResult = handler({}) as Promise<unknown>
+    await vi.advanceTimersByTimeAsync(0)
     expect(notificationCtorMock).toHaveBeenCalledTimes(2)
     getProbeOnceEventHandler('show')()
-    await expect(secondResult).resolves.toEqual({ state: 'delivered' })
+    await expect(secondResult).resolves.toEqual({ state: 'delivered', authoritative: false })
   })
 })
 

@@ -128,9 +128,10 @@ function prepareMacDevElectronApp() {
 
   const title = process.env.ORCA_DEV_DOCK_TITLE || 'Orca: dev'
   const identityKey = process.env.ORCA_DEV_INSTANCE_KEY || repoRoot
-  // v5: ad-hoc re-sign after plist edits so Notification Center accepts the
-  // bundle; bumping forces cached copies with broken seals to be recreated.
-  const bundleLayoutVersion = 'dock-title-app-preserve-framework-symlinks-v5'
+  // v6: bundle the notification-status helper (real permission readout) and
+  // ad-hoc re-sign after plist edits so Notification Center accepts the
+  // bundle; bumping forces stale cached copies to be recreated.
+  const bundleLayoutVersion = 'dock-title-app-preserve-framework-symlinks-v6'
   const hash = createHash('sha1')
     .update(
       `${sourceAppPath}\0${electronVersion ?? ''}\0${title}\0${identityKey}\0${bundleLayoutVersion}`
@@ -207,6 +208,31 @@ function prepareMacDevElectronApp() {
   setPlistValue(plistPath, 'CFBundleName', title)
   setPlistValue(plistPath, 'CFBundleDisplayName', title)
   setPlistValue(plistPath, 'CFBundleIdentifier', bundleId)
+
+  // Why: the notification-status helper reads the app's real macOS
+  // notification authorization (UNUserNotificationCenter has no Electron
+  // API). It must live inside the bundle and carry the dev bundle id as its
+  // embedded/code-sign identifier — macOS keys notification records to the
+  // signing identifier. Non-fatal: without swiftc the permission card falls
+  // back to delivery-probe heuristics.
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(repoRoot, 'config', 'scripts', 'build-notification-status-macos.mjs'),
+        '--bundle-id',
+        bundleId,
+        '--single-arch',
+        '--output',
+        path.join(appPath, 'Contents', 'MacOS', 'orca-notification-status')
+      ],
+      { stdio: 'inherit' }
+    )
+  } catch (error) {
+    console.warn(
+      `[orca-dev] notification-status helper build failed (permission card falls back to probes): ${error?.message ?? error}`
+    )
+  }
 
   // Why: the plist edits above (and the copy itself) break the bundle's
   // ad-hoc seal, and macOS refuses Notification Center registration for

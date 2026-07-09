@@ -70,6 +70,15 @@ describe('resolveMacNotificationPermissionState', () => {
     expect(resolveMacNotificationPermissionState('delivered', true)).toBe('enabled')
   })
 
+  it('maps a pending authorization decision to the awaiting card', () => {
+    expect(resolveMacNotificationPermissionState('awaiting-decision', false)).toBe(
+      'awaiting-permission'
+    )
+    expect(resolveMacNotificationPermissionState('awaiting-decision', true)).toBe(
+      'awaiting-permission'
+    )
+  })
+
   it('treats a first-ever rejection as an unanswered permission dialog', () => {
     expect(resolveMacNotificationPermissionState('blocked', false)).toBe('awaiting-permission')
   })

@@ -26,8 +26,12 @@ export function resolveMacNotificationPermissionState(
   if (probeState === 'delivered') {
     return 'enabled'
   }
-  // Why: a first-ever probe is what makes macOS show the permission dialog,
-  // so its rejection means "unanswered", not "denied".
+  if (probeState === 'awaiting-decision') {
+    return 'awaiting-permission'
+  }
+  // Why: probe-fallback hosts can't tell "unanswered dialog" from "denied" —
+  // a first-ever probe is what makes macOS show the permission dialog, so
+  // its rejection means "unanswered", not "denied".
   return promptedBefore ? 'blocked' : 'awaiting-permission'
 }
 
@@ -43,10 +47,7 @@ export function useMacNotificationPermissionState(): [
     let pollTimer: ReturnType<typeof setTimeout> | null = null
     let pollAttempts = 0
 
-    // Why: probe rejections are silent, so polling while the card is not
-    // green costs nothing visible and lets the card flip to "enabled" the
-    // moment the user clicks Allow (or fixes the toggle in System Settings).
-    function schedulePoll(): void {
+    function schedulePoll(promptedBefore: boolean): void {
       if (cancelled || pollAttempts >= MAC_PROBE_POLL_MAX_ATTEMPTS) {
         return
       }
@@ -56,11 +57,14 @@ export function useMacNotificationPermissionState(): [
           if (cancelled) {
             return
           }
-          if (probe.state === 'delivered') {
-            setMacPermissionState('enabled')
-            return
+          setMacPermissionState(resolveMacNotificationPermissionState(probe.state, promptedBefore))
+          // Why: authoritative readouts are silent, so keep tracking System
+          // Settings live in every state — flipping the toggle updates the
+          // card within a poll. Probe fallbacks flash a banner when delivery
+          // works, so for them polling stops once the card turns green.
+          if (probe.authoritative || probe.state !== 'delivered') {
+            schedulePoll(promptedBefore)
           }
-          schedulePoll()
         })
       }, MAC_PROBE_POLL_INTERVAL_MS)
     }
@@ -75,16 +79,16 @@ export function useMacNotificationPermissionState(): [
       }
       setMacPermissionState('checking')
       // Why: `status.requested` is read before the probe stamps it, so a
-      // fresh install (where the probe itself pops the macOS dialog) renders
-      // as "answer the dialog" instead of "blocked".
+      // fresh install (where the check itself pops the macOS dialog) renders
+      // as "answer the dialog" instead of "blocked" on probe-fallback hosts.
       const probe = await window.api.notifications.probeDelivery()
       if (cancelled) {
         return
       }
       const resolved = resolveMacNotificationPermissionState(probe.state, status.requested)
       setMacPermissionState(resolved)
-      if (resolved === 'awaiting-permission' || resolved === 'blocked') {
-        schedulePoll()
+      if (resolved !== null && (probe.authoritative || resolved !== 'enabled')) {
+        schedulePoll(status.requested)
       }
     })()
 

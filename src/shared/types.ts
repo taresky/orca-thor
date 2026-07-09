@@ -3106,11 +3106,16 @@ export type NotificationPermissionStatusResult = {
   requested: boolean
 }
 
-/** Outcome of a macOS notification delivery probe. Electron exposes no API to
- *  read UNUserNotificationCenter authorization, so delivery of a silent probe
- *  notification is the only reliable granted/blocked signal. */
+/** Outcome of a macOS notification permission check. Preferred source is the
+ *  bundled native helper reading UNUserNotificationCenter authorization
+ *  (authoritative); when unavailable, a silent delivery probe supplies weaker
+ *  scheduling-based evidence. 'awaiting-decision' means the macOS permission
+ *  dialog has not been answered yet. */
 export type NotificationDeliveryProbeResult = {
-  state: 'delivered' | 'blocked' | 'unsupported'
+  state: 'delivered' | 'blocked' | 'awaiting-decision' | 'unsupported'
+  /** True when the state comes from the native authorization readout. Silent
+   *  to poll; probe-based fallbacks flash a banner when delivery works. */
+  authoritative: boolean
 }
 
 export type WorktreeCardProperty =
