@@ -110,10 +110,10 @@ export function installTerminalViewAttributeResponder(
     while (slots.length > 1) {
       const idx = slots.shift() as string
       const spec = slots.shift() as string
-      if (!/^\d+$/.exec(idx)) {
+      if (!/^\d+$/.test(idx)) {
         continue
       }
-      const index = parseInt(idx, 10)
+      const index = Number.parseInt(idx, 10)
       if (!isValidColorIndex(index)) {
         continue
       }
@@ -143,8 +143,8 @@ export function installTerminalViewAttributeResponder(
       return true
     }
     for (const slot of data.split(';')) {
-      if (/^\d+$/.exec(slot)) {
-        ansiOverrides.delete(parseInt(slot, 10))
+      if (/^\d+$/.test(slot)) {
+        ansiOverrides.delete(Number.parseInt(slot, 10))
       }
     }
     return true

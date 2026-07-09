@@ -97,38 +97,38 @@ export function parseCssColor(css: string): ParsedCssColor | null {
       case 4:
         return {
           rgb: [
-            parseInt(css.slice(1, 2).repeat(2), 16),
-            parseInt(css.slice(2, 3).repeat(2), 16),
-            parseInt(css.slice(3, 4).repeat(2), 16)
+            Number.parseInt(css.slice(1, 2).repeat(2), 16),
+            Number.parseInt(css.slice(2, 3).repeat(2), 16),
+            Number.parseInt(css.slice(3, 4).repeat(2), 16)
           ],
           alpha: 0xff
         }
       case 5:
         return {
           rgb: [
-            parseInt(css.slice(1, 2).repeat(2), 16),
-            parseInt(css.slice(2, 3).repeat(2), 16),
-            parseInt(css.slice(3, 4).repeat(2), 16)
+            Number.parseInt(css.slice(1, 2).repeat(2), 16),
+            Number.parseInt(css.slice(2, 3).repeat(2), 16),
+            Number.parseInt(css.slice(3, 4).repeat(2), 16)
           ],
-          alpha: parseInt(css.slice(4, 5).repeat(2), 16)
+          alpha: Number.parseInt(css.slice(4, 5).repeat(2), 16)
         }
       case 7:
         return {
           rgb: [
-            parseInt(css.slice(1, 3), 16),
-            parseInt(css.slice(3, 5), 16),
-            parseInt(css.slice(5, 7), 16)
+            Number.parseInt(css.slice(1, 3), 16),
+            Number.parseInt(css.slice(3, 5), 16),
+            Number.parseInt(css.slice(5, 7), 16)
           ],
           alpha: 0xff
         }
       case 9:
         return {
           rgb: [
-            parseInt(css.slice(1, 3), 16),
-            parseInt(css.slice(3, 5), 16),
-            parseInt(css.slice(5, 7), 16)
+            Number.parseInt(css.slice(1, 3), 16),
+            Number.parseInt(css.slice(3, 5), 16),
+            Number.parseInt(css.slice(5, 7), 16)
           ],
-          alpha: parseInt(css.slice(7, 9), 16)
+          alpha: Number.parseInt(css.slice(7, 9), 16)
         }
       default:
         return null
@@ -139,8 +139,12 @@ export function parseCssColor(css: string): ParsedCssColor | null {
   )
   if (rgbaMatch) {
     return {
-      rgb: [parseInt(rgbaMatch[1], 10), parseInt(rgbaMatch[2], 10), parseInt(rgbaMatch[3], 10)],
-      alpha: Math.round((rgbaMatch[5] === undefined ? 1 : parseFloat(rgbaMatch[5])) * 0xff)
+      rgb: [
+        Number.parseInt(rgbaMatch[1], 10),
+        Number.parseInt(rgbaMatch[2], 10),
+        Number.parseInt(rgbaMatch[3], 10)
+      ],
+      alpha: Math.round((rgbaMatch[5] === undefined ? 1 : Number.parseFloat(rgbaMatch[5])) * 0xff)
     }
   }
   return null

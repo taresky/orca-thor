@@ -54,9 +54,9 @@ export function parseXColorSpec(spec: string): TerminalViewRgb | null {
     if (m) {
       const base = m[1] ? 15 : m[4] ? 255 : m[7] ? 4095 : 65535
       return [
-        Math.round((parseInt(m[1] || m[4] || m[7] || m[10], 16) / base) * 255),
-        Math.round((parseInt(m[2] || m[5] || m[8] || m[11], 16) / base) * 255),
-        Math.round((parseInt(m[3] || m[6] || m[9] || m[12], 16) / base) * 255)
+        Math.round((Number.parseInt(m[1] || m[4] || m[7] || m[10], 16) / base) * 255),
+        Math.round((Number.parseInt(m[2] || m[5] || m[8] || m[11], 16) / base) * 255),
+        Math.round((Number.parseInt(m[3] || m[6] || m[9] || m[12], 16) / base) * 255)
       ]
     }
     return null
@@ -67,7 +67,7 @@ export function parseXColorSpec(spec: string): TerminalViewRgb | null {
       const adv = low.length / 3
       const result: TerminalViewRgb = [0, 0, 0]
       for (let i = 0; i < 3; ++i) {
-        const c = parseInt(low.slice(adv * i, adv * i + adv), 16)
+        const c = Number.parseInt(low.slice(adv * i, adv * i + adv), 16)
         result[i] = adv === 1 ? c << 4 : adv === 2 ? c : adv === 3 ? c >> 4 : c >> 8
       }
       return result
