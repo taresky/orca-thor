@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
   Keyboard
 } from 'react-native'
-import { ChevronDown, ChevronUp, Check } from 'lucide-react-native'
+import { ChevronDown, ChevronUp } from 'lucide-react-native'
 import type { RpcClient } from '../transport/rpc-client'
 import type { RpcSuccess } from '../transport/types'
 import { colors, spacing, radii, typography } from '../theme/mobile-theme'
@@ -20,7 +20,6 @@ import { MobileAgentIcon } from './MobileAgentIcon'
 import { MobileWorkspaceNameInput } from './MobileWorkspaceNameInput'
 import { getSuggestedCreatureName } from './worktree-name-suggestion'
 import { deriveWorkspaceSshGate, workspaceSshStatusLabel } from '../tasks/workspace-ssh-gate'
-import { WORKTREE_CREATE_TIMEOUT_MS } from '../tasks/workspace-create-timeout'
 import {
   isSetupHookTrusted,
   normalizeSetupHookTrust,
@@ -49,6 +48,23 @@ import {
   refreshMobileNewWorkspaceDialogSelectedRepo,
   resolveMobileNewWorkspaceDialogRepoId
 } from '../worktree/new-workspace-dialog-repo-selection'
+import { createBlankWorkspace } from '../tasks/blank-workspace-create'
+import { createWorkspaceFromSource } from '../tasks/source-workspace-create'
+import {
+  describeWorkspaceSource,
+  isRepoBoundSource,
+  resolveSourceRepoId,
+  type WorkspaceSource
+} from '../tasks/workspace-source-selection'
+import { MOBILE_TASKS_CAPABILITY } from '../tasks/mobile-tasks-capability'
+import { normalizeWorkspaceAgent } from '../tasks/workspace-agent-selection'
+import {
+  filterAvailableTaskProviders,
+  normalizeVisibleTaskProviders,
+  type TaskProvider
+} from '../tasks/mobile-task-providers'
+import { WorkspaceSourcePickerDrawer } from './WorkspaceSourcePickerDrawer'
+import { SetupHookTrustDrawer, type SetupTrustPrompt } from './SetupHookTrustDrawer'
 
 type Repo = {
   id: string
@@ -89,14 +105,6 @@ type DetectedAgentIdsState = {
 type CreateOptions = {
   setupOverride?: Exclude<SetupDecision, 'inherit'>
   approvedSetupContentHash?: string
-}
-
-type SetupTrustPrompt = {
-  repoId: string
-  repoName: string
-  scriptContent: string
-  contentHash: string
-  previouslyApproved: boolean
 }
 
 function repoColor(name: string): string {
@@ -187,6 +195,10 @@ function NewWorktreeModalContent({
   const [sshConnectingTargetId, setSshConnectingTargetId] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [note, setNote] = useState('')
+  const [workspaceSource, setWorkspaceSource] = useState<WorkspaceSource>({ kind: 'blank' })
+  const [showSourcePicker, setShowSourcePicker] = useState(false)
+  const [availableProviders, setAvailableProviders] = useState<TaskProvider[]>([])
+  const [tasksSupported, setTasksSupported] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [setupHookDetails, setSetupHookDetails] = useState<SetupHookDetails | null>(null)
   const [trustedOrcaHooks, setTrustedOrcaHooks] = useState<PersistedTrustedOrcaHooks>({})
@@ -298,27 +310,59 @@ function NewWorktreeModalContent({
       })
 
     void (async () => {
-      try {
-        const [settingsResponse, uiResponse] = await Promise.all([
-          client.sendRequest('settings.get'),
-          client.sendRequest('ui.get')
-        ])
-        if (stale) {
-          return
-        }
-        if (settingsResponse.ok) {
-          const result = (settingsResponse as RpcSuccess).result as { settings: RuntimeSettings }
-          setRuntimeSettings(result.settings)
-        }
-        if (uiResponse.ok) {
-          const result = (uiResponse as RpcSuccess).result as {
-            ui?: { trustedOrcaHooks?: PersistedTrustedOrcaHooks }
-          }
-          setTrustedOrcaHooks(result.ui?.trustedOrcaHooks ?? {})
-        }
-      } catch {
-        // Non-critical; repo.list owns the visible loading state.
+      // Why: settle each RPC independently so a flaky availability probe (e.g. a
+      // linear.status timeout, which rejects rather than resolving {ok:false})
+      // can't discard the already-resolved critical settings/ui results.
+      const settled = await Promise.allSettled([
+        client.sendRequest('settings.get'),
+        client.sendRequest('ui.get'),
+        client.sendRequest('status.get'),
+        client.sendRequest('preflight.check'),
+        client.sendRequest('linear.status')
+      ])
+      if (stale) {
+        return
       }
+      const okResult = (entry: (typeof settled)[number]): RpcSuccess | null =>
+        entry.status === 'fulfilled' && entry.value.ok ? (entry.value as RpcSuccess) : null
+      const [settingsRes, uiRes, statusRes, preflightRes, linearRes] = settled
+
+      const settingsResult = okResult(settingsRes)
+      const settingsValue = settingsResult
+        ? (
+            settingsResult.result as {
+              settings: RuntimeSettings & { visibleTaskProviders?: unknown }
+            }
+          ).settings
+        : null
+      if (settingsValue) {
+        setRuntimeSettings(settingsValue)
+      }
+      const uiResult = okResult(uiRes)
+      if (uiResult) {
+        const ui = (uiResult.result as { ui?: { trustedOrcaHooks?: PersistedTrustedOrcaHooks } }).ui
+        setTrustedOrcaHooks(ui?.trustedOrcaHooks ?? {})
+      }
+      // Tasks is an additive RPC surface, so older paired desktops without the
+      // capability fall back to branch + blank sources only.
+      const statusResult = okResult(statusRes)
+      const capabilities =
+        (statusResult?.result as { capabilities?: string[] } | undefined)?.capabilities ?? []
+      setTasksSupported(capabilities.includes(MOBILE_TASKS_CAPABILITY))
+      const glabInstalled =
+        (okResult(preflightRes)?.result as { glab?: { installed?: boolean } } | undefined)?.glab
+          ?.installed === true
+      const linearConnected =
+        (okResult(linearRes)?.result as { connected?: boolean } | undefined)?.connected === true
+      const visibleProviders = normalizeVisibleTaskProviders(settingsValue?.visibleTaskProviders)
+      setAvailableProviders(
+        // Drop filterAvailableTaskProviders' forced 'github' fallback when the user
+        // hid GitHub; the Branch tab always guarantees at least one tab remains.
+        filterAvailableTaskProviders(visibleProviders, {
+          gitlabInstalled: glabInstalled,
+          linearConnected
+        }).filter((provider) => visibleProviders.includes(provider))
+      )
     })()
     return () => {
       stale = true
@@ -558,21 +602,6 @@ function NewWorktreeModalContent({
       const trimmedName = name.trim()
       const baseName = trimmedName || getSuggestedCreatureName(existingWorktreePaths ?? [])
 
-      // Why: mirrors src/renderer/src/store/slices/worktrees.ts
-      // (createWorktree retry loop). Server-side checks (Branch X already
-      // exists locally / on a remote / already has PR #N) can fire even
-      // after the pre-flight basename dedupe — branches outlive worktrees
-      // in git, and remote branches/PRs aren't visible from worktree.ps.
-      // Retry up to 25 times by appending -2, -3, ... before surfacing
-      // the error. The desktop applies this to user-typed names too, so
-      // mobile follows suit for parity.
-      const retryablePatterns = [
-        /already exists locally/i,
-        /already exists on a remote/i,
-        /already has pr #\d+/i
-      ]
-      const candidateFor = (attempt: number): string =>
-        attempt === 0 ? baseName : `${baseName}-${attempt + 1}`
       let setupDecision: SetupDecision = 'inherit'
       if (setupCommand) {
         if (options.setupOverride) {
@@ -605,38 +634,37 @@ function NewWorktreeModalContent({
         return
       }
 
-      let lastError: string | null = null
-      for (let attempt = 0; attempt < 25; attempt += 1) {
-        const candidateName = candidateFor(attempt)
-        const params: Record<string, unknown> = {
-          repo: `id:${selectedRepo.id}`,
-          startupCommand: command,
-          setupDecision,
-          name: candidateName
-        }
-        if (selectedAgent.id !== '__blank__') {
-          params.createdWithAgent = selectedAgent.id
-        }
-        if (note.trim()) {
-          params.comment = note.trim()
-        }
-
-        const response = await client.sendRequest('worktree.create', params, {
-          timeoutMs: WORKTREE_CREATE_TIMEOUT_MS
-        })
-        if (response.ok) {
-          const result = (response as RpcSuccess).result as { worktree: { id: string } }
-          onClose()
-          onCreated(result.worktree.id, candidateName)
-          return
-        }
-
-        lastError = response.error.message
-        if (!retryablePatterns.some((p) => p.test(lastError ?? ''))) {
-          break
-        }
+      const createdWithAgentId = selectedAgent.id !== '__blank__' ? selectedAgent.id : undefined
+      const trimmedNote = note.trim() || undefined
+      const result =
+        workspaceSource.kind === 'blank'
+          ? await createBlankWorkspace({
+              client,
+              repoId: selectedRepo.id,
+              baseName,
+              startupCommand: command,
+              createdWithAgentId,
+              comment: trimmedNote,
+              setupDecision
+            })
+          : await createWorkspaceFromSource({
+              client,
+              source: workspaceSource,
+              targetRepoId: resolveSourceRepoId(workspaceSource) ?? selectedRepo.id,
+              setupDecision,
+              agent: {
+                choice: normalizeWorkspaceAgent(selectedAgent.id) ?? 'blank',
+                startupCommand: command
+              },
+              workspaceName: name.trim() || undefined,
+              note: trimmedNote
+            })
+      if ('error' in result) {
+        setError(result.error)
+        return
       }
-      setError(lastError ?? 'Failed to create workspace')
+      onClose()
+      onCreated(result.worktreeId, result.name)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create workspace')
     } finally {
@@ -674,6 +702,36 @@ function NewWorktreeModalContent({
     // prevents the keyboard from reopening under the picker drawer.
     setNameAutoFocusEnabled(false)
     Keyboard.dismiss()
+  }
+
+  function handleSourceSelected(source: WorkspaceSource): void {
+    // A GitHub/GitLab work item dictates its own repo; pin the repo picker to it.
+    const pinnedRepoId = resolveSourceRepoId(source)
+    if (pinnedRepoId) {
+      const pinnedRepo = repos.find((repo) => repo.id === pinnedRepoId)
+      if (pinnedRepo) {
+        setSelectedRepo(pinnedRepo)
+      }
+    }
+    setWorkspaceSource(source)
+  }
+
+  async function approveSetupTrust(alwaysTrust: boolean): Promise<void> {
+    if (!setupTrustPrompt) {
+      return
+    }
+    try {
+      await persistSetupHookTrust(
+        setupTrustPrompt.repoId,
+        setupTrustPrompt.contentHash,
+        alwaysTrust
+      )
+      const approvedHash = setupTrustPrompt.contentHash
+      setSetupTrustPrompt(null)
+      await handleCreate({ setupOverride: 'run', approvedSetupContentHash: approvedHash })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to trust setup script.')
+    }
   }
 
   return (
@@ -715,6 +773,22 @@ function NewWorktreeModalContent({
                   numberOfLines={1}
                 >
                   {selectedRepo?.displayName ?? 'Select a repository'}
+                </Text>
+                <ChevronDown size={14} color={colors.textMuted} />
+              </Pressable>
+            </View>
+
+            <View style={styles.field}>
+              <Text style={styles.label}>Start from</Text>
+              <Pressable
+                style={styles.fieldButton}
+                onPress={() => {
+                  prepareSelectionPickerOpen()
+                  setShowSourcePicker(true)
+                }}
+              >
+                <Text style={styles.fieldButtonText} numberOfLines={1}>
+                  {describeWorkspaceSource(workspaceSource).label}
                 </Text>
                 <ChevronDown size={14} color={colors.textMuted} />
               </Pressable>
@@ -910,7 +984,16 @@ function NewWorktreeModalContent({
         title="Repository"
         items={repoPickerItems}
         selectedId={selectedRepo?.id ?? ''}
-        onSelect={(item) => setSelectedRepo(item.repo)}
+        onSelect={(item) => {
+          const repoChanged = item.repo.id !== selectedRepo?.id
+          setSelectedRepo(item.repo)
+          // Branch and GitHub/GitLab sources are tied to the repo they were
+          // searched from; switching repos invalidates them, so reset to blank.
+          // Linear issues are repo-agnostic and survive.
+          if (repoChanged && isRepoBoundSource(workspaceSource)) {
+            setWorkspaceSource({ kind: 'blank' })
+          }
+        }}
         onClose={() => setShowRepoPicker(false)}
         renderIcon={(item) => {
           return <View style={[styles.repoDot, { backgroundColor: repoBadgeColor(item.repo) }]} />
@@ -930,100 +1013,29 @@ function NewWorktreeModalContent({
         renderIcon={(agent) => <MobileAgentIcon agentId={agent.id} size={18} />}
       />
 
-      <BottomDrawer
+      <WorkspaceSourcePickerDrawer
+        visible={visible && showSourcePicker}
+        client={client}
+        tasksSupported={tasksSupported}
+        availableProviders={availableProviders}
+        repoId={selectedRepo?.id ?? null}
+        sshReady={!sshGate.requiresConnection}
+        onSelect={handleSourceSelected}
+        onClose={() => setShowSourcePicker(false)}
+      />
+
+      <SetupHookTrustDrawer
         visible={visible && setupTrustPrompt != null}
+        prompt={setupTrustPrompt}
+        busy={creating}
+        onRunOnce={() => void approveSetupTrust(false)}
+        onAlwaysTrust={() => void approveSetupTrust(true)}
+        onDontRun={() => {
+          setSetupTrustPrompt(null)
+          void handleCreate({ setupOverride: 'skip' })
+        }}
         onClose={() => setSetupTrustPrompt(null)}
-      >
-        {setupTrustPrompt ? (
-          <View>
-            <View style={styles.trustHeader}>
-              <Text style={styles.title}>
-                {setupTrustPrompt.previouslyApproved
-                  ? `${setupTrustPrompt.repoName}'s setup script changed`
-                  : `Run setup from ${setupTrustPrompt.repoName}?`}
-              </Text>
-              <Text style={styles.subtitle}>
-                This repository's orca.yaml runs before the workspace starts. Only run it if you
-                trust this repository.
-              </Text>
-            </View>
-
-            <View style={styles.trustScriptBox}>
-              <Text style={styles.trustScriptLabel}>
-                {setupTrustPrompt.previouslyApproved ? 'New setup script' : 'Setup script'}
-              </Text>
-              <Text style={styles.trustScriptText}>{setupTrustPrompt.scriptContent}</Text>
-            </View>
-
-            <View style={styles.trustActionGroup}>
-              <Pressable
-                style={styles.trustActionRow}
-                disabled={creating}
-                onPress={() =>
-                  void (async () => {
-                    try {
-                      await persistSetupHookTrust(
-                        setupTrustPrompt.repoId,
-                        setupTrustPrompt.contentHash,
-                        false
-                      )
-                      const approvedHash = setupTrustPrompt.contentHash
-                      setSetupTrustPrompt(null)
-                      await handleCreate({
-                        setupOverride: 'run',
-                        approvedSetupContentHash: approvedHash
-                      })
-                    } catch (err) {
-                      setError(err instanceof Error ? err.message : 'Failed to trust setup script.')
-                    }
-                  })()
-                }
-              >
-                <Check size={16} color={colors.textPrimary} />
-                <Text style={styles.trustActionText}>Run hooks</Text>
-              </Pressable>
-              <View style={styles.trustActionSeparator} />
-              <Pressable
-                style={styles.trustActionRow}
-                disabled={creating}
-                onPress={() =>
-                  void (async () => {
-                    try {
-                      await persistSetupHookTrust(
-                        setupTrustPrompt.repoId,
-                        setupTrustPrompt.contentHash,
-                        true
-                      )
-                      const approvedHash = setupTrustPrompt.contentHash
-                      setSetupTrustPrompt(null)
-                      await handleCreate({
-                        setupOverride: 'run',
-                        approvedSetupContentHash: approvedHash
-                      })
-                    } catch (err) {
-                      setError(err instanceof Error ? err.message : 'Failed to trust setup script.')
-                    }
-                  })()
-                }
-              >
-                <Check size={16} color={colors.textPrimary} />
-                <Text style={styles.trustActionText}>Always trust and run</Text>
-              </Pressable>
-              <View style={styles.trustActionSeparator} />
-              <Pressable
-                style={styles.trustActionRow}
-                disabled={creating}
-                onPress={() => {
-                  setSetupTrustPrompt(null)
-                  void handleCreate({ setupOverride: 'skip' })
-                }}
-              >
-                <Text style={styles.trustActionText}>Don't run</Text>
-              </Pressable>
-            </View>
-          </View>
-        ) : null}
-      </BottomDrawer>
+      />
     </>
   )
 }
@@ -1246,52 +1258,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: typography.monoFamily,
     color: colors.textPrimary
-  },
-  trustHeader: {
-    paddingHorizontal: spacing.xs,
-    marginBottom: spacing.md
-  },
-  trustScriptBox: {
-    backgroundColor: colors.bgRaised,
-    borderRadius: radii.input,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    padding: spacing.md,
-    marginBottom: spacing.md
-  },
-  trustScriptLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textSecondary,
-    marginBottom: spacing.sm
-  },
-  trustScriptText: {
-    fontSize: 13,
-    fontFamily: typography.monoFamily,
-    color: colors.textPrimary
-  },
-  trustActionGroup: {
-    backgroundColor: colors.bgPanel,
-    borderRadius: radii.input,
-    overflow: 'hidden'
-  },
-  trustActionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md
-  },
-  trustActionText: {
-    flex: 1,
-    fontSize: typography.bodySize,
-    color: colors.textPrimary,
-    fontWeight: '500'
-  },
-  trustActionSeparator: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.borderSubtle,
-    marginHorizontal: spacing.md
   },
   actions: {
     flexDirection: 'row',
