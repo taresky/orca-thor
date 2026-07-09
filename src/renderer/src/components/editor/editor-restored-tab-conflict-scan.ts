@@ -41,7 +41,10 @@ export function attachRestoredTabConflictScan(store: AppStoreApi): () => void {
   const inFlightFileIds = new Set<string>()
   const attemptsByFileId = new Map<string, number>()
   const retryTimers = new Set<ReturnType<typeof setTimeout>>()
-  const verifyQueue: OpenFile[] = []
+  // Why: queue ids, not OpenFile snapshots. Ids are paths, so a snapshot can go
+  // stale (close/reopen or save at the same path) while it waits for a slot;
+  // the live file is re-read at dispatch instead.
+  const verifyQueue: string[] = []
   let activeVerifyReads = 0
   let disposed = false
 
@@ -153,7 +156,23 @@ export function attachRestoredTabConflictScan(store: AppStoreApi): () => void {
 
   const pumpVerifyQueue = (): void => {
     while (!disposed && activeVerifyReads < MAX_CONCURRENT_VERIFY_READS && verifyQueue.length > 0) {
-      const file = verifyQueue.shift()!
+      const fileId = verifyQueue.shift()!
+      // Why: re-read the live file when the slot opens. A queued id may now
+      // resolve to a reopened or saved same-path tab, so re-validate it against
+      // the current state before spending a disk read; skipping frees the dedupe
+      // marker so a later scan can re-queue it if it needs verification again.
+      const file = store.getState().openFiles.find((f) => f.id === fileId)
+      if (
+        !file ||
+        !file.pendingDiskBaselineVerification ||
+        !file.isDirty ||
+        !file.lastKnownDiskSignature ||
+        file.externalMutation === 'changed' ||
+        !canAutoSaveOpenFile(file)
+      ) {
+        inFlightFileIds.delete(fileId)
+        continue
+      }
       activeVerifyReads += 1
       const onSettled = (): void => {
         activeVerifyReads -= 1
@@ -181,7 +200,7 @@ export function attachRestoredTabConflictScan(store: AppStoreApi): () => void {
         continue
       }
       inFlightFileIds.add(file.id)
-      verifyQueue.push(file)
+      verifyQueue.push(file.id)
     }
     pumpVerifyQueue()
   }
