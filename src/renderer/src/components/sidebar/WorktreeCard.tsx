@@ -26,6 +26,7 @@ import { AutoRenameFailedDialog } from './AutoRenameFailedDialog'
 import { LinearAgentSkillSetupPrompt } from './LinearAgentSkillSetupPrompt'
 import WorktreeCardAgents from './WorktreeCardAgents'
 import { useWorktreeAgentRows } from './useWorktreeAgentRows'
+import { WorktreeBrowserTabIndicator } from './WorktreeBrowserTabIndicator'
 import { WorktreeCardStatusSlot } from './WorktreeCardStatusSlot'
 import { cn } from '@/lib/utils'
 import { activateWorktreeFromSidebar } from '@/lib/sidebar-worktree-activation'
@@ -1577,6 +1578,8 @@ const WorktreeCard = React.memo(function WorktreeCard({
                 </TooltipContent>
               </Tooltip>
             )}
+
+            <WorktreeBrowserTabIndicator worktreeId={worktree.id} />
 
             {showTitleRowIndicators && titleRowIndicators}
           </div>

@@ -482,6 +482,36 @@ describe('WorktreeCard quick actions', () => {
     expect(markup).not.toContain('aria-label="Delete workspace"')
   })
 
+  it('identifies the workspace that owns live browser tabs', () => {
+    const owner = makeWorktree()
+    const other = makeWorktree({ id: 'repo-1::/repo/worktrees/no-browser' })
+    browserTabsByWorktree = { [owner.id]: [{ id: 'browser-1' }, { id: 'browser-2' }] }
+
+    const ownerMarkup = renderToStaticMarkup(
+      <WorktreeCard worktree={owner} repo={makeRepo()} isActive={false} />
+    )
+    const otherMarkup = renderToStaticMarkup(
+      <WorktreeCard worktree={other} repo={makeRepo()} isActive={false} />
+    )
+
+    expect(ownerMarkup).toContain('data-worktree-browser-tab-count="2"')
+    expect(ownerMarkup).toContain('aria-label="2 open browser tabs"')
+    expect(ownerMarkup).toContain('lucide-globe')
+    expect(otherMarkup).not.toContain('data-worktree-browser-tab-count')
+
+    browserTabsByWorktree = { [owner.id]: [{ id: 'browser-1' }] }
+    const singleMarkup = renderToStaticMarkup(
+      <WorktreeCard worktree={owner} repo={makeRepo()} isActive={false} />
+    )
+    expect(singleMarkup).toContain('aria-label="1 open browser tab"')
+
+    browserTabsByWorktree = {}
+    const closedMarkup = renderToStaticMarkup(
+      <WorktreeCard worktree={owner} repo={makeRepo()} isActive={false} />
+    )
+    expect(closedMarkup).not.toContain('data-worktree-browser-tab-count')
+  })
+
   it('does not show sleep as the top-right quick action for an active workspace', () => {
     const worktree = makeWorktree()
     tabsByWorktree = { [worktree.id]: [{ id: 'tab-1' }] }

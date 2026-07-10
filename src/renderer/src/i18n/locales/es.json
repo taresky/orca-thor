@@ -4645,6 +4645,10 @@
           "cancel": "Cancel",
           "forget": "Eliminar de Orca",
           "reconnectAndDelete": "Reconectar y eliminar"
+        },
+        "WorktreeBrowserTabIndicator": {
+          "single": "1 open browser tab",
+          "multiple": "{{value0}} open browser tabs"
         }
       },
       "shared": {

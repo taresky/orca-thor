@@ -4645,6 +4645,10 @@
           "cancel": "Cancel",
           "forget": "Orca에서 제거",
           "reconnectAndDelete": "재연결 후 삭제"
+        },
+        "WorktreeBrowserTabIndicator": {
+          "single": "1 open browser tab",
+          "multiple": "{{value0}} open browser tabs"
         }
       },
       "shared": {
