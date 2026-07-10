@@ -14,8 +14,8 @@ export type LargeFileCountRepoOptions = {
   filesPerDirectory?: number
   /**
    * Minimum size of each untracked file. Untracked line stats read full file
-   * contents (mtime-cached, but the cache caps at 2,048 entries), so per-poll
-   * I/O cost only shows up when untracked files have realistic sizes.
+   * contents (mtime-cached), so per-poll I/O cost only shows up when
+   * untracked files have realistic sizes.
    */
   untrackedFileBytes?: number
 }

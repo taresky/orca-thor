@@ -356,24 +356,26 @@ test.describe('Source Control large file count (#8013)', () => {
 
   test('untracked line-stat cache stays effective above 2,048 files', async ({ orcaPage }) => {
     test.setTimeout(600_000)
-    // Why: the untracked line-stat cache caps at 2,048 entries with FIFO
-    // eviction. A sequential scan over more files than the cap evicts every
-    // entry before the next poll revisits it (0% hit rate), so each 3s poll
-    // re-reads every untracked file's contents. Compare per-file warm rescan
-    // cost under vs over the cap on the same machine — a healthy cache keeps
-    // the ratio near 1; thrash makes it several-fold.
+    // Why: the untracked line-stat cache historically capped at 2,048 entries
+    // with FIFO eviction, so a sequential scan over more files evicted every
+    // entry before the next poll revisited it (0% hit rate) and each 3s poll
+    // re-read every untracked file's contents. The cache is now LRU and sized
+    // to the status entry limit; this gate keeps it that way by comparing
+    // per-file warm rescan cost at two scales on the same machine — a healthy
+    // cache keeps the ratio near 1, thrash makes it several-fold.
     const fileBytes = 65_536
     const smallRepo = createLargeFileCountRepo({
       trackedFiles: 10,
       untrackedFiles: 2_000,
       untrackedFileBytes: fileBytes
     })
-    const largeRepo = createLargeFileCountRepo({
-      trackedFiles: 10,
-      untrackedFiles: 4_000,
-      untrackedFileBytes: fileBytes
-    })
+    let largeRepo: ReturnType<typeof createLargeFileCountRepo> | null = null
     try {
+      largeRepo = createLargeFileCountRepo({
+        trackedFiles: 10,
+        untrackedFiles: 4_000,
+        untrackedFileBytes: fileBytes
+      })
       await waitForSessionReady(orcaPage)
 
       const warmRescanPerFileMs = async (repoPath: string, files: number): Promise<number> => {
@@ -395,7 +397,9 @@ test.describe('Source Control large file count (#8013)', () => {
       expect(largePerFileMs).toBeLessThan(smallPerFileMs * 2)
     } finally {
       await removeLargeFileCountRepo(smallRepo.repoPath)
-      await removeLargeFileCountRepo(largeRepo.repoPath)
+      if (largeRepo) {
+        await removeLargeFileCountRepo(largeRepo.repoPath)
+      }
     }
   })
 
