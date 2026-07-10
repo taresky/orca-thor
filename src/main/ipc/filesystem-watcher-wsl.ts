@@ -2,6 +2,9 @@
 import type { WebContents } from 'electron'
 import type { Event as WatcherEvent } from '@parcel/watcher'
 import { queueWatcherEvents } from './filesystem-watcher-event-batch'
+import { clearWslWatcherTimers, stopWslWatcherEngines } from './filesystem-watcher-wsl-disposal'
+import { isPermanentWslNativeFailure } from './filesystem-watcher-wsl-failure-policy'
+import { canonicalizeWslLinuxPath } from './filesystem-watcher-wsl-host-lifecycle'
 import {
   createWslNativeEngine,
   createWslSnapshotEngine,
@@ -31,11 +34,16 @@ export type WatchedRoot = {
 export type WslWatcherDeps = {
   ignoreDirs: string[]
   scheduleBatchFlush: (rootKey: string, root: WatchedRoot) => void
+  signal?: AbortSignal
 }
 
 const RESTART_DELAYS_MS = [500, 1_000, 2_000, 5_000, 10_000] as const
-const STABLE_ENGINE_MS = 30_000
-const STOPPED_DISTRO_RECHECK_MS = 5_000
+const STABLE_ENGINE_MS = 30_000,
+  STOPPED_DISTRO_RECHECK_MS = 5_000
+const NATIVE_REPROBE_DELAY_MS = 30_000
+const UNSTABLE_NATIVE_EXIT_LIMIT = 3
+
+type StartedEngine = { engine: WslWatchEngine; kind: 'native' | 'snapshot' }
 
 function markOverflow(root: WatchedRoot): void {
   if (root.batch.timer) {
@@ -62,17 +70,50 @@ export async function createWslWatcher(
     batch: { events: [], overflowed: false, timer: null, firstEventAt: 0 }
   }
   let activeEngine: WslWatchEngine | null = null
-  let startingEngine: WslWatchEngine | null = null
+  let activeEngineKind: StartedEngine['kind'] | null = null
+  const startingEngines = new Set<WslWatchEngine>()
+  let startGeneration = 0
   let disposed = false
   let nativeUnavailable = false
+  let nativePermanentlyUnavailable = false
+  let nativeRetryNeeded = false
+  let unstableNativeExits = 0
   let restartAttempt = 0
   let restartTimer: ReturnType<typeof setTimeout> | null = null
   let stabilityTimer: ReturnType<typeof setTimeout> | null = null
+  let nativeRetryTimer: ReturnType<typeof setTimeout> | null = null
   const maximumRestartDelay = RESTART_DELAYS_MS.at(-1) ?? 10_000
+
+  const dispose = (): void => {
+    if (!disposed) {
+      disposed = true
+      clearWslWatcherTimers([restartTimer, stabilityTimer, nativeRetryTimer])
+      startGeneration += 1
+      stopWslWatcherEngines(startingEngines, activeEngine)
+      activeEngine = null
+      activeEngineKind = null
+    }
+  }
+
+  const beginEngineStart = (engine: WslWatchEngine): number => {
+    const generation = ++startGeneration
+    // Why: a newer recovery attempt supersedes every older pending attempt;
+    // stopping all of them prevents late readiness from leaking a watcher.
+    for (const pending of startingEngines) {
+      pending.stop()
+    }
+    startingEngines.add(engine)
+    return generation
+  }
+  const finishEngineStart = (engine: WslWatchEngine): void => {
+    startingEngines.delete(engine)
+  }
+  const isCurrentStart = (generation: number): boolean =>
+    !disposed && generation === startGeneration
 
   const context: WslEngineContext = {
     distro: wsl.distro,
-    linuxPath: wsl.linuxPath,
+    linuxPath: canonicalizeWslLinuxPath(wsl.linuxPath),
     worktreePath,
     ignoreDirs: deps.ignoreDirs,
     onEvents: (events) => {
@@ -85,37 +126,79 @@ export async function createWslWatcher(
     }
   }
 
-  const startEngine = async (): Promise<WslWatchEngine> => {
+  const recordNativeFailure = (error: unknown): void => {
+    nativeUnavailable = true
+    if (isPermanentWslNativeFailure(error)) {
+      nativePermanentlyUnavailable = true
+      nativeRetryNeeded = false
+    } else {
+      nativeRetryNeeded = true
+    }
+  }
+
+  const startEngine = async (): Promise<StartedEngine | null> => {
+    if (disposed) {
+      return null
+    }
     if (!nativeUnavailable) {
       const native = createWslNativeEngine(context)
-      startingEngine = native
+      const generation = beginEngineStart(native)
       try {
         await native.ready
-        startingEngine = null
-        return native
-      } catch (error) {
-        startingEngine = null
-        nativeUnavailable = true
-        native.stop()
-        if (disposed) {
-          throw error
+        finishEngineStart(native)
+        if (!isCurrentStart(generation)) {
+          native.stop()
+          return null
         }
+        return { engine: native, kind: 'native' }
+      } catch (error) {
+        finishEngineStart(native)
+        native.stop()
+        if (!isCurrentStart(generation)) {
+          return null
+        }
+        recordNativeFailure(error)
       }
     }
+    if (disposed) {
+      return null
+    }
     const snapshot = createWslSnapshotEngine(context)
-    startingEngine = snapshot
+    const generation = beginEngineStart(snapshot)
     try {
       await snapshot.ready
     } catch (error) {
+      finishEngineStart(snapshot)
       snapshot.stop()
+      if (!isCurrentStart(generation)) {
+        return null
+      }
+      // Why: without a live snapshot, transient native failures must be
+      // retried by the bounded restart loop instead of pinning an unwatched root.
+      if (nativeRetryNeeded && !nativePermanentlyUnavailable) {
+        nativeUnavailable = false
+      }
       throw error
-    } finally {
-      startingEngine = null
     }
-    return snapshot
+    finishEngineStart(snapshot)
+    if (!isCurrentStart(generation)) {
+      snapshot.stop()
+      return null
+    }
+    return { engine: snapshot, kind: 'snapshot' }
   }
 
   let installEngine: () => Promise<void>
+  let reprobeNative: () => Promise<void>
+  const scheduleNativeReprobe = (): void => {
+    if (disposed || nativePermanentlyUnavailable || !nativeRetryNeeded || nativeRetryTimer) {
+      return
+    }
+    nativeRetryTimer = setTimeout(() => {
+      nativeRetryTimer = null
+      void reprobeNative()
+    }, NATIVE_REPROBE_DELAY_MS)
+  }
   const scheduleRestart = (delay: number): void => {
     restartTimer = setTimeout(() => {
       restartTimer = null
@@ -138,51 +221,113 @@ export async function createWslWatcher(
     }, delay)
   }
 
-  installEngine = async (): Promise<void> => {
-    const engine = await startEngine()
-    if (disposed) {
-      engine.stop()
-      return
+  const activateEngine = (started: StartedEngine): void => {
+    const { engine } = started
+    if (stabilityTimer) {
+      clearTimeout(stabilityTimer)
     }
     activeEngine = engine
+    activeEngineKind = started.kind
     stabilityTimer = setTimeout(() => {
       restartAttempt = 0
+      if (started.kind === 'native') {
+        unstableNativeExits = 0
+      }
     }, STABLE_ENGINE_MS)
-    void engine.stopped.then(() => {
+    if (started.kind === 'snapshot') {
+      scheduleNativeReprobe()
+    }
+    void engine.stopped.then((reason) => {
       if (disposed || activeEngine !== engine) {
         return
       }
       activeEngine = null
+      activeEngineKind = null
       if (stabilityTimer) {
         clearTimeout(stabilityTimer)
+      }
+      if (started.kind === 'native' && reason !== 'topology') {
+        unstableNativeExits += 1
+        if (unstableNativeExits >= UNSTABLE_NATIVE_EXIT_LIMIT) {
+          // Why: a host that repeatedly starts and dies is less reliable than
+          // the scanner; circuit-break temporarily, then probe native again.
+          nativeUnavailable = true
+          nativeRetryNeeded = true
+        }
       }
       markOverflow(root)
       deps.scheduleBatchFlush(rootKey, root)
       const delay =
-        RESTART_DELAYS_MS.at(Math.min(restartAttempt, RESTART_DELAYS_MS.length - 1)) ??
-        maximumRestartDelay
-      restartAttempt += 1
+        RESTART_DELAYS_MS.at(
+          reason === 'topology' ? 0 : Math.min(restartAttempt, RESTART_DELAYS_MS.length - 1)
+        ) ?? maximumRestartDelay
+      if (reason !== 'topology') {
+        restartAttempt += 1
+      }
       // Why: WSL shutdowns and transient distro failures must not permanently
       // orphan an active renderer subscription.
       scheduleRestart(delay)
     })
   }
 
-  await installEngine()
-  root.subscription = {
-    unsubscribe: async () => {
-      disposed = true
-      if (restartTimer) {
-        clearTimeout(restartTimer)
-      }
-      if (stabilityTimer) {
-        clearTimeout(stabilityTimer)
-      }
-      startingEngine?.stop()
-      startingEngine = null
-      activeEngine?.stop()
-      activeEngine = null
+  reprobeNative = async (): Promise<void> => {
+    const snapshot = activeEngineKind === 'snapshot' ? activeEngine : null
+    if (disposed || !snapshot) {
+      return
     }
+    const native = createWslNativeEngine(context)
+    const generation = beginEngineStart(native)
+    try {
+      await native.ready
+    } catch (error) {
+      finishEngineStart(native)
+      native.stop()
+      if (!isCurrentStart(generation)) {
+        return
+      }
+      recordNativeFailure(error)
+      scheduleNativeReprobe()
+      return
+    }
+    finishEngineStart(native)
+    if (!isCurrentStart(generation) || activeEngine !== snapshot) {
+      native.stop()
+      return
+    }
+    // Why: keep snapshots live until native is ready so recovery probes never
+    // create an unwatched gap after a transient or unstable native failure.
+    nativeUnavailable = false
+    nativeRetryNeeded = false
+    // Why: snapshot output and native readiness have no shared sequence token;
+    // one conservative refresh closes the handoff race without duplicate paths.
+    markOverflow(root)
+    deps.scheduleBatchFlush(rootKey, root)
+    activateEngine({ engine: native, kind: 'native' })
+    snapshot.stop()
   }
-  return root
+
+  installEngine = async (): Promise<void> => {
+    const started = await startEngine()
+    if (!started) {
+      return
+    }
+    activateEngine(started)
+  }
+
+  const onAbort = (): void => dispose()
+  if (deps.signal?.aborted) {
+    dispose()
+    throw new Error('WSL watcher startup was cancelled')
+  }
+  deps.signal?.addEventListener('abort', onAbort, { once: true })
+  try {
+    await installEngine()
+    if (disposed) {
+      throw new Error('WSL watcher startup was cancelled')
+    }
+    root.subscription = { unsubscribe: async () => dispose() }
+    return root
+  } finally {
+    deps.signal?.removeEventListener('abort', onAbort)
+  }
 }

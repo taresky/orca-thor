@@ -6,7 +6,7 @@ export type WslHostMessage =
   | { op: 'subscribed'; id?: unknown }
   | { op: 'subscribe-failed'; id?: unknown; message?: unknown }
   | { op: 'events'; id?: unknown; events?: unknown }
-  | { op: 'watch-error'; id?: unknown; message?: unknown }
+  | { op: 'watch-error'; id?: unknown; message?: unknown; reason?: unknown }
   | { op: 'unsubscribed'; id?: unknown }
   | { op: 'protocol-error'; message?: unknown }
 

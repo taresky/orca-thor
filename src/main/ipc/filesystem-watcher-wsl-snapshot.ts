@@ -2,10 +2,13 @@ import type { Event as WatcherEvent } from '@parcel/watcher'
 
 const POLL_INTERVAL_SECONDS = 5
 const SAFE_IGNORE_NAME = /^[A-Za-z0-9_.-]+$/
-export const SNAPSHOT_START = '\x1e'
-export const SNAPSHOT_END = '\x1f'
+// NUL cannot occur in a Linux filename. An empty NUL record therefore closes
+// a frame without reserving legal filename bytes as stream sentinels.
+export const SNAPSHOT_START = ''
+export const SNAPSHOT_END = '\0'
+export const MAX_SNAPSHOT_RECORD_CHARS = 64 * 1024
 
-type WslSnapshotEntry = {
+export type WslSnapshotEntry = {
   path: string
   type: string
   mtime: string
@@ -34,45 +37,88 @@ function buildPruneExpression(ignoreDirs: readonly string[]): string {
   return `\\( -type d \\( ${names} \\) -prune \\) -o`
 }
 
-export function buildSnapshotScript(ignoreDirs: readonly string[]): string {
+// Why: files can vanish after find batches them. Retry a failed batch one path
+// at a time so churn is skipped without hiding errors for paths that still exist.
+const BUSYBOX_STAT_BATCH_SCRIPT =
+  'tmp="${TMPDIR:-/tmp}/orca-wsl-snapshot-$$"; error="$tmp.error"; ' +
+  'trap \'rm -f "$tmp" "$error"\' EXIT; ' +
+  'if stat -c "%F\t%y" -- "$@" >"$tmp" 2>"$error"; then ' +
+  'exec 3<"$tmp"; for path do IFS= read -r metadata <&3 || exit 75; ' +
+  'printf "%s\\t%s\\0" "$metadata" "$path"; done; ' +
+  'else for path do if metadata=$(stat -c "%F\t%y" -- "$path" 2>"$error"); then ' +
+  'printf "%s\\t%s\\0" "$metadata" "$path"; ' +
+  'elif test ! -e "$path" && test ! -L "$path"; then :; ' +
+  'else cat "$error" >&2; exit 75; fi; done; fi'
+
+function quoteShellArgument(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
+type SnapshotScriptOptions = {
+  forcePortable?: boolean
+  once?: boolean
+}
+
+export function buildSnapshotScript(
+  ignoreDirs: readonly string[],
+  options: SnapshotScriptOptions = {}
+): string {
   const prune = buildPruneExpression(ignoreDirs)
+  const findMode = options.forcePortable
+    ? 'snapshot_find=portable'
+    : 'if find "$root" -printf "" -quit >/dev/null 2>&1; then snapshot_find=gnu; else snapshot_find=portable; fi'
+  const repeat = options.once ? '  exit 0' : `  sleep ${POLL_INTERVAL_SECONDS} || exit 0`
   return [
     'set -efu',
     'root=$1',
+    'command -v find >/dev/null',
+    'command -v stat >/dev/null',
+    'stat -c "%F\t%y" -- "$root" >/dev/null',
+    findMode,
     'while :; do',
-    "  printf '\\036'",
     '  if [ -d "$root" ]; then',
-    // Why: this is the compatibility path; correctness still requires every
-    // nested open file while high-churn directories are pruned during traversal.
-    `    find "$root" -mindepth 1 ${prune} -printf '%y\\t%T@\\t%p\\0' 2>/dev/null || true`,
+    // Why: GNU find is the zero-fork fast path. BusyBox batches paths through
+    // one stat process per ARG_MAX group while retaining NUL-safe filenames.
+    `    if [ "$snapshot_find" = gnu ]; then find "$root" -mindepth 1 ${prune} -printf '%y\\t%T@\\t%p\\0';`,
+    `    else find "$root" -mindepth 1 ${prune} -exec sh -c ${quoteShellArgument(BUSYBOX_STAT_BATCH_SCRIPT)} sh {} +; fi`,
     '  fi',
-    "  printf '\\037'",
-    `  sleep ${POLL_INTERVAL_SECONDS} || exit 0`,
+    "  printf '\\0'",
+    repeat,
     'done'
   ].join('\n')
+}
+
+export function parseSnapshotRecord(
+  rawEntry: string,
+  distro: string
+): [path: string, entry: WslSnapshotEntry] | null {
+  if (!rawEntry || rawEntry.length > MAX_SNAPSHOT_RECORD_CHARS) {
+    return null
+  }
+  const firstTab = rawEntry.indexOf('\t')
+  const secondTab = firstTab === -1 ? -1 : rawEntry.indexOf('\t', firstTab + 1)
+  if (firstTab <= 0 || secondTab <= firstTab + 1) {
+    return null
+  }
+  const linuxPath = rawEntry.slice(secondTab + 1)
+  if (!linuxPath.startsWith('/')) {
+    return null
+  }
+  const entry: WslSnapshotEntry = {
+    type: rawEntry.slice(0, firstTab),
+    mtime: rawEntry.slice(firstTab + 1, secondTab),
+    path: toWslUncPath(linuxPath, distro)
+  }
+  return [entry.path, entry]
 }
 
 export function parseSnapshotFrame(frame: string, distro: string): WslSnapshot {
   const snapshot: WslSnapshot = new Map()
   for (const rawEntry of frame.split('\0')) {
-    if (!rawEntry) {
-      continue
+    const parsed = parseSnapshotRecord(rawEntry, distro)
+    if (parsed) {
+      snapshot.set(...parsed)
     }
-    const firstTab = rawEntry.indexOf('\t')
-    const secondTab = firstTab === -1 ? -1 : rawEntry.indexOf('\t', firstTab + 1)
-    if (firstTab <= 0 || secondTab <= firstTab + 1) {
-      continue
-    }
-    const linuxPath = rawEntry.slice(secondTab + 1)
-    if (!linuxPath.startsWith('/')) {
-      continue
-    }
-    const entry: WslSnapshotEntry = {
-      type: rawEntry.slice(0, firstTab),
-      mtime: rawEntry.slice(firstTab + 1, secondTab),
-      path: toWslUncPath(linuxPath, distro)
-    }
-    snapshot.set(entry.path, entry)
   }
   return snapshot
 }

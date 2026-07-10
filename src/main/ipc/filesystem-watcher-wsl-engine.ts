@@ -3,20 +3,20 @@ import { StringDecoder } from 'node:string_decoder'
 import type { Event as WatcherEvent } from '@parcel/watcher'
 import {
   subscribeViaWslWatcherHost,
+  type WslHostStopReason,
   type WslHostSubscription
 } from './filesystem-watcher-wsl-host-client'
 import {
   buildSnapshotScript,
   diffSnapshots,
-  parseSnapshotFrame,
-  SNAPSHOT_END,
-  SNAPSHOT_START,
+  MAX_SNAPSHOT_RECORD_CHARS,
+  parseSnapshotRecord,
   type WslSnapshot
 } from './filesystem-watcher-wsl-snapshot'
 
 export type WslWatchEngine = {
   ready: Promise<void>
-  stopped: Promise<void>
+  stopped: Promise<WslHostStopReason>
   stop(): void
 }
 
@@ -30,7 +30,7 @@ export type WslEngineContext = {
 }
 
 const SNAPSHOT_STARTUP_TIMEOUT_MS = 30_000
-const MAX_STREAM_BUFFER_CHARS = 10 * 1024 * 1024
+const MAX_SNAPSHOT_ENTRIES = 1_000_000
 
 function createChildEngine(
   args: string[],
@@ -50,12 +50,12 @@ function createChildEngine(
   const stderrDecoder = new StringDecoder('utf8')
   let resolveReady!: () => void
   let rejectReady!: (error: Error) => void
-  let resolveStopped!: () => void
+  let resolveStopped!: (reason: WslHostStopReason) => void
   const ready = new Promise<void>((resolve, reject) => {
     resolveReady = resolve
     rejectReady = reject
   })
-  const stopped = new Promise<void>((resolve) => {
+  const stopped = new Promise<WslHostStopReason>((resolve) => {
     resolveStopped = resolve
   })
   const settleReady = (error?: Error): void => {
@@ -75,7 +75,7 @@ function createChildEngine(
       return
     }
     stoppedSettled = true
-    resolveStopped()
+    resolveStopped('failure')
   }
   const stop = (): void => {
     if (disposed) {
@@ -134,14 +134,14 @@ export function createWslNativeEngine(context: WslEngineContext): WslWatchEngine
   const abortController = new AbortController()
   let disposed = false
   let stoppedSettled = false
-  let resolveStopped!: () => void
-  const stopped = new Promise<void>((resolve) => {
+  let resolveStopped!: (reason: WslHostStopReason) => void
+  const stopped = new Promise<WslHostStopReason>((resolve) => {
     resolveStopped = resolve
   })
-  const settleStopped = (): void => {
+  const settleStopped = (reason: WslHostStopReason = 'failure'): void => {
     if (!stoppedSettled) {
       stoppedSettled = true
-      resolveStopped()
+      resolveStopped(reason)
     }
   }
   const ready = subscribeViaWslWatcherHost(
@@ -178,44 +178,51 @@ export function createWslNativeEngine(context: WslEngineContext): WslWatchEngine
 }
 
 export function createWslSnapshotEngine(context: WslEngineContext): WslWatchEngine {
-  let streamBuffer = ''
+  let recordBuffer = ''
+  let current: WslSnapshot = new Map()
   let previous: WslSnapshot | null = null
   const decoder = new StringDecoder('utf8')
+  const finishSnapshot = (settleReady: (error?: Error) => void): void => {
+    if (!previous) {
+      previous = current
+      settleReady()
+    } else {
+      const events = diffSnapshots(previous, current)
+      previous = current
+      if (events.length > 0) {
+        context.onEvents(events)
+      }
+    }
+    current = new Map()
+  }
   return createChildEngine(
     ['-d', context.distro, '--', 'sh', '-s', '--', context.linuxPath],
     buildSnapshotScript(context.ignoreDirs),
     SNAPSHOT_STARTUP_TIMEOUT_MS,
     context.worktreePath,
     (chunk, settleReady, stop) => {
-      streamBuffer += decoder.write(chunk)
+      recordBuffer += decoder.write(chunk)
       while (true) {
-        const start = streamBuffer.indexOf(SNAPSHOT_START)
-        if (start === -1) {
-          streamBuffer = streamBuffer.slice(-1)
-          return
-        }
-        if (start > 0) {
-          streamBuffer = streamBuffer.slice(start)
-        }
-        const end = streamBuffer.indexOf(SNAPSHOT_END, 1)
+        const end = recordBuffer.indexOf('\0')
         if (end === -1) {
-          if (streamBuffer.length > MAX_STREAM_BUFFER_CHARS) {
+          if (recordBuffer.length > MAX_SNAPSHOT_RECORD_CHARS) {
             context.onOverflow()
             stop()
           }
           return
         }
-        const next = parseSnapshotFrame(streamBuffer.slice(1, end), context.distro)
-        streamBuffer = streamBuffer.slice(end + 1)
-        if (!previous) {
-          previous = next
-          settleReady()
+        const rawRecord = recordBuffer.slice(0, end)
+        recordBuffer = recordBuffer.slice(end + 1)
+        if (rawRecord.length === 0) {
+          finishSnapshot(settleReady)
         } else {
-          const events = diffSnapshots(previous, next)
-          previous = next
-          if (events.length > 0) {
-            context.onEvents(events)
+          const parsed = parseSnapshotRecord(rawRecord, context.distro)
+          if (!parsed || current.size >= MAX_SNAPSHOT_ENTRIES) {
+            context.onOverflow()
+            stop()
+            return
           }
+          current.set(...parsed)
         }
       }
     }

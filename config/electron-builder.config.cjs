@@ -67,9 +67,10 @@ module.exports = {
     '!{AGENTS.md,CLAUDE.md,DEVELOPING.md,bundle-size-progress.md}',
     '!out/**/*.test.js',
     // Why: these Linux-host artifacts are staged as a Windows-only external
-    // resource; including either copy in app.asar would duplicate ~62 MB.
+    // resource; app.asar must exclude compiled, prepared, and failed temp copies.
     '!out/main/wsl-watcher-host.js',
     '!out/wsl-watcher{,/**/*}',
+    '!out/wsl-watcher.*{,/**/*}',
     '!electron.vite.config.{js,ts,mjs,cjs}',
     '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,CHANGELOG.md,README.md}',
     '!{.env,.env.*,.npmrc,pnpm-lock.yaml}',
@@ -124,6 +125,7 @@ module.exports = {
     'node_modules/sherpa-onnx*/**'
   ],
   afterPack: async (context) => {
+    try {
     const resourcesDir =
       context.electronPlatformName === 'darwin'
         ? join(
@@ -174,6 +176,11 @@ module.exports = {
         context.packager
       )
     }
+    } finally {
+      // Why: immutable WSL runtime sources are retained while Electron Builder
+      // reads them, then made eligible for bounded pruning after packaging.
+      electronBuilderBeforeBuild.releaseWslRuntimeBuildLease()
+    }
   },
   win: {
     executableName: 'Orca',
@@ -198,7 +205,9 @@ module.exports = {
         to: 'computer-use-windows/runtime.ps1'
       },
       {
-        from: 'out/wsl-watcher',
+        // Why: beforeBuild binds this process-local macro to an immutable
+        // content-addressed source, so concurrent publishers cannot race readers.
+        from: '${env.ORCA_WSL_WATCHER_BUILD_SOURCE}',
         to: 'wsl-watcher'
       },
       featureWallResources

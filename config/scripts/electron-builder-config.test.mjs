@@ -7,7 +7,12 @@ import { describe, expect, it } from 'vitest'
 const require = createRequire(import.meta.url)
 const electronBuilderConfig = require('../electron-builder.config.cjs')
 const electronBuilderBeforeBuild = require('./electron-builder-before-build.cjs')
-const { buildWslRuntimePreparationArgs } = electronBuilderBeforeBuild
+const {
+  buildWslRuntimePreparationArgs,
+  currentProcessStartToken,
+  parseWslRuntimeBuildSource,
+  parseWslRuntimePreparationOutput
+} = electronBuilderBeforeBuild
 const {
   createPackagedRuntimeNodeModuleResources,
   findAsarEntry,
@@ -34,7 +39,8 @@ describe('electron-builder config', () => {
         '!{AGENTS.md,CLAUDE.md,DEVELOPING.md,bundle-size-progress.md}',
         '!out/**/*.test.js',
         '!out/main/wsl-watcher-host.js',
-        '!out/wsl-watcher{,/**/*}'
+        '!out/wsl-watcher{,/**/*}',
+        '!out/wsl-watcher.*{,/**/*}'
       ])
     )
   })
@@ -63,7 +69,7 @@ describe('electron-builder config', () => {
           to: 'computer-use-windows/runtime.ps1'
         }),
         expect.objectContaining({
-          from: 'out/wsl-watcher',
+          from: '${env.ORCA_WSL_WATCHER_BUILD_SOURCE}',
           to: 'wsl-watcher'
         })
       ])
@@ -145,10 +151,36 @@ describe('electron-builder config', () => {
 
   it('prepares the managed WSL runtime only for Windows artifacts', () => {
     expect(buildWslRuntimePreparationArgs({ platform: { nodeName: 'win32' } })).toEqual([
-      'config/scripts/prepare-wsl-watcher-runtime.mjs'
+      'config/scripts/prepare-wsl-watcher-runtime.mjs',
+      '--print-package-source',
+      '--lease-owner-pid',
+      String(process.pid),
+      '--lease-owner-start-token',
+      currentProcessStartToken()
     ])
     expect(buildWslRuntimePreparationArgs({ platform: { nodeName: 'darwin' } })).toBeNull()
     expect(buildWslRuntimePreparationArgs({ platform: { nodeName: 'linux' } })).toBeNull()
+  })
+
+  it('reads the immutable WSL source returned by runtime preparation', () => {
+    expect(
+      parseWslRuntimeBuildSource(
+        '[prepare] complete\nORCA_WSL_WATCHER_BUILD_SOURCE=out/wsl-watcher.builds/abc\n' +
+          'ORCA_WSL_WATCHER_BUILD_LEASE=out/wsl-watcher.builds/abc.lease-token\n'
+      )
+    ).toBe('out/wsl-watcher.builds/abc')
+    expect(
+      parseWslRuntimePreparationOutput(
+        'ORCA_WSL_WATCHER_BUILD_SOURCE=out/wsl-watcher.builds/abc\n' +
+          'ORCA_WSL_WATCHER_BUILD_LEASE=out/wsl-watcher.builds/abc.lease-token\n'
+      )
+    ).toEqual({
+      source: 'out/wsl-watcher.builds/abc',
+      lease: 'out/wsl-watcher.builds/abc.lease-token'
+    })
+    expect(() => parseWslRuntimeBuildSource('[prepare] missing source\n')).toThrow(
+      'did not return an immutable leased source'
+    )
   })
 
   it('verifies packaged main runtime deps from Windows-style asar entries', async () => {

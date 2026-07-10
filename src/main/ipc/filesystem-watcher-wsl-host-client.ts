@@ -1,88 +1,65 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { StringDecoder } from 'node:string_decoder'
-import type { Event as WatcherEvent } from '@parcel/watcher'
+import { spawn } from 'node:child_process'
+import {
+  acquireWslDistroHost,
+  canonicalizeWslLinuxPath,
+  handleWslHostGone,
+  releaseHostOwnership,
+  releaseWslDistroHost,
+  resetWslDistroHostsForTest,
+  stopHostIfUnused,
+  type WslDistroHost,
+  type WslHostStopReason,
+  type WslHostSubscriptionContext,
+  type WslHostSubscriptionRecord
+} from './filesystem-watcher-wsl-host-lifecycle'
 import { wslHostMessageEvents, type WslHostMessage } from './filesystem-watcher-wsl-host-protocol'
 import { ensureWslWatcherRuntime } from './filesystem-watcher-wsl-runtime'
 
-export type WslHostSubscriptionContext = {
-  distro: string
-  linuxPath: string
-  ignoreDirs: readonly string[]
-  onEvents: (events: WatcherEvent[]) => void
-  onOverflow: () => void
-  onStopped: () => void
-}
+export type {
+  WslHostStopReason,
+  WslHostSubscriptionContext
+} from './filesystem-watcher-wsl-host-lifecycle'
 
 export type WslHostSubscription = {
   unsubscribe(): void
 }
 
-type PendingResult = {
-  resolve: () => void
-  reject: (error: Error) => void
-}
+export class WslWatcherTopologyError extends Error {}
 
-type SubscriptionRecord = {
-  id: number
-  context: WslHostSubscriptionContext
-  pending: PendingResult | null
-  pendingTimer: ReturnType<typeof setTimeout> | null
-}
-
-type DistroHost = {
-  distro: string
-  process: ChildProcessWithoutNullStreams | null
-  starting: Promise<void> | null
-  subscriptions: Map<number, SubscriptionRecord>
-  nextId: number
-  streamBuffer: string
-  stdoutDecoder: StringDecoder
-  stderrDecoder: StringDecoder
-  stderrTail: string
-}
-
-const hosts = new Map<string, DistroHost>()
 const STARTUP_TIMEOUT_MS = 30_000
 const SUBSCRIBE_TIMEOUT_MS = 30_000
 const MAX_STREAM_BUFFER_CHARS = 10 * 1024 * 1024
 
-function createHost(distro: string): DistroHost {
-  return {
-    distro,
-    process: null,
-    starting: null,
-    subscriptions: new Map(),
-    nextId: 1,
-    streamBuffer: '',
-    stdoutDecoder: new StringDecoder('utf8'),
-    stderrDecoder: new StringDecoder('utf8'),
-    stderrTail: ''
-  }
-}
-
-function settleRecordFailure(host: DistroHost, record: SubscriptionRecord, error: Error): void {
+function settleRecordFailure(
+  host: WslDistroHost,
+  record: WslHostSubscriptionRecord,
+  error: Error,
+  reason: WslHostStopReason = 'failure'
+): void {
   host.subscriptions.delete(record.id)
   if (record.pendingTimer) {
     clearTimeout(record.pendingTimer)
     record.pendingTimer = null
   }
+  if (reason === 'topology') {
+    record.context.onOverflow()
+  }
   if (record.pending) {
     record.pending.reject(error)
     record.pending = null
   } else {
-    record.context.onStopped()
+    record.context.onStopped(reason)
   }
-  if (host.subscriptions.size === 0) {
-    hosts.delete(host.distro)
-    const child = host.process
-    host.process = null
-    child?.kill()
-  } else {
+  if (!stopHostIfUnused(host)) {
     send(host, { op: 'unsubscribe', id: record.id })
   }
 }
 
-function handleMessage(host: DistroHost, message: WslHostMessage, settleReady: () => void): void {
+function handleMessage(
+  host: WslDistroHost,
+  message: WslHostMessage,
+  settleReady: () => void
+): void {
   if (message.op === 'ready') {
     if (message.protocol === 1) {
       settleReady()
@@ -112,7 +89,10 @@ function handleMessage(host: DistroHost, message: WslHostMessage, settleReady: (
   } else if (message.op === 'subscribe-failed') {
     settleRecordFailure(host, record, new Error(String(message.message ?? 'subscribe failed')))
   } else if (message.op === 'watch-error') {
-    settleRecordFailure(host, record, new Error(String(message.message ?? 'watch failed')))
+    const topology = message.reason === 'topology'
+    const ErrorType = topology ? WslWatcherTopologyError : Error
+    const error = new ErrorType(String(message.message ?? 'watch failed'))
+    settleRecordFailure(host, record, error, topology ? 'topology' : 'failure')
   } else if (message.op === 'events') {
     const events = wslHostMessageEvents(message, record.context)
     if (events.length > 0) {
@@ -121,31 +101,7 @@ function handleMessage(host: DistroHost, message: WslHostMessage, settleReady: (
   }
 }
 
-function handleHostGone(host: DistroHost, child: ChildProcessWithoutNullStreams): void {
-  if (host.process !== child) {
-    return
-  }
-  host.process = null
-  hosts.delete(host.distro)
-  const error = new Error(
-    `Managed WSL watcher exited${host.stderrTail.trim() ? `: ${host.stderrTail.trim()}` : ''}`
-  )
-  for (const record of host.subscriptions.values()) {
-    if (record.pendingTimer) {
-      clearTimeout(record.pendingTimer)
-      record.pendingTimer = null
-    }
-    if (record.pending) {
-      record.pending.reject(error)
-      record.pending = null
-    } else {
-      record.context.onStopped()
-    }
-  }
-  host.subscriptions.clear()
-}
-
-function send(host: DistroHost, message: object): boolean {
+function send(host: WslDistroHost, message: object): boolean {
   try {
     if (!host.process?.stdin.writable) {
       return false
@@ -157,8 +113,11 @@ function send(host: DistroHost, message: object): boolean {
   }
 }
 
-async function startHost(host: DistroHost): Promise<void> {
-  const runtime = await ensureWslWatcherRuntime(host.distro)
+async function startHost(host: WslDistroHost, signal: AbortSignal): Promise<void> {
+  const runtime = await ensureWslWatcherRuntime(host.distro, signal)
+  if (host.retired) {
+    throw new Error('Managed WSL watcher startup was cancelled')
+  }
   const child = spawn(
     'wsl.exe',
     ['-d', host.distro, '--exec', runtime.nodePath, runtime.hostPath],
@@ -209,39 +168,72 @@ async function startHost(host: DistroHost): Promise<void> {
     child.stderr.on('data', (chunk: Buffer) => {
       host.stderrTail = (host.stderrTail + host.stderrDecoder.write(chunk)).slice(-4096)
     })
+    child.stdin.on('error', (error) => {
+      settle(error)
+      child.kill()
+      handleWslHostGone(host, child)
+    })
+    child.stdout.on('error', (error) => {
+      settle(error)
+      child.kill()
+      handleWslHostGone(host, child)
+    })
+    // Diagnostics are optional; an unreadable stderr pipe must not crash main.
+    child.stderr.on('error', () => undefined)
     child.once('error', (error) => {
       settle(error)
-      handleHostGone(host, child)
+      handleWslHostGone(host, child)
     })
     child.once('close', (code, signal) => {
       settle(new Error(`Managed WSL watcher exited before ready (${code ?? signal})`))
-      handleHostGone(host, child)
+      handleWslHostGone(host, child)
     })
   })
 }
 
-function ensureHost(distro: string): Promise<DistroHost> {
-  let host = hosts.get(distro)
-  if (!host) {
-    host = createHost(distro)
-    hosts.set(distro, host)
-  }
-  if (!host.starting) {
-    host.starting = startHost(host)
+function ensureHost(host: WslDistroHost): Promise<WslDistroHost> {
+  if (!host.starting && !host.process) {
+    const bootstrapAbortController = new AbortController()
+    host.bootstrapAbortController = bootstrapAbortController
+    const starting = startHost(host, bootstrapAbortController.signal)
       .catch((error) => {
-        if (host?.process) {
-          host.process.kill()
-        }
-        hosts.delete(distro)
+        const child = host.process
+        host.process = null
+        releaseHostOwnership(host)
+        child?.kill()
         throw error
       })
       .finally(() => {
-        if (host) {
+        if (host.starting === starting) {
           host.starting = null
         }
+        if (host.bootstrapAbortController === bootstrapAbortController) {
+          host.bootstrapAbortController = null
+        }
       })
+    host.starting = starting
   }
-  return host.starting.then(() => host!)
+  return host.starting ? host.starting.then(() => host) : Promise.resolve(host)
+}
+
+async function ensureHostAvailable(
+  host: WslDistroHost,
+  signal: AbortSignal | undefined
+): Promise<WslDistroHost> {
+  if (!signal) {
+    return ensureHost(host)
+  }
+  let rejectAbort!: (error: Error) => void
+  const aborted = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject
+  })
+  const onAbort = (): void => rejectAbort(new Error('Managed WSL watcher subscription cancelled'))
+  signal.addEventListener('abort', onAbort, { once: true })
+  try {
+    return await Promise.race([ensureHost(host), aborted])
+  } finally {
+    signal.removeEventListener('abort', onAbort)
+  }
 }
 
 export async function subscribeViaWslWatcherHost(
@@ -251,65 +243,70 @@ export async function subscribeViaWslWatcherHost(
   if (signal?.aborted) {
     throw new Error('Managed WSL watcher subscription cancelled')
   }
-  const host = await ensureHost(context.distro)
-  if (signal?.aborted) {
-    if (host.subscriptions.size === 0) {
-      hosts.delete(host.distro)
-      const child = host.process
-      host.process = null
-      child?.kill()
+  const normalizedContext = {
+    ...context,
+    linuxPath: canonicalizeWslLinuxPath(context.linuxPath)
+  }
+  let host: WslDistroHost | null = null
+  try {
+    // Why: reservations prevent one cancelled caller from killing a host that
+    // another same-distro caller is still waiting to use.
+    host = acquireWslDistroHost(normalizedContext.distro)
+    await ensureHostAvailable(host, signal)
+    if (signal?.aborted) {
+      throw new Error('Managed WSL watcher subscription cancelled')
     }
-    throw new Error('Managed WSL watcher subscription cancelled')
-  }
-  const id = host.nextId++
-  const record: SubscriptionRecord = { id, context, pending: null, pendingTimer: null }
-  const ready = new Promise<void>((resolve, reject) => {
-    record.pending = { resolve, reject }
-  })
-  host.subscriptions.set(id, record)
-  record.pendingTimer = setTimeout(() => {
-    settleRecordFailure(host, record, new Error('Timed out subscribing managed WSL watcher'))
-  }, SUBSCRIBE_TIMEOUT_MS)
-  signal?.addEventListener(
-    'abort',
-    () => {
-      if (host.subscriptions.has(id)) {
-        settleRecordFailure(host, record, new Error('Managed WSL watcher subscription cancelled'))
-      }
-    },
-    { once: true }
-  )
-  if (
-    !send(host, {
-      op: 'subscribe',
+    const id = host.nextId++
+    const record: WslHostSubscriptionRecord = {
       id,
-      dir: context.linuxPath,
-      ignoreDirs: context.ignoreDirs
+      context: normalizedContext,
+      pending: null,
+      pendingTimer: null
+    }
+    const ready = new Promise<void>((resolve, reject) => {
+      record.pending = { resolve, reject }
     })
-  ) {
-    settleRecordFailure(host, record, new Error('Managed WSL watcher is unavailable'))
-  }
-  await ready
-  return {
-    unsubscribe: () => {
-      if (!host.subscriptions.delete(id)) {
-        return
+    host.subscriptions.set(id, record)
+    record.pendingTimer = setTimeout(() => {
+      settleRecordFailure(host!, record, new Error('Timed out subscribing managed WSL watcher'))
+    }, SUBSCRIBE_TIMEOUT_MS)
+    signal?.addEventListener(
+      'abort',
+      () => {
+        if (host?.subscriptions.has(id)) {
+          settleRecordFailure(host, record, new Error('Managed WSL watcher subscription cancelled'))
+        }
+      },
+      { once: true }
+    )
+    if (
+      !send(host, {
+        op: 'subscribe',
+        id,
+        dir: normalizedContext.linuxPath,
+        ignoreDirs: normalizedContext.ignoreDirs
+      })
+    ) {
+      settleRecordFailure(host, record, new Error('Managed WSL watcher is unavailable'))
+    }
+    await ready
+    return {
+      unsubscribe: () => {
+        if (!host?.subscriptions.delete(id)) {
+          return
+        }
+        if (!stopHostIfUnused(host)) {
+          send(host, { op: 'unsubscribe', id })
+        }
       }
-      if (host.subscriptions.size === 0) {
-        hosts.delete(host.distro)
-        const child = host.process
-        host.process = null
-        child?.kill()
-      } else {
-        send(host, { op: 'unsubscribe', id })
-      }
+    }
+  } finally {
+    if (host) {
+      releaseWslDistroHost(host)
     }
   }
 }
 
 export function resetWslWatcherHostsForTest(): void {
-  for (const host of hosts.values()) {
-    host.process?.kill()
-  }
-  hosts.clear()
+  resetWslDistroHostsForTest()
 }

@@ -11,7 +11,8 @@ const { ensureRuntimeMock, isDistroRunningMock, spawnMock } = vi.hoisted(() => (
 vi.mock('node:child_process', () => ({ spawn: spawnMock }))
 vi.mock('./filesystem-watcher-wsl-runtime', () => ({
   ensureWslWatcherRuntime: ensureRuntimeMock,
-  isWslDistroRunning: isDistroRunningMock
+  isWslDistroRunning: isDistroRunningMock,
+  WslWatcherCompatibilityError: class WslWatcherCompatibilityError extends Error {}
 }))
 
 import { createWslWatcher } from './filesystem-watcher-wsl'

@@ -1,6 +1,18 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import {
+  recoverAndScavengeRuntimePaths,
+  replacePublishedRuntimePath,
+  withRuntimePublicationLock
+} from './wsl-watcher-runtime-publication.mjs'
+import {
+  acquireRuntimeBuildLease,
+  createImmutableRuntimeBuildSource,
+  publishRuntimeBuildPointer,
+  validatePreparedRuntimeBundle
+} from './wsl-watcher-runtime-build-source.mjs'
+import { downloadRuntimeArchive } from './wsl-watcher-runtime-cache.mjs'
 
 export const WSL_WATCHER_NODE_VERSION = '24.15.0'
 const WSL_WATCHER_INSTALL_LAYOUT_VERSION = 1
@@ -23,45 +35,15 @@ function sha256(contents) {
   return createHash('sha256').update(contents).digest('hex')
 }
 
-async function matchesHash(filename, expected) {
-  try {
-    return sha256(await readFile(filename)) === expected
-  } catch {
-    return false
-  }
+const defaultRuntimeFileOperations = { copyFile, mkdir, readFile, rename, rm, stat, writeFile }
+
+export function downloadRuntime(arch, expectedHash, options = {}) {
+  return downloadRuntimeArchive(arch, expectedHash, WSL_WATCHER_NODE_VERSION, cacheDir, options)
 }
 
-async function downloadRuntime(arch, expectedHash) {
-  await mkdir(cacheDir, { recursive: true })
-  const filename = `node-v${WSL_WATCHER_NODE_VERSION}-linux-${arch}.tar.xz`
-  const cached = path.join(cacheDir, filename)
-  if (await matchesHash(cached, expectedHash)) {
-    return cached
-  }
-
-  const response = await fetch(`https://nodejs.org/dist/v${WSL_WATCHER_NODE_VERSION}/${filename}`, {
-    signal: AbortSignal.timeout(60_000)
-  })
-  if (!response.ok) {
-    throw new Error(`Could not download ${filename}: HTTP ${response.status}`)
-  }
-  const contents = Buffer.from(await response.arrayBuffer())
-  const actualHash = sha256(contents)
-  if (actualHash !== expectedHash) {
-    throw new Error(
-      `Checksum mismatch for ${filename}: expected ${expectedHash}, got ${actualHash}`
-    )
-  }
-  const temporary = `${cached}.${process.pid}.tmp`
-  await writeFile(temporary, contents)
-  await rm(cached, { force: true })
-  await rename(temporary, cached)
-  return cached
-}
-
-async function assertBuildInput(filename, description) {
+async function assertBuildInput(filename, description, statRuntimePath = stat) {
   try {
-    const info = await stat(filename)
+    const info = await statRuntimePath(filename)
     if (info.isFile()) {
       return
     }
@@ -69,57 +51,145 @@ async function assertBuildInput(filename, description) {
   throw new Error(`Missing ${description} at ${filename}. Run pnpm build:electron-vite first.`)
 }
 
-export async function prepareWslWatcherRuntime() {
-  const hostSource = path.join(rootDir, 'out', 'main', 'wsl-watcher-host.js')
-  await assertBuildInput(hostSource, 'compiled WSL watcher host')
+export async function prepareWslWatcherRuntime({
+  runtimeRootDir = rootDir,
+  runtimeOutputDir = outputDir,
+  fetchRuntimeArchive = downloadRuntime,
+  archives = runtimeArchives,
+  createPublicationId = randomUUID,
+  beforePublish,
+  afterPublicationLockAcquired,
+  runtimeFileOperations: operationOverrides = {},
+  publicationLockOptions = {},
+  buildRetentionOptions = {}
+} = {}) {
+  const operations = { ...defaultRuntimeFileOperations, ...operationOverrides }
+  const hostSource = path.join(runtimeRootDir, 'out', 'main', 'wsl-watcher-host.js')
+  await assertBuildInput(hostSource, 'compiled WSL watcher host', operations.stat)
 
-  const stageDir = `${outputDir}.${process.pid}.tmp`
-  await rm(stageDir, { recursive: true, force: true })
-  await mkdir(stageDir, { recursive: true })
-  const hostContents = await readFile(hostSource)
-  await writeFile(path.join(stageDir, 'host.js'), hostContents)
-  await copyFile(
-    path.join(rootDir, 'node_modules', '@parcel', 'watcher', 'LICENSE'),
-    path.join(stageDir, 'parcel-watcher-LICENSE')
+  const publicationId = createPublicationId()
+  const architectures = Object.keys(archives)
+  const stageDir = `${runtimeOutputDir}.stage-${publicationId}`
+  const backupDir = `${runtimeOutputDir}.backup-${publicationId}`
+  const lockPath = `${runtimeOutputDir}.publish.lock`
+  const validatePublished = (candidate) =>
+    validatePreparedRuntimeBundle(candidate, architectures, undefined, { operations })
+  await operations.mkdir(path.dirname(runtimeOutputDir), { recursive: true })
+  await withRuntimePublicationLock(
+    lockPath,
+    () => recoverAndScavengeRuntimePaths(runtimeOutputDir, validatePublished, { operations }),
+    { ...publicationLockOptions, operations }
   )
-
-  const versionParts = [
-    String(WSL_WATCHER_INSTALL_LAYOUT_VERSION),
-    WSL_WATCHER_NODE_VERSION,
-    sha256(hostContents)
-  ]
-  for (const [arch, runtime] of Object.entries(runtimeArchives)) {
-    const archDir = path.join(stageDir, arch)
-    await mkdir(archDir, { recursive: true })
-    const archive = await downloadRuntime(arch, runtime.sha256)
-    const watcherSource = path.join(
-      rootDir,
-      'node_modules',
-      '@parcel',
-      runtime.watcherPackage.replace('@parcel/', ''),
-      'watcher.node'
+  try {
+    await operations.rm(stageDir, { recursive: true, force: true })
+    await operations.mkdir(stageDir, { recursive: true })
+    const hostContents = await operations.readFile(hostSource)
+    await operations.writeFile(path.join(stageDir, 'host.js'), hostContents)
+    const watcherLicense = await operations.readFile(
+      path.join(runtimeRootDir, 'node_modules', '@parcel', 'watcher', 'LICENSE')
     )
-    const watcherContents = await readFile(watcherSource)
-    versionParts.push(arch, runtime.sha256, sha256(watcherContents))
-    await copyFile(archive, path.join(archDir, 'node.tar.xz'))
-    await writeFile(path.join(archDir, 'watcher.node'), watcherContents)
-  }
+    await operations.writeFile(path.join(stageDir, 'parcel-watcher-LICENSE'), watcherLicense)
 
-  const manifest = {
-    protocol: 1,
-    installLayout: WSL_WATCHER_INSTALL_LAYOUT_VERSION,
-    nodeVersion: WSL_WATCHER_NODE_VERSION,
-    bundleVersion: sha256(versionParts.join('\n')).slice(0, 20)
+    const versionParts = [
+      String(WSL_WATCHER_INSTALL_LAYOUT_VERSION),
+      WSL_WATCHER_NODE_VERSION,
+      sha256(hostContents),
+      sha256(watcherLicense)
+    ]
+    for (const [arch, runtime] of Object.entries(archives)) {
+      const archDir = path.join(stageDir, arch)
+      await operations.mkdir(archDir, { recursive: true })
+      const archive = await fetchRuntimeArchive(arch, runtime.sha256)
+      const watcherSource = path.join(
+        runtimeRootDir,
+        'node_modules',
+        '@parcel',
+        runtime.watcherPackage.replace('@parcel/', ''),
+        'watcher.node'
+      )
+      const watcherContents = await operations.readFile(watcherSource)
+      versionParts.push(arch, runtime.sha256, sha256(watcherContents))
+      await operations.copyFile(archive, path.join(archDir, 'node.tar.xz'))
+      await operations.writeFile(path.join(archDir, 'watcher.node'), watcherContents)
+    }
+
+    const manifest = {
+      protocol: 1,
+      installLayout: WSL_WATCHER_INSTALL_LAYOUT_VERSION,
+      nodeVersion: WSL_WATCHER_NODE_VERSION,
+      bundleVersion: sha256(versionParts.join('\n')).slice(0, 20)
+    }
+    await operations.writeFile(
+      path.join(stageDir, 'manifest.json'),
+      `${JSON.stringify(manifest, null, 2)}\n`
+    )
+    const packageSourceDir = await createImmutableRuntimeBuildSource(
+      stageDir,
+      runtimeOutputDir,
+      manifest,
+      architectures,
+      publicationId,
+      {
+        operations,
+        lockOptions: publicationLockOptions,
+        retentionOptions: buildRetentionOptions
+      }
+    )
+    await beforePublish?.({ publicationId, stageDir })
+    await withRuntimePublicationLock(
+      lockPath,
+      async () => {
+        await recoverAndScavengeRuntimePaths(runtimeOutputDir, validatePublished, { operations })
+        await afterPublicationLockAcquired?.({ publicationId, stageDir })
+        await replacePublishedRuntimePath(stageDir, runtimeOutputDir, backupDir, {
+          operations
+        })
+        await publishRuntimeBuildPointer(
+          runtimeOutputDir,
+          packageSourceDir,
+          manifest,
+          publicationId,
+          { operations }
+        )
+      },
+      { ...publicationLockOptions, operations }
+    )
+    process.stdout.write(
+      `[prepare-wsl-watcher-runtime] prepared ${manifest.bundleVersion} in ${runtimeOutputDir}\n`
+    )
+    return { ...manifest, packageSourceDir }
+  } finally {
+    // Why: interrupted preparation must not leave large archives eligible for
+    // app.asar discovery or consume disk indefinitely across package retries.
+    await operations.rm(stageDir, { recursive: true, force: true })
   }
-  await writeFile(path.join(stageDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
-  await rm(outputDir, { recursive: true, force: true })
-  await rename(stageDir, outputDir)
-  process.stdout.write(
-    `[prepare-wsl-watcher-runtime] prepared ${manifest.bundleVersion} in ${outputDir}\n`
-  )
-  return manifest
+}
+
+function commandLineValue(name) {
+  const index = process.argv.indexOf(name)
+  return index >= 0 ? process.argv[index + 1] : undefined
 }
 
 if (process.argv[1] === import.meta.filename) {
-  await prepareWslWatcherRuntime()
+  const prepared = await prepareWslWatcherRuntime()
+  if (process.argv.includes('--print-package-source')) {
+    const ownerProcessId = Number(commandLineValue('--lease-owner-pid'))
+    const ownerProcessStartToken = commandLineValue('--lease-owner-start-token')
+    if (
+      !Number.isSafeInteger(ownerProcessId) ||
+      ownerProcessId <= 0 ||
+      ownerProcessId !== process.ppid ||
+      !ownerProcessStartToken
+    ) {
+      throw new Error('Invalid Electron Builder parent identity for WSL runtime lease')
+    }
+    const packageSource = path.relative(rootDir, prepared.packageSourceDir).replaceAll('\\', '/')
+    const leasePath = await acquireRuntimeBuildLease(prepared.packageSourceDir, {
+      ownerProcessId,
+      ownerProcessStartToken
+    })
+    const packageLease = path.relative(rootDir, leasePath).replaceAll('\\', '/')
+    process.stdout.write(`ORCA_WSL_WATCHER_BUILD_SOURCE=${packageSource}\n`)
+    process.stdout.write(`ORCA_WSL_WATCHER_BUILD_LEASE=${packageLease}\n`)
+  }
 }

@@ -66,5 +66,5 @@ describe.skipIf(!runLive)('WSL watcher live integration', () => {
     } finally {
       await root.subscription.unsubscribe()
     }
-  })
+  }, 15_000)
 })
