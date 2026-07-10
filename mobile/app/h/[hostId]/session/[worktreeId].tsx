@@ -62,7 +62,10 @@ import {
   useReconnectAttempt,
   useLastConnectedAt
 } from '../../../../src/transport/client-context'
-import { classifyConnection } from '../../../../src/transport/connection-health'
+import {
+  classifyConnection,
+  verdictDisplayLabel
+} from '../../../../src/transport/connection-health'
 import { useResponsiveLayout } from '../../../../src/layout/responsive-layout'
 import {
   type ActivePanel,
@@ -856,20 +859,21 @@ export default function SessionScreen() {
       setActivePanel(null)
     }
   }, [canDockPanel, activePanel])
-  // Session-level PR context feeds the docked PR panel; the panel itself owns
-  // loading/blocked states for GitLab/other providers, so no auto-close here.
-  const {
-    branch: prBranch,
-    headSha: prHeadSha,
-    status: prStatus,
-    isGithubRepo: prIsGithubRepo,
-    repoLoaded: prRepoContextLoaded,
-    loaded: prContextLoaded
-  } = useMobilePrBranchContext({
-    client,
-    connState,
-    worktreeId
-  })
+  // Session-level GitHub remote probe gates the PR dock icon so non-GitHub
+  // providers do not open the hosted-review surface. Branch/head/status for the
+  // hub are loaded inside MobileSourceControlPanel — skip the unused identity RPCs.
+  const { isGithubRepo: prIsGithubRepo, repoLoaded: prRepoContextLoaded } =
+    useMobilePrBranchContext({
+      client,
+      connState,
+      worktreeId,
+      includeBranchIdentity: false
+    })
+  useEffect(() => {
+    if (prRepoContextLoaded && !prIsGithubRepo && activePanel === 'pr') {
+      setActivePanel(null)
+    }
+  }, [activePanel, prRepoContextLoaded, prIsGithubRepo])
   const initialCreateWarning = typeof createdWarning === 'string' ? createdWarning.trim() : ''
   const [terminals, setTerminals] = useState<Terminal[]>([])
   const terminalsRef = useRef<Terminal[]>([])
@@ -999,6 +1003,9 @@ export default function SessionScreen() {
   const terminalCwdRef = useRef<Map<string, string>>(new Map())
   const initialModesSeenRef = useRef<Set<string>>(new Set())
   const deviceTokenRef = useRef<string | null>(null)
+  // Why: state (not a ref) — the connection verdict needs a re-render once
+  // the endpoint loads so the Tailscale hint can appear.
+  const [hostEndpoint, setHostEndpoint] = useState<string | null>(null)
   const clientRef = useRef<RpcClient | null>(null)
   const connStateRef = useRef<ConnectionState>(connState)
   // Why: measured once from TerminalWebView on mount, then passed with every
@@ -2452,6 +2459,7 @@ export default function SessionScreen() {
       const host = hosts.find((h) => h.id === hostId)
       if (host) {
         deviceTokenRef.current = host.deviceToken
+        setHostEndpoint(host.endpoint)
       }
     })
     return () => {
@@ -4264,13 +4272,14 @@ export default function SessionScreen() {
     void handleCreateTerminal()
   }, [client, creating, creatingBrowser, creatingMarkdown, showEmptyState, worktreeId])
 
-  // Why: the reconnect loop parks at its give-up cap; without an in-session
-  // affordance the only recovery is leaving the screen or restarting the
-  // app (issue #5049). Surface tap-to-retry once the verdict escalates.
+  // Why: the reconnect loop slows to a 90s trickle at its give-up cap;
+  // surface tap-to-retry once the verdict escalates so recovery doesn't
+  // wait out the trickle timer (issue #5049).
   const connectionVerdict = classifyConnection({
     state: connState,
     reconnectAttempts,
-    lastConnectedAt
+    lastConnectedAt,
+    endpoint: hostEndpoint
   })
   const showConnectionRetry =
     connectionVerdict.kind === 'warning' || connectionVerdict.kind === 'unreachable'
@@ -4283,7 +4292,7 @@ export default function SessionScreen() {
           ? '1 tab'
           : `${visibleTabs.length} tabs`
       : showConnectionRetry
-        ? `${connectionVerdict.label} — tap to retry`
+        ? `${verdictDisplayLabel(connectionVerdict)} — tap to retry`
         : MOBILE_SESSION_STATUS_LABELS[connState]
 
   // Why: keep safe-area padding in layout at all times, then visually translate
@@ -4422,14 +4431,18 @@ export default function SessionScreen() {
       setActivePanel(action.next)
       return
     }
+    const descriptor = panelRouteDescriptor(action.panel)
     router.push({
-      pathname: panelRouteDescriptor(action.panel).pathname,
+      pathname: descriptor.pathname,
       params: {
         hostId,
         worktreeId,
         name: worktreeName || '',
-        // Source control's post-diff-open dismissal keys off origin: 'session' (U2).
-        ...(action.panel === 'sourceControl' ? { origin: 'session' } : {})
+        // SC + PR both land on the source-control hub; post-diff-open dismissal
+        // keys off origin: 'session' (U2). Files keeps its own route without origin.
+        ...(action.panel === 'sourceControl' || action.panel === 'pr' ? { origin: 'session' } : {}),
+        // The PR panel routes into the hub's Pull Request segment via descriptor params.
+        ...descriptor.params
       }
     })
   }
@@ -5105,13 +5118,6 @@ export default function SessionScreen() {
               hostId={hostId}
               worktreeId={worktreeId}
               name={worktreeName || ''}
-              client={client}
-              connState={connState}
-              branch={prBranch}
-              headSha={prHeadSha}
-              gitStatus={prStatus}
-              isGithubRepo={prIsGithubRepo}
-              branchContextLoaded={prContextLoaded && prRepoContextLoaded}
               availableWidth={sessionContentRowWidth}
               onRequestClose={() => setActivePanel(null)}
               onFileOpenStart={handleFileOpenStart}
