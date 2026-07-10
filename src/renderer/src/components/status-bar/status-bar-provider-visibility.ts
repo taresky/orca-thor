@@ -7,7 +7,11 @@ export type UsageProviderSettings = Pick<
   | 'claudeManagedAccounts'
   | 'opencodeSessionCookie'
   | 'geminiCliOAuthEnabled'
->
+> & {
+  // Why: MiniMax/Grok sign-in live on disk, not in settings; main sets these each poll.
+  minimaxCookieConfigured: boolean
+  grokAuthConfigured: boolean
+}
 
 type UsageProviderSnapshots = {
   claude: ProviderRateLimits | null
@@ -15,6 +19,8 @@ type UsageProviderSnapshots = {
   gemini: ProviderRateLimits | null
   opencodeGo: ProviderRateLimits | null
   kimi: ProviderRateLimits | null
+  minimax: ProviderRateLimits | null
+  grok: ProviderRateLimits | null
 }
 
 type UsageProviderId = ProviderRateLimits['provider']
@@ -23,6 +29,7 @@ function hasUsageData(provider: ProviderRateLimits): boolean {
   return Boolean(
     provider.session ||
     provider.weekly ||
+    provider.fableWeekly ||
     provider.monthly ||
     (provider.buckets && provider.buckets.length > 0)
   )
@@ -57,7 +64,9 @@ export function hasUsageProviderSettings(
     (settings?.codexManagedAccounts?.length ?? 0) > 0 ||
     (settings?.claudeManagedAccounts?.length ?? 0) > 0 ||
     settings?.geminiCliOAuthEnabled === true ||
-    Boolean(settings?.opencodeSessionCookie?.trim())
+    Boolean(settings?.opencodeSessionCookie?.trim()) ||
+    settings?.minimaxCookieConfigured === true ||
+    settings?.grokAuthConfigured === true
   )
 }
 
@@ -79,6 +88,12 @@ export function hasUsageProviderSettingsForProvider(
   }
   if (providerId === 'opencode-go') {
     return Boolean(settings.opencodeSessionCookie?.trim())
+  }
+  if (providerId === 'minimax') {
+    return settings.minimaxCookieConfigured === true
+  }
+  if (providerId === 'grok') {
+    return settings.grokAuthConfigured === true
   }
   return false
 }
@@ -127,7 +142,9 @@ export function isUsageEmptyState(
     isProviderSnapshotPending(providers.codex) ||
     isProviderSnapshotPending(providers.gemini) ||
     isProviderSnapshotPending(providers.opencodeGo) ||
-    isProviderSnapshotPending(providers.kimi)
+    isProviderSnapshotPending(providers.kimi) ||
+    isProviderSnapshotPending(providers.minimax) ||
+    isProviderSnapshotPending(providers.grok)
   ) {
     return false
   }
@@ -137,6 +154,8 @@ export function isUsageEmptyState(
     !isProviderConfigured(providers.codex) &&
     !isProviderConfigured(providers.gemini) &&
     !isProviderConfigured(providers.opencodeGo) &&
-    !isProviderConfigured(providers.kimi)
+    !isProviderConfigured(providers.kimi) &&
+    !isProviderConfigured(providers.minimax) &&
+    !isProviderConfigured(providers.grok)
   )
 }

@@ -24,6 +24,12 @@ import {
 } from '../../../../shared/agent-status-identity'
 import type { TerminalTab } from '../../../../shared/types'
 import { isExplicitAgentStatusFresh } from '@/lib/agent-status'
+import {
+  getAgentRowGeneratedTitleText,
+  getOrcaDispatchTaskId,
+  isOrcaDispatchPrompt,
+  orchestrationLabelsMatchLiveDispatch
+} from '@/lib/agent-row-primary-text'
 import { createFreshnessScheduler } from './agent-status-freshness-scheduler'
 
 /** Snapshot of a finished (or vanished) agent status entry, kept around so
@@ -64,6 +70,17 @@ type AgentLaunchConfigRegistrationMetadata = {
   leafId?: string
   terminalHandle?: string
   providerSession?: AgentProviderSessionMetadata
+}
+
+type AgentLaunchConfigStatusMetadata = {
+  paneKey: string
+  agentType?: AgentType
+  tabId?: string
+  terminalHandle?: string
+  launchToken?: string
+  providerSession?: AgentProviderSessionMetadata
+  existingProviderSession?: AgentProviderSessionMetadata
+  providerSessionChanged?: boolean
 }
 
 type AgentLaunchConfigRegistryEntry = {
@@ -130,6 +147,9 @@ export type AgentStatusSlice = {
   getAgentLaunchConfigForStatusEntry: (
     entry: AgentStatusEntry
   ) => SleepingAgentLaunchConfig | undefined
+  getAgentLaunchConfigForStatusMetadata: (
+    metadata: AgentLaunchConfigStatusMetadata
+  ) => SleepingAgentLaunchConfig | undefined
   clearAgentLaunchConfig: (paneKey: string) => void
 
   setRuntimeAgentOrchestrationByPaneKey: (
@@ -178,6 +198,7 @@ export type AgentStatusSlice = {
    *  quit flush so provider session ids survive an app restart. */
   captureAllSleepingAgentSessions: () => void
   clearSleepingAgentSession: (paneKey: string) => void
+  clearSleepingAgentSessionsByPaneKey: (paneKeys: readonly string[]) => void
   clearSleepingAgentSessionsByWorktree: (worktreeId: string) => void
   pruneSleepingAgentSessions: (validWorktreeIds: Set<string>) => void
 
@@ -201,6 +222,32 @@ export type AgentStatusSlice = {
   clearRetentionSuppressedPaneKeys: (paneKeys: string[]) => void
 }
 
+// Why: retainedAgentsByPaneKey snapshots a completed agent (a full
+// AgentStatusEntry — up to ~24KB of prompt/message text — plus a TerminalTab)
+// per ephemeral paneKey. paneKeys never recur, and the map is pruned only on
+// worktree removal or manual dismissal, so a long-lived worktree in a busy
+// multi-agent session grows it without bound — the dominant driver of the
+// renderer JS-heap OOM. Cap by insertion order (== retention order), evicting
+// the oldest completions first so the newest — the ones a user is most likely
+// to still care about — always survive. Evicted rows just stop showing in the
+// recently-completed overlay.
+const MAX_RETAINED_AGENTS = 500
+
+function capRetainedAgents(
+  retained: Record<string, RetainedAgentEntry>,
+  maxEntries = MAX_RETAINED_AGENTS
+): Record<string, RetainedAgentEntry> {
+  const keys = Object.keys(retained)
+  if (keys.length <= maxEntries) {
+    return retained
+  }
+  const capped: Record<string, RetainedAgentEntry> = {}
+  for (const key of keys.slice(keys.length - maxEntries)) {
+    capped[key] = retained[key]
+  }
+  return capped
+}
+
 function paneKeyMatchesAnyTabPrefix(paneKey: string, tabPrefixes: string[]): boolean {
   for (const prefix of tabPrefixes) {
     if (paneKey.startsWith(prefix)) {
@@ -220,6 +267,34 @@ function getTabIdFromPaneKey(paneKey: string): string | null {
     return null
   }
   return paneKey.slice(0, separator)
+}
+
+/** True when auto-title generation would no-op without replace (custom/quick/generated). */
+function agentStatusTabAlreadyHasProtectedOrGeneratedTitle(
+  state: AppState,
+  tabId: string | null,
+  worktreeId?: string | null
+): boolean {
+  if (!tabId) {
+    return false
+  }
+  const ownerTabs = worktreeId ? state.tabsByWorktree[worktreeId] : undefined
+  if (ownerTabs) {
+    const tab = ownerTabs.find((candidate) => candidate.id === tabId)
+    return Boolean(
+      tab?.customTitle?.trim() || tab?.quickCommandLabel?.trim() || tab?.generatedTitle?.trim()
+    )
+  }
+  for (const tabs of Object.values(state.tabsByWorktree)) {
+    const tab = tabs.find((candidate) => candidate.id === tabId)
+    if (!tab) {
+      continue
+    }
+    return Boolean(
+      tab.customTitle?.trim() || tab.quickCommandLabel?.trim() || tab.generatedTitle?.trim()
+    )
+  }
+  return false
 }
 
 function getLeafIdFromPaneKey(paneKey: string): string | null {
@@ -640,14 +715,16 @@ function registryEntryMatchesStatus(args: {
   ) {
     return false
   }
-  if (identity.providerSession !== undefined) {
-    return providerSessionsEqual(identity.providerSession, args.providerSession)
-  }
   if (
     identity.launchToken !== undefined &&
     (args.launchToken === undefined || identity.launchToken !== args.launchToken)
   ) {
+    // Why: missing or mismatched launch tokens are stale launch proof even if a
+    // provider session id was reused by a later manual/mixed Codex run.
     return false
+  }
+  if (identity.providerSession !== undefined) {
+    return providerSessionsEqual(identity.providerSession, args.providerSession)
   }
   if (identity.launchToken !== undefined) {
     return true
@@ -688,6 +765,55 @@ function getLaunchConfigForEntry(
     entry.providerSession &&
     providerSessionsEqual(sleepingRecord.providerSession, entry.providerSession)
     ? sleepingRecord.launchConfig
+    : undefined
+}
+
+// Why: the renderer twin of the main-process closedAgentStatusTabIds set that
+// #7561 FIFO-capped. It suppresses late hook/status events for a just-closed tab,
+// so it must outlive the tab briefly — but tabId is ephemeral and it was only
+// ever added to, growing one entry per tab-close for the renderer's whole life.
+export const RECENTLY_CLOSED_AGENT_STATUS_TAB_IDS_MAX = 1024
+
+// delete-then-set for LRU recency, then evict the oldest keys past the cap (Record
+// key order is insertion order for non-integer string keys). A status event for a
+// tab closed >MAX tabs ago cannot still arrive, so eviction is safe.
+function boundRecentlyClosedAgentStatusTabIds(
+  existing: Record<string, true>,
+  tabId: string
+): Record<string, true> {
+  const next: Record<string, true> = {}
+  for (const key of Object.keys(existing)) {
+    if (key !== tabId) {
+      next[key] = true
+    }
+  }
+  next[tabId] = true
+  const keys = Object.keys(next)
+  if (keys.length > RECENTLY_CLOSED_AGENT_STATUS_TAB_IDS_MAX) {
+    for (const stale of keys.slice(0, keys.length - RECENTLY_CLOSED_AGENT_STATUS_TAB_IDS_MAX)) {
+      delete next[stale]
+    }
+  }
+  return next
+}
+
+function getLaunchConfigForStatusMetadata(
+  state: AppState,
+  metadata: AgentLaunchConfigStatusMetadata
+): SleepingAgentLaunchConfig | undefined {
+  const registryEntry = state.agentLaunchConfigByPaneKey[metadata.paneKey]
+  return registryEntryMatchesStatus({
+    entry: registryEntry,
+    paneKey: metadata.paneKey,
+    agentType: metadata.agentType,
+    tabId: metadata.tabId ?? getTabIdFromPaneKey(metadata.paneKey) ?? undefined,
+    terminalHandle: metadata.terminalHandle,
+    launchToken: metadata.launchToken,
+    providerSession: metadata.providerSession,
+    existingProviderSession: metadata.existingProviderSession,
+    providerSessionChanged: metadata.providerSessionChanged ?? false
+  })
+    ? registryEntry?.launchConfig
     : undefined
 }
 
@@ -775,6 +901,41 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
     }
   })
 
+  const clearSleepingAgentSessionsByPaneKey = (paneKeys: readonly string[]): void => {
+    if (paneKeys.length === 0) {
+      return
+    }
+    const uniquePaneKeys = new Set(paneKeys)
+    set((s) => {
+      let nextSleeping = s.sleepingAgentSessionsByPaneKey
+      let nextLaunchConfigs = s.agentLaunchConfigByPaneKey
+      for (const paneKey of uniquePaneKeys) {
+        if (paneKey in nextSleeping) {
+          if (nextSleeping === s.sleepingAgentSessionsByPaneKey) {
+            nextSleeping = { ...nextSleeping }
+          }
+          delete nextSleeping[paneKey]
+        }
+        if (paneKey in nextLaunchConfigs) {
+          if (nextLaunchConfigs === s.agentLaunchConfigByPaneKey) {
+            nextLaunchConfigs = { ...nextLaunchConfigs }
+          }
+          delete nextLaunchConfigs[paneKey]
+        }
+      }
+      if (
+        nextSleeping === s.sleepingAgentSessionsByPaneKey &&
+        nextLaunchConfigs === s.agentLaunchConfigByPaneKey
+      ) {
+        return s
+      }
+      return {
+        sleepingAgentSessionsByPaneKey: nextSleeping,
+        agentLaunchConfigByPaneKey: nextLaunchConfigs
+      }
+    })
+  }
+
   return {
     agentStatusByPaneKey: {},
     runtimeAgentOrchestrationByPaneKey: {},
@@ -787,6 +948,7 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
     recentlyClosedAgentStatusTabIds: {},
 
     setRuntimeAgentOrchestrationByPaneKey: (entries) => {
+      const generatedTitleUpdates: AgentStatusEntry[] = []
       set((s) => {
         const runtimeMapChanged = !orchestrationMapsEqual(
           s.runtimeAgentOrchestrationByPaneKey,
@@ -809,7 +971,19 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
                 nextLive = { ...nextLive }
                 liveChanged = true
               }
-              nextLive[paneKey] = { ...liveEntry, orchestration: merged }
+              const nextEntry = { ...liveEntry, orchestration: merged }
+              nextLive[paneKey] = nextEntry
+              // Why: only replace titles when labels match the live dispatch
+              // taskId; sticky completed context must not rename a later turn.
+              if (
+                (merged.displayName?.trim() || merged.taskTitle?.trim()) &&
+                orchestrationLabelsMatchLiveDispatch({
+                  prompt: nextEntry.prompt,
+                  orchestration: merged
+                })
+              ) {
+                generatedTitleUpdates.push(nextEntry)
+              }
             }
           }
 
@@ -843,6 +1017,15 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
           ...(liveChanged ? { agentStatusEpoch: s.agentStatusEpoch + 1 } : {})
         }
       })
+      for (const entry of generatedTitleUpdates) {
+        get().setGeneratedTabTitleFromAgentPrompt(
+          entry.paneKey,
+          getAgentRowGeneratedTitleText(entry),
+          {
+            replaceExistingGeneratedTitle: true
+          }
+        )
+      }
     },
 
     registerAgentLaunchConfig: (paneKey, launchConfig, metadata) => {
@@ -916,6 +1099,8 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
       })
     },
     getAgentLaunchConfigForStatusEntry: (entry) => getLaunchConfigForEntry(get(), entry),
+    getAgentLaunchConfigForStatusMetadata: (metadata) =>
+      getLaunchConfigForStatusMetadata(get(), metadata),
 
     clearAgentLaunchConfig: (paneKey) => {
       set((s) => {
@@ -942,6 +1127,7 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
       }
       let completionRefreshWorktreeId: string | null = null
       let suppressedInheritedTerminalStatus = false
+      const generatedTitleEntry: { current: AgentStatusEntry | null } = { current: null }
       set((s) => {
         const existing = s.agentStatusByPaneKey[paneKey]
         // Why: snapshots and live pushes share receivedAt from the same main-side
@@ -1100,6 +1286,10 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
           stateHistory: history,
           toolName: payload.toolName,
           toolInput: payload.toolInput,
+          // Why: full untruncated AskUserQuestion JSON; carried so mobile/web
+          // clients can render the live prompt card. parseAgentStatusPayload
+          // already clears it when the agent moves to a different tool/state.
+          interactivePrompt: payload.interactivePrompt,
           lastAssistantMessage: payload.lastAssistantMessage,
           // Why: reused panes may start non-orchestrated work after runtime
           // metadata expires. Only final done rows keep the previous lineage
@@ -1112,6 +1302,7 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
           // it when a new turn starts (working → Stop reprices it).
           interrupted: payload.interrupted
         }
+        generatedTitleEntry.current = entry
         if (
           isAgentCompletionState(entry.state) &&
           existing !== undefined &&
@@ -1252,7 +1443,52 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
       if (suppressedInheritedTerminalStatus) {
         return
       }
-      get().setGeneratedTabTitleFromAgentPrompt(paneKey, payload.prompt)
+      const entryForGeneratedTitle = generatedTitleEntry.current
+      if (entryForGeneratedTitle) {
+        // Why: sticky orchestration (~30m) can outlive the dispatch turn.
+        // - Matching labels: replace so displayName upgrades the task preview.
+        // - Mismatched sticky taskId on a new dispatch preamble: replace so the
+        //   prior task's title does not stick across re-dispatch on the same pane.
+        const hasMatchingOrchestrationLabels = Boolean(
+          (entryForGeneratedTitle.orchestration?.displayName?.trim() ||
+            entryForGeneratedTitle.orchestration?.taskTitle?.trim()) &&
+          orchestrationLabelsMatchLiveDispatch(entryForGeneratedTitle)
+        )
+        const liveIsDispatchPrompt = isOrcaDispatchPrompt(entryForGeneratedTitle.prompt)
+        const liveDispatchTaskId = liveIsDispatchPrompt
+          ? getOrcaDispatchTaskId(entryForGeneratedTitle.prompt)
+          : null
+        const stickyOrchestrationTaskId =
+          entryForGeneratedTitle.orchestration?.taskId?.trim() || null
+        const isNewDispatchAgainstStickyOrchestration = Boolean(
+          liveDispatchTaskId &&
+          stickyOrchestrationTaskId &&
+          liveDispatchTaskId !== stickyOrchestrationTaskId
+        )
+        const shouldReplaceGeneratedTitle =
+          hasMatchingOrchestrationLabels || isNewDispatchAgainstStickyOrchestration
+        // Why: setAgentStatus is high-frequency. Only parse dispatch preambles when
+        // a title write is still possible (feature on + replace or first-write).
+        const mayWriteGeneratedTitle =
+          get().settings?.tabAutoGenerateTitle === true &&
+          (shouldReplaceGeneratedTitle ||
+            !agentStatusTabAlreadyHasProtectedOrGeneratedTitle(
+              get(),
+              entryForGeneratedTitle.tabId ?? getTabIdFromPaneKey(paneKey),
+              entryForGeneratedTitle.worktreeId
+            ))
+        const generatedTitlePrompt =
+          liveIsDispatchPrompt && mayWriteGeneratedTitle
+            ? getAgentRowGeneratedTitleText(entryForGeneratedTitle)
+            : entryForGeneratedTitle.prompt
+        if (shouldReplaceGeneratedTitle) {
+          get().setGeneratedTabTitleFromAgentPrompt(paneKey, generatedTitlePrompt, {
+            replaceExistingGeneratedTitle: true
+          })
+        } else {
+          get().setGeneratedTabTitleFromAgentPrompt(paneKey, generatedTitlePrompt)
+        }
+      }
       // Why: schedule after set completes so the timer reads the updated map.
       // queueMicrotask avoids re-entry into the zustand store during set.
       queueMicrotask(() => freshness.schedule())
@@ -1564,10 +1800,10 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
             delete nextAck[k]
           }
         }
-        const nextClosedTabs: Record<string, true> = {
-          ...s.recentlyClosedAgentStatusTabIds,
-          [tabIdPrefix]: true
-        }
+        const nextClosedTabs = boundRecentlyClosedAgentStatusTabIds(
+          s.recentlyClosedAgentStatusTabIds,
+          tabIdPrefix
+        )
 
         if (
           liveKeys.length === 0 &&
@@ -1976,31 +2212,8 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
       })
     },
 
-    clearSleepingAgentSession: (paneKey) => {
-      set((s) => {
-        const hasSleepingRecord = paneKey in s.sleepingAgentSessionsByPaneKey
-        const hasLaunchConfig = paneKey in s.agentLaunchConfigByPaneKey
-        if (!hasSleepingRecord && !hasLaunchConfig) {
-          return s
-        }
-        const nextSleeping = hasSleepingRecord
-          ? { ...s.sleepingAgentSessionsByPaneKey }
-          : s.sleepingAgentSessionsByPaneKey
-        if (hasSleepingRecord) {
-          delete nextSleeping[paneKey]
-        }
-        const nextLaunchConfigs = hasLaunchConfig
-          ? { ...s.agentLaunchConfigByPaneKey }
-          : s.agentLaunchConfigByPaneKey
-        if (hasLaunchConfig) {
-          delete nextLaunchConfigs[paneKey]
-        }
-        return {
-          sleepingAgentSessionsByPaneKey: nextSleeping,
-          agentLaunchConfigByPaneKey: nextLaunchConfigs
-        }
-      })
-    },
+    clearSleepingAgentSession: (paneKey) => clearSleepingAgentSessionsByPaneKey([paneKey]),
+    clearSleepingAgentSessionsByPaneKey,
 
     clearSleepingAgentSessionsByWorktree: (worktreeId) => {
       set((s) => {
@@ -2105,7 +2318,10 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
           next[retained.entry.paneKey] =
             entry === retained.entry ? retained : { ...retained, entry }
         }
-        return { retainedAgentsByPaneKey: next }
+        // Why: bound the map so a long multi-agent session cannot leak the
+        // renderer heap. retainAgents is the only path that grows it, so
+        // capping here is sufficient; evicts oldest-retained first.
+        return { retainedAgentsByPaneKey: capRetainedAgents(next) }
       })
     },
 

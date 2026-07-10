@@ -1,9 +1,11 @@
-/* eslint-disable max-lines -- Why: local/runtime launch tests share a mock harness. */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { BACKGROUND_MOUNT_TERMINAL_WORKTREE_EVENT } from '@/constants/terminal'
 import { createCompatibleRuntimeStatusResponseIfNeeded } from '@/runtime/runtime-compatibility-test-fixture'
 import { clearRuntimeCompatibilityCacheForTests } from '@/runtime/runtime-rpc-client'
+import { resetRemoteRuntimeTerminalMultiplexersForTests } from '@/runtime/remote-runtime-terminal-multiplexer'
 
 const mockSpawn = vi.fn()
+const mockKill = vi.fn()
 const mockWrite = vi.fn()
 const mockRuntimeEnvironmentCall = vi.fn()
 const mockRuntimeEnvironmentTransportCall = vi.fn()
@@ -19,6 +21,7 @@ const mockSubscribeToPtyData = vi.fn()
 const mockSubscribeToPtyExit = vi.fn()
 const mockPasteDraftWhenAgentReady = vi.fn()
 const mockMarkTrusted = vi.fn()
+const mockDispatchEvent = vi.fn()
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
 function expectStablePaneSpawn(): string {
@@ -98,6 +101,7 @@ vi.mock('@/components/terminal-pane/pty-data-sidecar-subscriptions', () => ({
 
 describe('launchAgentBackgroundSession', () => {
   beforeEach(() => {
+    resetRemoteRuntimeTerminalMultiplexersForTests()
     clearRuntimeCompatibilityCacheForTests()
     vi.clearAllMocks()
     mockRuntimeEnvironmentTransportCall.mockImplementation(
@@ -138,10 +142,12 @@ describe('launchAgentBackgroundSession', () => {
     mockSubscribeToPtyData.mockReturnValue(vi.fn())
     mockSubscribeToPtyExit.mockReturnValue(vi.fn())
     vi.stubGlobal('window', {
+      dispatchEvent: mockDispatchEvent,
       api: {
         pty: {
           spawn: mockSpawn,
-          write: mockWrite
+          write: mockWrite,
+          kill: mockKill
         },
         agentTrust: {
           markTrusted: mockMarkTrusted
@@ -171,6 +177,15 @@ describe('launchAgentBackgroundSession', () => {
       activate: false,
       recordInteraction: false
     })
+    expect(mockDispatchEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: BACKGROUND_MOUNT_TERMINAL_WORKTREE_EVENT,
+        detail: { worktreeId: 'wt-1', tabIds: ['tab-1'] }
+      })
+    )
+    expect(mockUpdateTabPtyId.mock.invocationCallOrder[0]).toBeLessThan(
+      mockDispatchEvent.mock.invocationCallOrder[0] ?? 0
+    )
     expect(mockSpawn).toHaveBeenCalledWith(
       expect.objectContaining({
         cwd: '/repo/worktree',
@@ -215,6 +230,33 @@ describe('launchAgentBackgroundSession', () => {
     expect(mockSubscribeToPtyData).toHaveBeenCalledWith('pty-1', expect.any(Function))
     expect(mockSubscribeToPtyExit).toHaveBeenCalledWith('pty-1', expect.any(Function))
     expect(result).toMatchObject({ tabId: 'tab-1', paneKey, ptyId: 'pty-1' })
+  })
+
+  it('does not mount the tab while the explicit PTY spawn is unresolved', async () => {
+    let resolveSpawn!: (result: { id: string }) => void
+    mockSpawn.mockReturnValueOnce(
+      new Promise<{ id: string }>((resolve) => {
+        resolveSpawn = resolve
+      })
+    )
+    const { launchAgentBackgroundSession } = await import('./launch-agent-background-session')
+
+    const launch = launchAgentBackgroundSession({
+      agent: 'claude',
+      worktreeId: 'wt-1',
+      prompt: 'run slowly'
+    })
+    await Promise.resolve()
+
+    expect(mockCreateTab).toHaveBeenCalled()
+    expect(mockDispatchEvent).not.toHaveBeenCalled()
+
+    resolveSpawn({ id: 'pty-slow' })
+    await expect(launch).resolves.toMatchObject({ ptyId: 'pty-slow' })
+    expect(mockUpdateTabPtyId).toHaveBeenCalledWith('tab-1', 'pty-slow')
+    expect(mockDispatchEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: { worktreeId: 'wt-1', tabIds: ['tab-1'] } })
+    )
   })
 
   it('records effective launch config returned by local PTY spawn', async () => {
@@ -599,7 +641,7 @@ describe('launchAgentBackgroundSession', () => {
         }),
         tabId: 'tab-1',
         leafId,
-        focus: false
+        presentation: 'background'
       }),
       timeoutMs: 15_000
     })
@@ -618,5 +660,30 @@ describe('launchAgentBackgroundSession', () => {
       paneKey: `tab-1:${leafId}`,
       ptyId: 'remote:env-1@@terminal-1'
     })
+  })
+
+  it('closes a created runtime terminal when its data subscription fails', async () => {
+    state.settings = { agentCmdOverrides: {}, activeRuntimeEnvironmentId: 'env-1' }
+    mockRuntimeEnvironmentSubscribe.mockRejectedValueOnce(new Error('subscription failed'))
+    const { launchAgentBackgroundSession } = await import('./launch-agent-background-session')
+
+    await expect(
+      launchAgentBackgroundSession({
+        agent: 'claude',
+        worktreeId: 'wt-1',
+        prompt: 'run the automation'
+      })
+    ).rejects.toThrow('subscription failed')
+
+    expect(mockRuntimeEnvironmentCall).toHaveBeenCalledWith({
+      selector: 'env-1',
+      method: 'terminal.close',
+      params: { terminal: 'terminal-1' },
+      timeoutMs: undefined
+    })
+    expect(state.clearTabPtyId).toHaveBeenCalledWith('tab-1', 'remote:env-1@@terminal-1')
+    expect(state.clearAgentLaunchConfig).toHaveBeenCalledWith(expect.stringMatching(/^tab-1:/))
+    expect(mockCloseTab).toHaveBeenCalledWith('tab-1', { recordInteraction: false })
+    expect(mockDispatchEvent).not.toHaveBeenCalled()
   })
 })

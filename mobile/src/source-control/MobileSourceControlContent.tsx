@@ -1,25 +1,23 @@
 import { ActivityIndicator, Pressable, SectionList, Text, TextInput, View } from 'react-native'
-import { GitBranch, Minus, MoreHorizontal, Plus, Sparkles } from 'lucide-react-native'
+import { Minus, MoreHorizontal, Plus, Sparkles } from 'lucide-react-native'
 import { colors, spacing } from '../theme/mobile-theme'
-import { MobileSourceControlReviewEntry } from './mobile-source-control-review-entry'
+import { MobileSourceControlCreatePrEntry } from './MobileSourceControlCreatePrEntry'
+import { MobileCommitFailurePanel } from './MobileCommitFailurePanel'
 import { KEYBOARD_COMMIT_BAR_CLEARANCE } from './mobile-source-control-screen-state'
 import { makeRenderFileRow, BranchCompareFooter } from './MobileSourceControlFileRows'
 import type { MobileSourceControlState } from './use-mobile-source-control-state'
 import { styles } from './mobile-source-control-styles'
+import { hubStyles } from './mobile-source-control-hub-styles'
 
 type Props = {
   state: MobileSourceControlState
-  hostId: string
-  worktreeId: string
-  name: string
 }
 
-// The ready-state body: summary card, changed-files list, and commit bar.
-export function MobileSourceControlContent({ state, hostId, worktreeId, name }: Props) {
+// The ready-state Changes segment body: quick actions, changed-files list, and commit bar.
+export function MobileSourceControlContent({ state }: Props) {
   const {
-    connState,
     insets,
-    screenState,
+    connState,
     busyAction,
     commitMessage,
     setCommitMessage,
@@ -27,84 +25,56 @@ export function MobileSourceControlContent({ state, hostId, worktreeId, name }: 
     setShowActionSheet,
     setDiscardTarget,
     actionError,
+    commitFailureRecovery,
+    commitFailureRecoveryAction,
     keyboardLift,
     openingPath,
     openingBranchPath,
-    status,
     sections,
-    branchEntries,
     hasVisibleChanges,
-    reviewableCount,
     stageablePaths,
     unstageablePaths,
     stagedCount,
-    unstagedCount,
-    branchLabel,
-    syncLabel,
     primaryAction,
+    createPrAction,
     stageAll,
     unstageAll,
     generateCommitMessage,
     cancelGenerateCommitMessage,
-    abortConflictOperation,
     openFile,
     openBranchDiff,
     runGitAction
   } = state
   const ioBusy = busyAction !== null || openingPath !== null || openingBranchPath !== null
   const shouldShowGenerateButton = stagedCount > 0 || generatingMessage
+  const createPrHeroActive =
+    createPrAction.visible && !createPrAction.disabled && !createPrAction.pushFirst
 
   return (
     <>
-      <View style={styles.summaryCard}>
-        <View style={styles.summaryHeader}>
-          <View style={styles.branchLine}>
-            <GitBranch size={15} color={colors.textSecondary} strokeWidth={2.1} />
-            <Text style={styles.branchText} numberOfLines={1}>
-              {branchLabel}
-            </Text>
-          </View>
-          {syncLabel ? <Text style={styles.syncText}>{syncLabel}</Text> : null}
+      {connState !== 'connected' ? (
+        // Why: once data has loaded the screen looks alive even when the
+        // desktop link is down, so taps appear to do nothing (STA-1511).
+        // Surface the reconnect state where the user is looking.
+        <View style={styles.reconnectBanner}>
+          <ActivityIndicator size="small" color={colors.statusAmber} />
+          <Text style={styles.reconnectBannerText}>Reconnecting to desktop...</Text>
         </View>
-        <View style={styles.countRow}>
-          <Text style={styles.countText}>{unstagedCount} changed</Text>
-          <Text style={styles.countText}>{stagedCount} staged</Text>
-          {branchEntries.length > 0 ? (
-            <Text style={styles.countText}>{branchEntries.length} on branch</Text>
-          ) : null}
-          {status && status.conflictOperation !== 'unknown' ? (
-            <View style={styles.conflictRow}>
-              <Text style={styles.conflictText}>{status.conflictOperation}</Text>
-              {(status.conflictOperation === 'merge' || status.conflictOperation === 'rebase') && (
-                <Pressable
-                  style={({ pressed }) => [styles.abortButton, pressed && styles.abortPressed]}
-                  disabled={busyAction !== null}
-                  onPress={() => void abortConflictOperation(status.conflictOperation)}
-                >
-                  <Text style={styles.abortText}>
-                    {busyAction === `abort-${status.conflictOperation}`
-                      ? 'Aborting…'
-                      : `Abort ${status.conflictOperation}`}
-                  </Text>
-                </Pressable>
-              )}
-            </View>
-          ) : null}
-        </View>
-        {actionError ? (
+      ) : null}
+      <View style={hubStyles.changesControls}>
+        {commitFailureRecovery ? (
+          <MobileCommitFailurePanel
+            failure={commitFailureRecovery}
+            action={commitFailureRecoveryAction}
+          />
+        ) : actionError ? (
           <View style={styles.actionError}>
             <Text style={styles.actionErrorText} numberOfLines={2}>
               {actionError}
             </Text>
           </View>
         ) : null}
-        <MobileSourceControlReviewEntry
-          count={reviewableCount}
-          disabled={screenState.kind !== 'ready' || connState !== 'connected' || ioBusy}
-          hostId={hostId}
-          worktreeId={worktreeId}
-          worktreeName={name}
-        />
+        <MobileSourceControlCreatePrEntry action={createPrAction} />
         <View style={styles.bulkRow}>
           <Pressable
             style={({ pressed }) => [
@@ -161,6 +131,7 @@ export function MobileSourceControlContent({ state, hostId, worktreeId, name }: 
         </View>
       ) : (
         <SectionList
+          style={hubStyles.tabBody}
           sections={sections}
           renderItem={makeRenderFileRow({
             busyAction,
@@ -257,6 +228,7 @@ export function MobileSourceControlContent({ state, hostId, worktreeId, name }: 
           <Pressable
             style={({ pressed }) => [
               styles.commitButton,
+              createPrHeroActive && styles.commitButtonSecondary,
               primaryAction.disabled && styles.commitButtonDisabled,
               pressed && styles.commitButtonPressed
             ]}
@@ -266,9 +238,19 @@ export function MobileSourceControlContent({ state, hostId, worktreeId, name }: 
             accessibilityHint={primaryAction.accessibilityHint}
           >
             {primaryAction.loading ? (
-              <ActivityIndicator size="small" color={colors.bgBase} />
+              <ActivityIndicator
+                size="small"
+                color={createPrHeroActive ? colors.textPrimary : colors.bgBase}
+              />
             ) : (
-              <Text style={styles.commitButtonText}>{primaryAction.label}</Text>
+              <Text
+                style={[
+                  styles.commitButtonText,
+                  createPrHeroActive && styles.commitButtonSecondaryText
+                ]}
+              >
+                {primaryAction.label}
+              </Text>
             )}
           </Pressable>
         </View>

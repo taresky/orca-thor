@@ -199,6 +199,30 @@ import {
   type TaskPageRepoSourceState
 } from '@/components/task-page-cache-selectors'
 import { shouldHideTaskPageListChrome } from '@/components/task-page-list-chrome-visibility'
+import LinearIssueAttributeFilterDropdowns from '@/components/linear-issue-attribute-filter-dropdowns'
+import { resolveLinearIssueAttributeFilterPrimaryTeam } from '@/components/linear-issue-attribute-filter-primary-team'
+import {
+  buildLinearIssueListReadArgs,
+  buildLinearIssueListRequestSignature,
+  isLinearIssueSearchActive,
+  shouldForceLinearIssueListRead,
+  teamDerivedFacetsForPrimaryTeamChange
+} from '@/components/task-page-linear-issue-request'
+import {
+  resolveLinearIssueEmptyKind,
+  shouldOfferLinearIssueFetchMore
+} from '@/components/task-page-linear-issue-empty-state'
+import {
+  emptyLinearIssueAttributeFilter,
+  linearIssueAttributeFilterSignature,
+  type LinearIssueAttributeFilter
+} from '../../../shared/linear-issue-attribute-filter'
+import {
+  isNewIssueDraftContentful,
+  resolveNewIssueOpenSeed,
+  resolveUserRepoSwitchReset,
+  resolveVanishedNewIssueRepoReset
+} from '@/components/task-page-new-issue-draft'
 import { findTaskPageJiraIssue } from '@/components/task-page-jira-cache-selectors'
 import { getRepoBackedTaskEmptyState } from '@/components/task-page-empty-state'
 import {
@@ -466,9 +490,10 @@ function getTaskPageRepoCacheInput(repo: Repo): {
   }
 }
 
-// Why: the row's px-3 left padding leaves a 12px gap between the scroll-viewport
-// edge and the sticky ID column; without a covering ::before, scrolled cell text
-// bleeds through that strip. Same trick as the title column for its 8px gap.
+// Why: the sticky header's bg must be opaque (GITHUB_TASK_ROW_SURFACE_CLASS, not
+// bg-muted/50) or vertically-scrolled rows bleed through it. These left-sticky
+// cells additionally need a ::before gap-cover so horizontally-scrolled header
+// columns don't show through the row's px-3 padding strip.
 const GITHUB_TASK_STICKY_ID_HEADER_CLASS = cn(
   'sticky left-3 z-30 before:absolute before:-left-3 before:top-0 before:bottom-0 before:w-3 before:bg-inherit',
   GITHUB_TASK_ROW_SURFACE_CLASS
@@ -645,27 +670,28 @@ function LinearStateCell({
       }
 
       setPending(true)
-      patchLinearIssue(issue.id, { state: nextState })
+      patchLinearIssue(issue.id, { state: nextState }, { sourceContext })
       void linearUpdateIssue(providerSettings, issue.id, { stateId }, issue.workspaceId)
         .then((result) => {
           if (reqId !== reqRef.current) {
             return
           }
           if (result.ok === false) {
-            patchLinearIssue(issue.id, { state: previousState })
+            patchLinearIssue(issue.id, { state: previousState }, { sourceContext })
             toast.error(
               result.error ??
                 translate('auto.components.TaskPage.6775c05483', 'Failed to update Linear state')
             )
             return
           }
+          useAppStore.getState().invalidateLinearIssueLists({ sourceContext })
           useAppStore.getState().recordFeatureInteraction('linear-tasks')
         })
         .catch(() => {
           if (reqId !== reqRef.current) {
             return
           }
-          patchLinearIssue(issue.id, { state: previousState })
+          patchLinearIssue(issue.id, { state: previousState }, { sourceContext })
           toast.error(
             translate('auto.components.TaskPage.6775c05483', 'Failed to update Linear state')
           )
@@ -684,6 +710,7 @@ function LinearStateCell({
       patchLinearIssue,
       pending,
       providerSettings,
+      sourceContext,
       states.data
     ]
   )
@@ -3047,6 +3074,8 @@ export default function TaskPage(): React.JSX.Element {
   const selectLinearWorkspace = useAppStore((s) => s.selectLinearWorkspace)
   const searchLinearIssues = useAppStore((s) => s.searchLinearIssues)
   const listLinearIssues = useAppStore((s) => s.listLinearIssues)
+  const linearListInvalidationToken = useAppStore((s) => s.linearListInvalidationToken)
+  const invalidateLinearIssueLists = useAppStore((s) => s.invalidateLinearIssueLists)
   const getCachedLinearIssues = useAppStore((s) => s.getCachedLinearIssues)
   const getCachedLinearTeams = useAppStore((s) => s.getCachedLinearTeams)
   const listLinearTeams = useAppStore((s) => s.listLinearTeams)
@@ -3445,6 +3474,13 @@ export default function TaskPage(): React.JSX.Element {
       selectedLinearWorkspaceId
     ]
   )
+  // Why: only react to invalidation tokens for this TaskPage source scope.
+  const linearListInvalidationVersionForSource = useMemo(() => {
+    const scope = linearTaskSourceContext
+      ? getTaskSourceCacheScope(linearTaskSourceContext)
+      : 'local'
+    return linearListInvalidationToken.scope === scope ? linearListInvalidationToken.version : 0
+  }, [linearListInvalidationToken, linearTaskSourceContext])
   const jiraTaskSourceContext = useMemo(
     () =>
       normalizeTaskSourceContext({
@@ -4051,6 +4087,16 @@ export default function TaskPage(): React.JSX.Element {
   const [newIssueAssignees, setNewIssueAssignees] = useState<GitHubAssignableUser[]>([])
   const [newIssueSubmitting, setNewIssueSubmitting] = useState(false)
   const [newIssueRepoId, setNewIssueRepoId] = useState<string | null>(null)
+  // Why: session-only draft slice backs recovery of an in-progress issue after
+  // an accidental dismissal (outside click/Escape/Cancel) and across a Tasks
+  // view unmount. Component `useState` stays the inputs' immediate source; the
+  // store is the durable-across-remount backing. See task-page-new-issue-draft.
+  // The draft value is read imperatively at open time (getState) rather than
+  // subscribed: it's only consumed in the `+` open handler, and the write-through
+  // rewrites it on every keystroke — subscribing would re-render all of TaskPage
+  // per keystroke while the modal is open. Actions are stable refs (no churn).
+  const setNewIssueDraft = useAppStore((s) => s.setNewIssueDraft)
+  const clearNewIssueDraft = useAppStore((s) => s.clearNewIssueDraft)
 
   // Why: resolve the target repo from the user's choice, falling back to the
   // first selected repo if the chosen id drops out of the selection while the
@@ -4095,10 +4141,62 @@ export default function TaskPage(): React.JSX.Element {
     { runtimeEnvironmentId: newIssueOpen ? (newIssueRuntimeTarget?.environmentId ?? null) : null }
   )
 
+  // Why: repo-scoped labels/assignees can't cross repos. A reactive clear keyed
+  // on the derived target id can't tell a restore apart from a user switch, so
+  // it would wipe just-restored fields and corrupt the recovery draft via the
+  // write-through below. Decompose by cause instead: this guard only handles the
+  // "chosen repo vanished from the selection" case (removed/deselected). A
+  // genuine user switch clears imperatively in the repo Select's handler; a
+  // restore always seeds an in-selection repoId, so neither path fires here.
   useEffect(() => {
+    const reset = resolveVanishedNewIssueRepoReset(
+      newIssueRepoId,
+      selectedRepos.map((r) => r.id)
+    )
+    if (!reset) {
+      return
+    }
     setNewIssueLabels([])
     setNewIssueAssignees([])
-  }, [newIssueTargetRepo?.id])
+    setNewIssueRepoId(reset.repoId)
+  }, [newIssueRepoId, selectedRepos])
+
+  // Why: mirror the live fields into the session draft while the modal is open
+  // so an accidental dismissal doesn't lose input. Content-gate the write so an
+  // untouched open never pins a meaningless draft (repoId alone is not content),
+  // and clear any stale draft once the form is emptied back out.
+  useEffect(() => {
+    if (!newIssueOpen) {
+      return
+    }
+    if (
+      isNewIssueDraftContentful({
+        title: newIssueTitle,
+        body: newIssueBody,
+        labels: newIssueLabels,
+        assignees: newIssueAssignees
+      })
+    ) {
+      setNewIssueDraft({
+        title: newIssueTitle,
+        body: newIssueBody,
+        labels: newIssueLabels,
+        assignees: newIssueAssignees,
+        repoId: newIssueRepoId
+      })
+    } else {
+      clearNewIssueDraft()
+    }
+  }, [
+    newIssueOpen,
+    newIssueTitle,
+    newIssueBody,
+    newIssueLabels,
+    newIssueAssignees,
+    newIssueRepoId,
+    setNewIssueDraft,
+    clearNewIssueDraft
+  ])
 
   const [selectedLinearIssueId, setSelectedLinearIssueId] = useState<string | null>(null)
   const [selectedLinearIssueFallback, setSelectedLinearIssueFallback] =
@@ -4286,6 +4384,14 @@ export default function TaskPage(): React.JSX.Element {
   const [linearError, setLinearError] = useState<string | null>(null)
   const [linearSearchInput, setLinearSearchInput] = useState('')
   const [appliedLinearSearch, setAppliedLinearSearch] = useState('')
+  const [linearAttributeFilter, setLinearAttributeFilter] = useState<LinearIssueAttributeFilter>(
+    () => emptyLinearIssueAttributeFilter()
+  )
+  const linearAttributeFilterSignatureRef = useRef(
+    linearIssueAttributeFilterSignature(emptyLinearIssueAttributeFilter())
+  )
+  const linearPrimaryTeamIdRef = useRef<string | null>(null)
+  const previousLinearWorkspaceIdForFiltersRef = useRef<string | null | undefined>(undefined)
   const [linearViewMode, setLinearViewMode] = useState<LinearViewMode>('list')
   const [linearGroupBy, setLinearGroupBy] = useState<LinearGroupBy>('none')
   const [linearOrderBy, setLinearOrderBy] = useState<LinearOrderBy>('priority')
@@ -5031,6 +5137,57 @@ export default function TaskPage(): React.JSX.Element {
     )
   }, [linearTeamOptions, defaultLinearTeamSelection])
 
+  const linearAttributePrimaryTeam = useMemo(
+    () =>
+      resolveLinearIssueAttributeFilterPrimaryTeam({
+        selectedTeamIds: [...linearTeamSelection],
+        availableTeams: linearTeamOptions
+      }),
+    [linearTeamOptions, linearTeamSelection]
+  )
+
+  const applyLinearAttributeFilter = useCallback((next: LinearIssueAttributeFilter) => {
+    // Why: batch filter + limit/page reset in one transition so the fetch
+    // effect never issues an old expanded-limit request for the new filter.
+    setLinearAttributeFilter(next)
+    setLinearIssueLimit(LINEAR_ITEM_LIMIT)
+    setLinearIssuePage(0)
+    setLinearIssueLoadingTargetPage(null)
+  }, [])
+
+  useEffect(() => {
+    const workspaceId = selectedLinearWorkspaceId ?? null
+    const previous = previousLinearWorkspaceIdForFiltersRef.current
+    previousLinearWorkspaceIdForFiltersRef.current = workspaceId
+    if (previous === undefined || previous === workspaceId) {
+      return
+    }
+    applyLinearAttributeFilter(emptyLinearIssueAttributeFilter())
+  }, [applyLinearAttributeFilter, selectedLinearWorkspaceId])
+
+  useEffect(() => {
+    const nextId = linearAttributePrimaryTeam?.id ?? null
+    const previousId = linearPrimaryTeamIdRef.current
+    linearPrimaryTeamIdRef.current = nextId
+    if (previousId === null || previousId === nextId) {
+      return
+    }
+    // Why: status/assignee/labels are team-scoped; clearing them is a filter change
+    // and must reset limit/page via applyLinearAttributeFilter (R6), not a bare set.
+    const next = teamDerivedFacetsForPrimaryTeamChange(linearAttributeFilter)
+    if (
+      linearIssueAttributeFilterSignature(linearAttributeFilter) ===
+      linearIssueAttributeFilterSignature(next)
+    ) {
+      return
+    }
+    applyLinearAttributeFilter(next)
+  }, [applyLinearAttributeFilter, linearAttributeFilter, linearAttributePrimaryTeam?.id])
+
+  const linearSearchActive = isLinearIssueSearchActive(linearSearchInput, appliedLinearSearch)
+  const showLinearAttributeFilters =
+    linearMode === 'issues' && !activeLinearIssueContextLabel && !linearSearchActive
+
   const filteredLinearIssues = useMemo(() => {
     if (activeLinearIssueContextLabel) {
       return displayedLinearIssues
@@ -5349,7 +5506,7 @@ export default function TaskPage(): React.JSX.Element {
           color: workflowState.color
         }
 
-        patchLinearIssue(issue.id, { state: nextState })
+        patchLinearIssue(issue.id, { state: nextState }, { sourceContext: linearTaskSourceContext })
         patchScopedLinearIssue(issue.id, { state: nextState })
         applyFallbackState(nextState)
 
@@ -5360,7 +5517,11 @@ export default function TaskPage(): React.JSX.Element {
           issue.workspaceId
         )
         if (result.ok === false) {
-          patchLinearIssue(issue.id, { state: previousState })
+          patchLinearIssue(
+            issue.id,
+            { state: previousState },
+            { sourceContext: linearTaskSourceContext }
+          )
           patchScopedLinearIssue(issue.id, { state: previousState })
           applyFallbackState(previousState)
           toast.error(
@@ -5369,9 +5530,14 @@ export default function TaskPage(): React.JSX.Element {
           )
           return
         }
+        invalidateLinearIssueLists({ sourceContext: linearTaskSourceContext })
         useAppStore.getState().recordFeatureInteraction('linear-tasks')
       } catch {
-        patchLinearIssue(issue.id, { state: previousState })
+        patchLinearIssue(
+          issue.id,
+          { state: previousState },
+          { sourceContext: linearTaskSourceContext }
+        )
         patchScopedLinearIssue(issue.id, { state: previousState })
         applyFallbackState(previousState)
         toast.error(
@@ -5387,6 +5553,7 @@ export default function TaskPage(): React.JSX.Element {
     },
     [
       filteredLinearIssues,
+      invalidateLinearIssueLists,
       linearBoardDraggingIssueId,
       linearBoardUpdatingIssueIds,
       linearStatusBoardEnabled,
@@ -6632,6 +6799,10 @@ export default function TaskPage(): React.JSX.Element {
       setNewIssueBody('')
       setNewIssueLabels([])
       setNewIssueAssignees([])
+      // Why: a successful submit is the only path that discards the recovery
+      // draft. Closing `newIssueOpen` in the same commit keeps the write-through
+      // effect (gated on it) from re-persisting the emptied fields.
+      clearNewIssueDraft()
       // Why: bump the nonce so the list refetches and shows the new issue.
       setTaskRefreshNonce((current) => current + 1)
 
@@ -6699,7 +6870,8 @@ export default function TaskPage(): React.JSX.Element {
     newIssueTargetRepo,
     newIssueTitle,
     openGitHubDetailPage,
-    setDialogWorkItem
+    setDialogWorkItem,
+    clearNewIssueDraft
   ])
 
   const handleCreateNewLinearProject = useCallback(async (): Promise<void> => {
@@ -7103,9 +7275,8 @@ export default function TaskPage(): React.JSX.Element {
     taskSource
   ])
 
-  // Why: fetch Linear issues when the tab is active and the account is
-  // connected. An empty search falls back to `listLinearIssues` (assigned
-  // issues) so the default view shows the user's own work.
+  // Why: fetch Linear issues when the tab is active and connected. Empty search
+  // uses the plain `all` list with optional server-side attribute filters.
   useEffect(() => {
     if (!taskResumeApplied) {
       return
@@ -7125,10 +7296,17 @@ export default function TaskPage(): React.JSX.Element {
 
     const trimmed = appliedLinearSearch.trim()
     const effectiveLinearIssueLimit = clampLinearIssueListLimit(linearIssueLimit)
-    const readArgs =
-      trimmed.length > 0
-        ? ({ kind: 'search', query: trimmed, limit: LINEAR_ITEM_LIMIT } as const)
-        : ({ kind: 'list', filter: 'all', limit: effectiveLinearIssueLimit } as const)
+    const searchActive = trimmed.length > 0
+    const listReadArgs = buildLinearIssueListReadArgs({
+      filter: 'all',
+      limit: effectiveLinearIssueLimit,
+      attributeFilter: linearAttributeFilter,
+      searchActive,
+      allowAttributeFilter: selectedLinearWorkspaceId !== 'all'
+    })
+    const readArgs = searchActive
+      ? ({ kind: 'search', query: trimmed, limit: LINEAR_ITEM_LIMIT } as const)
+      : listReadArgs
     const cachedResult = getCachedLinearIssues(readArgs, { sourceContext: linearTaskSourceContext })
     if (readArgs.kind === 'search') {
       setLinearIssuesHasMore(false)
@@ -7143,15 +7321,29 @@ export default function TaskPage(): React.JSX.Element {
       )
     }
 
-    const requestSignature =
-      trimmed.length > 0
-        ? `${selectedLinearWorkspaceId ?? 'default'}::search::${trimmed}::${LINEAR_ITEM_LIMIT}`
-        : `${selectedLinearWorkspaceId ?? 'default'}::list::all::${effectiveLinearIssueLimit}`
+    const nextFilterSignature = linearIssueAttributeFilterSignature(linearAttributeFilter)
+    const previousFilterSignature = linearAttributeFilterSignatureRef.current
+    linearAttributeFilterSignatureRef.current = nextFilterSignature
+    const filterForce = shouldForceLinearIssueListRead({
+      previousFilterSignature,
+      nextFilterSignature,
+      refreshForced: false
+    })
+
+    const requestSignature = buildLinearIssueListRequestSignature({
+      sourceContext: linearTaskSourceContext,
+      workspaceId: selectedLinearWorkspaceId,
+      filter: 'all',
+      limit: effectiveLinearIssueLimit,
+      attributeFilter: linearAttributeFilter,
+      searchQuery: searchActive ? trimmed : undefined
+    })
     const previousRequest = lastLinearRequestRef.current
     const forceRefresh =
-      linearRefreshNonce > 0 &&
-      previousRequest?.nonce !== linearRefreshNonce &&
-      previousRequest?.signature === requestSignature
+      filterForce ||
+      (linearRefreshNonce > 0 &&
+        previousRequest?.nonce !== linearRefreshNonce &&
+        previousRequest?.signature === requestSignature)
     lastLinearRequestRef.current = { nonce: linearRefreshNonce, signature: requestSignature }
     const shouldProbeOnLanding =
       !forceRefresh &&
@@ -7174,7 +7366,7 @@ export default function TaskPage(): React.JSX.Element {
             force: forceRefresh || shouldProbeOnLanding,
             sourceContext: linearTaskSourceContext
           })
-        : listLinearIssues(readArgs.filter, effectiveLinearIssueLimit, {
+        : listLinearIssues(listReadArgs, {
             force: forceRefresh || shouldProbeOnLanding,
             sourceContext: linearTaskSourceContext
           })
@@ -7237,6 +7429,8 @@ export default function TaskPage(): React.JSX.Element {
     appliedLinearSearch,
     linearIssueLimit,
     linearRefreshNonce,
+    linearAttributeFilter,
+    linearListInvalidationVersionForSource,
     taskResumeApplied,
     getCachedLinearIssues,
     linearTaskSourceContext
@@ -7823,12 +8017,12 @@ export default function TaskPage(): React.JSX.Element {
             icon). Matching that here needs 6px top padding above the 32px
             cluster (6 + 16 = 22). The previous pt-3 placed the cluster 6px
             too low, breaking the visual band across the top chrome. */}
-        <div className="mx-auto flex min-h-0 min-w-0 w-full flex-1 flex-col px-5 pt-1.5 pb-5 md:px-8 md:pt-1.5 md:pb-7">
+        <div className="mx-auto flex min-h-0 min-w-0 w-full flex-1 flex-col px-5 pt-1.5 pb-4 md:px-8 md:pt-1.5 md:pb-5">
           <div
-            className={cn('flex-none flex flex-col gap-3', taskPageListChromeHidden && 'hidden')}
+            className={cn('flex-none flex flex-col gap-2', taskPageListChromeHidden && 'hidden')}
           >
-            <section className="flex flex-col gap-3">
-              <div className="flex flex-col gap-3">
+            <section className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2">
                 <div className="flex items-center justify-between gap-2">
                   <div
                     className="flex min-w-0 flex-wrap items-center gap-2"
@@ -8142,10 +8336,10 @@ export default function TaskPage(): React.JSX.Element {
 
                 {taskSource === 'github' && githubMode === 'items' ? (
                   <div
-                    className="min-w-0 rounded-md rounded-b-none border border-border/50 bg-muted/50 p-3 shadow-sm"
+                    className="min-w-0 rounded-md rounded-b-none border border-border/50 bg-muted/50 px-3 pt-2 pb-0 shadow-sm"
                     data-contextual-tour-target="tasks-search-presets"
                   >
-                    <div className="mb-3 flex flex-wrap gap-2">
+                    <div className="mb-2 flex flex-wrap gap-2">
                       {getGitHubTaskKindPresets(activeGithubTaskKind).map((option) => {
                         const active = activeTaskPreset === option.id
                         return (
@@ -8233,11 +8427,20 @@ export default function TaskPage(): React.JSX.Element {
                               variant="outline"
                               size="icon"
                               onClick={() => {
-                                setNewIssueTitle('')
-                                setNewIssueBody('')
-                                setNewIssueLabels([])
-                                setNewIssueAssignees([])
-                                setNewIssueRepoId(primaryRepo?.id ?? null)
+                                // Why: restore a content-non-empty draft instead
+                                // of resetting, so an accidental dismissal is
+                                // recoverable. The empty-default branch stays live
+                                // so a stale draft never hijacks a fresh open after
+                                // the user changed their primary/selected repo.
+                                const seed = resolveNewIssueOpenSeed({
+                                  draft: useAppStore.getState().newIssueDraft,
+                                  selectedRepoIds: selectedRepos.map((r) => r.id)
+                                })
+                                setNewIssueTitle(seed.title)
+                                setNewIssueBody(seed.body)
+                                setNewIssueLabels(seed.labels)
+                                setNewIssueAssignees(seed.assignees)
+                                setNewIssueRepoId(seed.repoId)
                                 setNewIssueOpen(true)
                               }}
                               disabled={!newIssueTargetRepo}
@@ -8371,7 +8574,7 @@ export default function TaskPage(): React.JSX.Element {
                   </div>
                 ) : taskSource === 'linear' && linearConnected ? (
                   <div
-                    className="min-w-0 rounded-md rounded-b-none border border-border/50 bg-muted/50 p-3 shadow-sm"
+                    className="min-w-0 rounded-md rounded-b-none border border-border/50 bg-muted/50 px-3 pt-2 pb-0 shadow-sm"
                     data-contextual-tour-target="tasks-search-presets"
                   >
                     <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
@@ -8510,7 +8713,18 @@ export default function TaskPage(): React.JSX.Element {
                     </div>
 
                     {linearMode === 'issues' ? (
-                      <div className="mt-3 flex min-w-0 items-center gap-3">
+                      <div className="mt-3 flex min-w-0 items-center gap-2">
+                        {showLinearAttributeFilters ? (
+                          <LinearIssueAttributeFilterDropdowns
+                            value={linearAttributeFilter}
+                            onChange={applyLinearAttributeFilter}
+                            workspaceId={selectedLinearWorkspaceId ?? null}
+                            isAllWorkspaces={selectedLinearWorkspaceId === 'all'}
+                            primaryTeam={linearAttributePrimaryTeam}
+                            selectedTeamCount={linearTeamSelection.size}
+                            settings={linearTaskSourceContext ?? settings}
+                          />
+                        ) : null}
                         <div className="relative min-w-0 flex-1 basis-64">
                           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                           <Input
@@ -8598,7 +8812,7 @@ export default function TaskPage(): React.JSX.Element {
                     ) : null}
                   </div>
                 ) : taskSource === 'jira' && jiraConnected ? (
-                  <div className="rounded-md rounded-b-none border border-border/50 bg-muted/50 p-3 shadow-sm">
+                  <div className="rounded-md rounded-b-none border border-border/50 bg-muted/50 px-3 pt-2 pb-0 shadow-sm">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex flex-wrap gap-2">
                         {jiraPresets.map((preset) => {
@@ -8806,7 +9020,7 @@ export default function TaskPage(): React.JSX.Element {
                       </div>
                     </div>
                     <div
-                      className="min-w-0 rounded-md rounded-b-none border border-border/50 bg-muted/50 p-3 shadow-sm"
+                      className="min-w-0 rounded-md rounded-b-none border border-border/50 bg-muted/50 px-3 pt-2 pb-0 shadow-sm"
                       data-contextual-tour-target="tasks-search-presets"
                     >
                       <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
@@ -8899,6 +9113,7 @@ export default function TaskPage(): React.JSX.Element {
                 initialTab={dialogInitialTab}
                 repoPath={dialogRepoPath}
                 repoId={dialogWorkItem.repoId}
+                sourceContext={dialogSourceContext}
                 backLabel="Pull requests"
                 onUse={(item) => {
                   setDialogWorkItem(null)
@@ -8934,8 +9149,12 @@ export default function TaskPage(): React.JSX.Element {
                 style={{ scrollbarGutter: 'stable' }}
               >
                 <div
+                  // Why: z-40 must beat the data rows' sticky left cells (z-20);
+                  // this container is a stacking context, so its z sets the whole
+                  // header's level — at z-10 the rows' sticky cells painted over it.
                   className={cn(
-                    'sticky top-0 z-10 grid gap-2 border-b border-border/50 bg-muted/50 px-3 py-2 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground',
+                    'sticky top-0 z-40 grid gap-2 border-b border-border/50 px-3 py-2 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground',
+                    GITHUB_TASK_ROW_SURFACE_CLASS,
                     githubTaskGridClass
                   )}
                 >
@@ -9156,7 +9375,10 @@ export default function TaskPage(): React.JSX.Element {
                             }
                           }}
                           className={cn(
-                            'group/github-task-row grid cursor-pointer gap-2 px-3 py-2 text-left transition hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+                            // Why: hover uses the same opaque muted-70% mix as the sticky
+                            // ID/Title cells (GITHUB_TASK_ROW_HOVER_SURFACE_CLASS) so the
+                            // left columns don't show a different shade than the rest of the row.
+                            'group/github-task-row grid cursor-pointer gap-2 px-3 py-2 text-left transition-colors hover:[background:color-mix(in_srgb,var(--muted)_70%,var(--background))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
                             githubTaskGridClass
                           )}
                         >
@@ -9197,7 +9419,7 @@ export default function TaskPage(): React.JSX.Element {
                                 />
                               ) : null}
                             </div>
-                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                               <span>
                                 {item.author ??
                                   translate(
@@ -10446,20 +10668,37 @@ export default function TaskPage(): React.JSX.Element {
                       {translate('auto.components.TaskPage.903c7af49f', 'No Linear issues found')}
                     </p>
                     <p className="mt-2 text-sm text-muted-foreground">
-                      {activeLinearIssueContextLabel
-                        ? translate(
+                      {(() => {
+                        const emptyKind = resolveLinearIssueEmptyKind({
+                          hasContextLabel: Boolean(activeLinearIssueContextLabel),
+                          searchActive: linearSearchActive,
+                          attributeFilter: linearAttributeFilter,
+                          serverIssueCount: activeLinearIssues.length,
+                          filteredIssueCount: filteredLinearIssues.length
+                        })
+                        if (emptyKind === 'context') {
+                          return translate(
                             'auto.components.TaskPage.25ff84769a',
                             'No issues match this Linear context.'
                           )
-                        : linearSearchInput
-                          ? translate(
-                              'auto.components.TaskPage.2bdefbcac3',
-                              'Try a different search query.'
-                            )
-                          : translate(
-                              'auto.components.TaskPage.d079be2dc8',
-                              'No assigned issues. Try searching for something.'
-                            )}
+                        }
+                        if (emptyKind === 'search') {
+                          return translate(
+                            'auto.components.TaskPage.2bdefbcac3',
+                            'Try a different search query.'
+                          )
+                        }
+                        if (emptyKind === 'server-attribute-filter') {
+                          return translate(
+                            'auto.components.TaskPage.linearEmptyAttributeFilter',
+                            'No issues match the selected filters. Clear a filter or try different criteria.'
+                          )
+                        }
+                        return translate(
+                          'auto.components.TaskPage.linearEmptyUnfilteredScope',
+                          'No issues in this workspace scope. Try searching or adjusting teams.'
+                        )
+                      })()}
                     </p>
                   </div>
                 ) : null}
@@ -10480,6 +10719,27 @@ export default function TaskPage(): React.JSX.Element {
                         'Try selecting more teams or refreshing; team filters apply to the current fetched issue set.'
                       )}
                     </p>
+                    {shouldOfferLinearIssueFetchMore({
+                      emptyKind: 'client-team',
+                      serverHasMore: linearIssuesHasMore
+                    }) ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="mt-3 h-7 text-xs"
+                        onClick={() => {
+                          setLinearIssueLimit((limit) =>
+                            Math.min(
+                              clampLinearIssueListLimit(limit + LINEAR_ITEM_LIMIT),
+                              LINEAR_ISSUE_LIST_MAX
+                            )
+                          )
+                        }}
+                      >
+                        {translate('auto.components.TaskPage.linearFetchMore', 'Fetch more')}
+                      </Button>
+                    ) : null}
                   </div>
                 ) : null}
 
@@ -11048,7 +11308,15 @@ export default function TaskPage(): React.JSX.Element {
                 </label>
                 <Select
                   value={newIssueRepoId ?? undefined}
-                  onValueChange={(v) => setNewIssueRepoId(v)}
+                  onValueChange={(v) => {
+                    // Why: repo-scoped labels/assignees can't cross a genuine
+                    // user repo switch, so clear them imperatively here (co-located
+                    // with the cause). Restore never routes through this handler.
+                    setNewIssueRepoId(v)
+                    const reset = resolveUserRepoSwitchReset()
+                    setNewIssueLabels(reset.labels)
+                    setNewIssueAssignees(reset.assignees)
+                  }}
                   disabled={newIssueSubmitting}
                 >
                   <SelectTrigger>

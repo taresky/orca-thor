@@ -137,6 +137,65 @@ describe('createIpcPtyTransport', () => {
     expect(onReplayData).toHaveBeenCalledWith('new replay')
   })
 
+  it('keeps the live handler when detach() runs after a newer transport attached to the same PTY', async () => {
+    // Why: pane->tab detach and split-group moves rehome the React subtree, so
+    // the NEW TerminalPane can attach to the same ptyId BEFORE the old pane's
+    // unmount detach() runs. An unconditional unregister deletes the live
+    // handler and the pane freezes with the PTY still alive (frozen-pane bug).
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const receivedByNewPane = vi.fn()
+    const replayedToNewPane = vi.fn()
+    const exitSeenByNewPane = vi.fn()
+    const receivedByOldPane = vi.fn()
+
+    const oldPane = createIpcPtyTransport({})
+    await oldPane.connect({ url: '', callbacks: { onData: receivedByOldPane } })
+
+    const newPane = createIpcPtyTransport({})
+    newPane.attach?.({
+      existingPtyId: 'pty-1',
+      callbacks: {
+        onData: receivedByNewPane,
+        onReplayData: replayedToNewPane,
+        onExit: exitSeenByNewPane
+      }
+    })
+    oldPane.detach?.()
+
+    onData?.({ id: 'pty-1', data: 'live output' })
+    onReplay?.({ id: 'pty-1', data: 'replay output' })
+
+    expect(receivedByNewPane).toHaveBeenCalledWith('live output')
+    expect(replayedToNewPane).toHaveBeenCalledWith('replay output')
+    expect(receivedByOldPane).not.toHaveBeenCalled()
+
+    onExit?.({ id: 'pty-1', code: 0 })
+    expect(exitSeenByNewPane).toHaveBeenCalledWith(0)
+  })
+
+  it('buffers data across a normal detach-then-attach gap and drains it to the next pane', async () => {
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const receivedByNewPane = vi.fn()
+
+    const oldPane = createIpcPtyTransport({})
+    await oldPane.connect({ url: '', callbacks: { onData: vi.fn() } })
+    oldPane.detach?.()
+
+    onData?.({ id: 'pty-1', data: 'buffered while detached' })
+    expect(receivedByNewPane).not.toHaveBeenCalled()
+
+    const newPane = createIpcPtyTransport({})
+    newPane.attach?.({
+      existingPtyId: 'pty-1',
+      callbacks: { onData: receivedByNewPane }
+    })
+
+    expect(receivedByNewPane).toHaveBeenCalledWith('buffered while detached')
+
+    onData?.({ id: 'pty-1', data: 'live after reattach' })
+    expect(receivedByNewPane).toHaveBeenCalledWith('live after reattach')
+  })
+
   it('exposes the connection identity captured at transport creation', async () => {
     const { createIpcPtyTransport } = await import('./pty-transport')
 
@@ -161,6 +220,56 @@ describe('createIpcPtyTransport', () => {
       shellOverride: 'wsl.exe'
     })
     expect(sshTransport.getLocalSessionMetadata?.()).toBeNull()
+  })
+
+  it('sends the missing-cwd fallback flag only for local IPC spawns', async () => {
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const spawn = window.api.pty.spawn as unknown as ReturnType<typeof vi.fn>
+
+    const transport = createIpcPtyTransport({ cwdFallback: 'worktree' })
+    await transport.connect({ url: '', callbacks: {} })
+
+    expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ cwdFallback: 'worktree' }))
+    transport.disconnect()
+  })
+
+  it('omits the missing-cwd fallback flag when the IPC transport is SSH-tagged', async () => {
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const spawn = window.api.pty.spawn as unknown as ReturnType<typeof vi.fn>
+
+    const transport = createIpcPtyTransport({ connectionId: 'ssh-1', cwdFallback: 'worktree' })
+    await transport.connect({ url: '', callbacks: {} })
+
+    expect(spawn).toHaveBeenCalledWith(expect.not.objectContaining({ cwdFallback: 'worktree' }))
+    transport.disconnect()
+  })
+
+  it('omits the missing-cwd fallback flag for session reattach spawns', async () => {
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const spawn = window.api.pty.spawn as unknown as ReturnType<typeof vi.fn>
+
+    const transport = createIpcPtyTransport({ cwdFallback: 'worktree' })
+    await transport.connect({ url: '', callbacks: {}, sessionId: 'session-1' })
+
+    expect(spawn).toHaveBeenCalledWith(expect.not.objectContaining({ cwdFallback: 'worktree' }))
+    transport.disconnect()
+  })
+
+  it('returns startup cwd fallback metadata to the connection layer', async () => {
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const spawn = window.api.pty.spawn as unknown as ReturnType<typeof vi.fn>
+    spawn.mockResolvedValueOnce({
+      id: 'pty-1',
+      startupCwdFallback: { kind: 'worktree', cwd: '/repo/app' }
+    })
+
+    const transport = createIpcPtyTransport({ cwdFallback: 'worktree' })
+
+    await expect(transport.connect({ url: '', callbacks: {} })).resolves.toEqual({
+      id: 'pty-1',
+      startupCwdFallback: { kind: 'worktree', cwd: '/repo/app' }
+    })
+    transport.disconnect()
   })
 
   it('defers title side effects until after terminal data is delivered', async () => {
@@ -611,6 +720,21 @@ describe('createIpcPtyTransport', () => {
     expect(flushed.endsWith('TAIL$')).toBe(true)
   })
 
+  it('drains pre-handler data and exit into eager buffers for fast background PTYs', async () => {
+    const { ensurePtyDispatcher, registerEagerPtyBuffer } = await import('./pty-transport')
+    const onEagerExit = vi.fn()
+
+    ensurePtyDispatcher()
+    onData?.({ id: 'pty-fast-setup', data: 'setup failed fast\n' })
+    onExit?.({ id: 'pty-fast-setup', code: 1 })
+
+    const handle = registerEagerPtyBuffer('pty-fast-setup', onEagerExit)
+
+    expect(handle.flush()).toBe('setup failed fast\n')
+    await Promise.resolve()
+    expect(onEagerExit).toHaveBeenCalledWith('pty-fast-setup', 1)
+  })
+
   it('enforces the eager buffer cap in UTF-8 bytes for multi-byte output', async () => {
     const { registerEagerPtyBuffer } = await import('./pty-transport')
     const cap = 512 * 1024
@@ -700,7 +824,7 @@ describe('createIpcPtyTransport', () => {
     expect(onDataCallback).not.toHaveBeenCalledWith(bufferedPayload)
   })
 
-  it('clears before replaying eager-buffered output so hidden automation terminals do not open blank', async () => {
+  it('replays display-bearing eager-buffered output with default clear semantics', async () => {
     const { createIpcPtyTransport, registerEagerPtyBuffer } = await import('./pty-transport')
 
     const bufferedPayload = '\x1b[?1049hAutomation agent is running'
@@ -720,11 +844,121 @@ describe('createIpcPtyTransport', () => {
       }
     })
 
-    const clear = '\x1b[2J\x1b[3J\x1b[H'
-    expect(onReplayData.mock.calls.map(([data]) => data)).toEqual([clear, bufferedPayload])
+    expect(onReplayData.mock.calls).toEqual([[bufferedPayload]])
   })
 
-  it('routes the attach-time clear sequence through onReplayData for non-alternate-screen sessions', async () => {
+  it('does not clear before replaying title-only eager-buffered output', async () => {
+    const { createIpcPtyTransport, registerEagerPtyBuffer } = await import('./pty-transport')
+
+    const bufferedPayload = '\x1b]0;Restored title\x07'
+    registerEagerPtyBuffer('pty-title-only', vi.fn())
+    onData?.({
+      id: 'pty-title-only',
+      data: bufferedPayload
+    })
+
+    const onTitleChange = vi.fn()
+    const transport = createIpcPtyTransport({ onTitleChange })
+    const onReplayData = vi.fn()
+
+    transport.attach({
+      existingPtyId: 'pty-title-only',
+      callbacks: {
+        onReplayData
+      }
+    })
+
+    // Why: title/control frames restore metadata but do not redraw a terminal
+    // frame; clearing before them would erase the persisted scrollback.
+    const clear = '\x1b[2J\x1b[3J\x1b[H'
+    expect(onReplayData.mock.calls).toEqual([[bufferedPayload, { clearBeforeReplay: false }]])
+    expect(onReplayData).not.toHaveBeenCalledWith(clear)
+    expect(onTitleChange).toHaveBeenCalledWith('Restored title', 'Restored title')
+  })
+
+  it('does not write an unterminated title-only eager buffer into replay', async () => {
+    const { createIpcPtyTransport, registerEagerPtyBuffer } = await import('./pty-transport')
+
+    const bufferedPayload = '\x1b]0;partial restored title'
+    registerEagerPtyBuffer('pty-partial-title', vi.fn())
+    onData?.({
+      id: 'pty-partial-title',
+      data: bufferedPayload
+    })
+
+    const transport = createIpcPtyTransport()
+    const onReplayData = vi.fn()
+
+    transport.attach({
+      existingPtyId: 'pty-partial-title',
+      callbacks: {
+        onReplayData
+      }
+    })
+
+    const clear = '\x1b[2J\x1b[3J\x1b[H'
+    expect(onReplayData.mock.calls).toEqual([['', { clearBeforeReplay: false }]])
+    expect(onReplayData).not.toHaveBeenCalledWith(clear)
+  })
+
+  it('does not let an unterminated OSC 9999 eager buffer swallow live output', async () => {
+    const { createIpcPtyTransport, registerEagerPtyBuffer } = await import('./pty-transport')
+
+    registerEagerPtyBuffer('pty-partial-status', vi.fn())
+    onData?.({
+      id: 'pty-partial-status',
+      data: '\x1b]9999;{"state":"working"'
+    })
+
+    const transport = createIpcPtyTransport({ onAgentStatus: vi.fn() })
+    const onReplayData = vi.fn()
+    const onDataCallback = vi.fn()
+
+    transport.attach({
+      existingPtyId: 'pty-partial-status',
+      callbacks: {
+        onData: onDataCallback,
+        onReplayData
+      }
+    })
+
+    expect(onReplayData.mock.calls).toEqual([['', { clearBeforeReplay: false }]])
+
+    onData?.({
+      id: 'pty-partial-status',
+      data: 'live output'
+    })
+
+    expect(onDataCallback).toHaveBeenCalledWith('live output')
+  })
+
+  it('does not clear before replaying OSC 9999-only eager-buffered output', async () => {
+    const { createIpcPtyTransport, registerEagerPtyBuffer } = await import('./pty-transport')
+
+    registerEagerPtyBuffer('pty-status-only', vi.fn())
+    onData?.({
+      id: 'pty-status-only',
+      data: '\x1b]9999;{"state":"working","prompt":"ship it","agentType":"codex"}\x07'
+    })
+
+    const transport = createIpcPtyTransport()
+    const onReplayData = vi.fn()
+
+    transport.attach({
+      existingPtyId: 'pty-status-only',
+      callbacks: {
+        onReplayData
+      }
+    })
+
+    // Why: OSC 9999 is stripped before xterm receives replay data. A non-empty
+    // raw status frame must not clear restored scrollback and replay nothing.
+    const clear = '\x1b[2J\x1b[3J\x1b[H'
+    expect(onReplayData.mock.calls).toEqual([['', { clearBeforeReplay: false }]])
+    expect(onReplayData).not.toHaveBeenCalledWith(clear)
+  })
+
+  it('does not clear on attach when there is no eager-buffered output', async () => {
     const { createIpcPtyTransport } = await import('./pty-transport')
 
     const transport = createIpcPtyTransport()
@@ -739,15 +973,43 @@ describe('createIpcPtyTransport', () => {
       }
     })
 
-    // Why: the clear preamble must travel the replay path so any subsequent
-    // snapshot bytes sit under the same replay guard in pty-connection.ts.
-    const clear = '\x1b[2J\x1b[3J\x1b[H'
-    expect(onReplayData).toHaveBeenCalledWith(clear)
-    expect(onDataCallback).not.toHaveBeenCalledWith(clear)
+    // Why: restored scrollback may already be in xterm before attach. An
+    // empty eager buffer must not erase it and leave the pane cursor-only.
+    expect(onReplayData).not.toHaveBeenCalled()
+    expect(onDataCallback).not.toHaveBeenCalled()
+  })
+
+  it('does not clear on attach when the eager buffer is empty', async () => {
+    const { createIpcPtyTransport, registerEagerPtyBuffer } = await import('./pty-transport')
+
+    registerEagerPtyBuffer('pty-attached', vi.fn())
+    const transport = createIpcPtyTransport()
+    const onDataCallback = vi.fn()
+    const onReplayData = vi.fn()
+
+    transport.attach({
+      existingPtyId: 'pty-attached',
+      callbacks: {
+        onData: onDataCallback,
+        onReplayData
+      }
+    })
+
+    // Why: a live PTY can have an eager handle before any bytes arrive. Clearing
+    // here would destroy the scrollback restored by TerminalPane mount.
+    expect(onReplayData).not.toHaveBeenCalled()
+    expect(onDataCallback).not.toHaveBeenCalled()
   })
 
   it('skips the attach-time clear sequence for alternate-screen sessions', async () => {
-    const { createIpcPtyTransport } = await import('./pty-transport')
+    const { createIpcPtyTransport, registerEagerPtyBuffer } = await import('./pty-transport')
+
+    const bufferedPayload = '\x1b[?1049hAlternate screen is already restored'
+    registerEagerPtyBuffer('pty-alt-screen', vi.fn())
+    onData?.({
+      id: 'pty-alt-screen',
+      data: bufferedPayload
+    })
 
     const transport = createIpcPtyTransport()
     const onDataCallback = vi.fn()
@@ -765,6 +1027,7 @@ describe('createIpcPtyTransport', () => {
     // Why: alternate-screen snapshots already fill the viewport; emitting the
     // clear would erase the restored content. Neither path should see it.
     const clear = '\x1b[2J\x1b[3J\x1b[H'
+    expect(onReplayData.mock.calls).toEqual([[bufferedPayload, { clearBeforeReplay: false }]])
     expect(onReplayData).not.toHaveBeenCalledWith(clear)
     expect(onDataCallback).not.toHaveBeenCalledWith(clear)
   })
@@ -869,6 +1132,51 @@ describe('createIpcPtyTransport', () => {
       coldRestore: undefined,
       replay: undefined,
       sessionExpired: undefined
+    })
+  })
+
+  it('threads the daemon pendingEscapeTailAnsi through the reattach connect result (#7329)', async () => {
+    // Why: the local daemon ships the mid-escape tail on the spawn/reattach
+    // result; dropping it here silently regressed the local half of #7329
+    // (the consumer test injects at the transport boundary, so only this
+    // asserts the IPC threading).
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const spawnMock = vi.fn().mockResolvedValue({
+      id: 'pty-reattach-tail',
+      isReattach: true,
+      snapshot: 'snapshot data',
+      snapshotCols: 80,
+      snapshotRows: 24,
+      pendingEscapeTailAnsi: '\x1b[3'
+    })
+
+    ;(globalThis as { window: typeof window }).window = {
+      ...originalWindow,
+      api: {
+        ...originalWindow?.api,
+        pty: {
+          ...originalWindow?.api?.pty,
+          spawn: spawnMock,
+          write: vi.fn(),
+          resize: vi.fn(),
+          kill: vi.fn(),
+          onData: vi.fn(() => () => {}),
+          onReplay: vi.fn(() => () => {}),
+          onExit: vi.fn(() => () => {})
+        }
+      }
+    } as unknown as typeof window
+
+    const transport = createIpcPtyTransport()
+    const result = await transport.connect({
+      url: '',
+      sessionId: 'pty-reattach-tail',
+      callbacks: {}
+    })
+
+    expect(result).toMatchObject({
+      id: 'pty-reattach-tail',
+      pendingEscapeTailAnsi: '\x1b[3'
     })
   })
 
@@ -1106,6 +1414,114 @@ describe('createIpcPtyTransport', () => {
     expect(onError).toHaveBeenCalledWith('ENOENT: spawn /bin/nope not found')
   })
 
+  it('surfaces the SSH-not-active toast for a regular SSH target with no PTY provider', async () => {
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const spawnMock = vi.fn().mockRejectedValue(new Error('No PTY provider for connection ssh-1'))
+    ;(globalThis as { window: typeof window }).window = {
+      ...originalWindow,
+      api: {
+        ...originalWindow?.api,
+        pty: {
+          ...originalWindow?.api?.pty,
+          spawn: spawnMock,
+          write: vi.fn(),
+          resize: vi.fn(),
+          kill: vi.fn(),
+          onData: vi.fn(() => () => {}),
+          onReplay: vi.fn(() => () => {}),
+          onExit: vi.fn(() => () => {})
+        }
+      }
+    } as unknown as typeof window
+
+    const onError = vi.fn()
+    await createIpcPtyTransport({ connectionId: 'ssh-1' }).connect({
+      url: '',
+      callbacks: { onError }
+    })
+
+    expect(onError).toHaveBeenCalledWith(
+      'SSH connection is not active. Use the reconnect dialog or Settings to connect.'
+    )
+  })
+
+  it('suppresses the SSH-not-active toast for a runtime-owned (per-workspace-env) target', async () => {
+    // Why: a runtime-owned SSH target disappearing is expected teardown (e.g. the workspace was
+    // deleted) — there's no reconnect dialog for it, so no toast should fire.
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const spawnMock = vi
+      .fn()
+      .mockRejectedValue(new Error('No PTY provider for connection runtime-ssh-orca-1'))
+    ;(globalThis as { window: typeof window }).window = {
+      ...originalWindow,
+      api: {
+        ...originalWindow?.api,
+        pty: {
+          ...originalWindow?.api?.pty,
+          spawn: spawnMock,
+          write: vi.fn(),
+          resize: vi.fn(),
+          kill: vi.fn(),
+          onData: vi.fn(() => () => {}),
+          onReplay: vi.fn(() => () => {}),
+          onExit: vi.fn(() => () => {})
+        }
+      }
+    } as unknown as typeof window
+
+    const onError = vi.fn()
+    await createIpcPtyTransport({ connectionId: 'runtime-ssh-orca-1' }).connect({
+      url: '',
+      callbacks: { onError }
+    })
+
+    expect(onError).not.toHaveBeenCalled()
+  })
+
+  it('recovers a stale cross-connection SSH reattach as expired instead of a red error toast', async () => {
+    // Why: a restored SSH pty id embeds the connection it was created under. If
+    // the pane reattaches under a different connection the main-side router
+    // rejects with "belongs to SSH connection" — that session is unreachable, so
+    // we drop it (sessionExpired) and spawn fresh rather than surfacing a crash.
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const spawnMock = vi
+      .fn()
+      .mockRejectedValue(
+        new Error(
+          'PTY ssh:ssh-1779863656395-57g1q1@@pty-3 belongs to SSH connection "ssh-1779863656395-57g1q1"'
+        )
+      )
+    ;(globalThis as { window: typeof window }).window = {
+      ...originalWindow,
+      api: {
+        ...originalWindow?.api,
+        pty: {
+          ...originalWindow?.api?.pty,
+          spawn: spawnMock,
+          write: vi.fn(),
+          resize: vi.fn(),
+          kill: vi.fn(),
+          onData: vi.fn(() => () => {}),
+          onReplay: vi.fn(() => () => {}),
+          onExit: vi.fn(() => () => {})
+        }
+      }
+    } as unknown as typeof window
+
+    const onError = vi.fn()
+    const result = await createIpcPtyTransport({ connectionId: 'ssh-other' }).connect({
+      url: '',
+      sessionId: 'ssh:ssh-1779863656395-57g1q1@@pty-3',
+      callbacks: { onError }
+    })
+
+    expect(onError).not.toHaveBeenCalled()
+    expect(result).toEqual({
+      id: 'ssh:ssh-1779863656395-57g1q1@@pty-3',
+      sessionExpired: true
+    })
+  })
+
   it('surfaces terminal session state save failures without the Electron IPC wrapper', async () => {
     const { createIpcPtyTransport } = await import('./pty-transport')
     const wrappedMessage = `Error invoking remote method 'pty:spawn': Error: ${createTerminalSessionStateSaveFailureMessage()}`
@@ -1291,7 +1707,8 @@ describe('createRemoteRuntimePtyTransport', () => {
         env: { ORCA_TAB_ID: 'tab-1' },
         tabId: 'tab-1',
         leafId: '11111111-1111-4111-8111-111111111111',
-        focus: false
+        focus: false,
+        presentation: 'background'
       },
       timeoutMs: 15_000
     })

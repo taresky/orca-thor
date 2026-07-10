@@ -12,6 +12,11 @@ export type AgentCompletionDispatchMeta = {
   agentStatus?: AgentCompletionStatusSnapshot
 }
 
+export type AgentAttentionDispatchMeta = {
+  source: 'hook'
+  agentStatus: AgentCompletionStatusSnapshot
+}
+
 export type AgentCompletionCoordinatorOptions = {
   paneKey: string
   getPtyId: () => string | null
@@ -21,14 +26,21 @@ export type AgentCompletionCoordinatorOptions = {
     ptyId: string
   ) => Promise<RuntimeTerminalProcessInspection>
   dispatchCompletion: (title: string, meta?: AgentCompletionDispatchMeta) => void
+  dispatchAttention?: (title: string, meta: AgentAttentionDispatchMeta) => void
   isLive: () => boolean
   shouldPollProcessCadence?: () => boolean
+  // Why: on hosts where one inspection forks a whole-process-table scan (local
+  // Windows PowerShell/CIM), panes without agent evidence relax to a slow
+  // cadence; cheap hosts (POSIX `ps`, SSH/remote-owned scans) keep full cadence.
+  isProcessInspectionCostly?: () => boolean
+  shouldSuppressHookCompletion?: (payload: AgentCompletionStatusSnapshot) => boolean
 }
 
 export type AgentCompletionCoordinator = {
   observeTitle: (title: string) => void
   observeClassifiedTitleCompletion: (title: string) => void
   observeTitleWorking: () => void
+  observeOutputActivity: () => void
   observeHookStatus: (payload: AgentCompletionStatusSnapshot) => void
   startProcessTracking: () => void
   hasPendingHookDoneCompletion: () => boolean

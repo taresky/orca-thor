@@ -1,4 +1,4 @@
-import { win32 as pathWin32 } from 'path'
+import { win32 as pathWin32 } from 'node:path'
 import { isWindowsGitBashShellPath } from '../git-bash'
 import { parseWslPath, toLinuxPath, toWindowsWslPath } from '../wsl'
 import {
@@ -6,6 +6,7 @@ import {
   escapeWslShCommandForWindows,
   quotePosixShell
 } from '../../shared/wsl-login-shell-command'
+import { ensureShellReadyWrappersAt } from './local-pty-shell-ready'
 import {
   encodePowerShellCommand,
   getPowerShellOsc133Bootstrap
@@ -94,6 +95,7 @@ function getPowerShellEncodedCommand(startupCommand?: string): {
  * Builds wsl.exe arguments that enter the target directory through the distro shell.
  */
 function buildWslShellArgs(linuxCwd: string, distro?: string): string[] {
+  ensureShellReadyWrappersAt()
   const setupCommand = [
     `cd ${quotePosixShell(linuxCwd)}`,
     'export PATH="$HOME/.local/bin:$PATH"',
