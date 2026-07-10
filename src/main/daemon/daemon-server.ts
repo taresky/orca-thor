@@ -345,6 +345,7 @@ export class DaemonServer {
           terminalWindowsWslDistro: p.terminalWindowsWslDistro,
           terminalWindowsPowerShellImplementation: p.terminalWindowsPowerShellImplementation,
           shellReadySupported: p.shellReadySupported,
+          historySeed: p.historySeed,
           ...(p.shellReadyTimeoutMs !== undefined
             ? { shellReadyTimeoutMs: p.shellReadyTimeoutMs }
             : {}),
@@ -404,7 +405,8 @@ export class DaemonServer {
           isNew: result.isNew,
           snapshot: result.snapshot,
           pid: result.pid,
-          shellState: result.shellState
+          shellState: result.shellState,
+          ...(result.historySeeded !== undefined ? { historySeeded: result.historySeeded } : {})
         }
       }
 

@@ -52,7 +52,7 @@ import {
   AGENT_PROMPT_SUBMIT_DELAY_MS,
   buildAgentPromptPasteBytes
 } from '../../shared/agent-prompt-injection'
-import { gitExecFileAsync, wslAwareSpawn } from '../git/runner'
+import { gitExecFileAsync, gitSpawn } from '../git/runner'
 import {
   cleanupClaimedCloneTarget,
   claimCloneTarget,
@@ -60,6 +60,7 @@ import {
   getClonePathComparisonKey
 } from '../git/repo-clone-path'
 import { getGitCloneFailureMessage } from '../../shared/git-clone-failure-message'
+import { GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS } from '../../shared/git-fetch-auto-maintenance'
 import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
@@ -138,7 +139,11 @@ import type {
   WorkspaceSessionState,
   DirEntry
 } from '../../shared/types'
-import { parseExecutionHostId, type ExecutionHostId } from '../../shared/execution-host'
+import {
+  getRepoExecutionHostId,
+  parseExecutionHostId,
+  type ExecutionHostId
+} from '../../shared/execution-host'
 import type { SleepingAgentLaunchConfig } from '../../shared/agent-session-resume'
 import type { RuntimeClientEvent } from '../../shared/runtime-client-events'
 import { toRuntimeActivateWorktreeEvent } from '../../shared/runtime-client-events'
@@ -253,6 +258,11 @@ import {
   RUNTIME_PROTOCOL_VERSION,
   type RuntimeCapability
 } from '../../shared/protocol-version'
+import {
+  configureAiVaultSessionSources,
+  listAiVaultSessions
+} from '../ai-vault/cached-session-list'
+import type { AiVaultListArgs, AiVaultListResult } from '../../shared/ai-vault-types'
 import type {
   WorkspacePortKillRequest,
   WorkspacePortKillResult,
@@ -487,7 +497,8 @@ import {
   updateIssueForAgent as updateLinearIssueForAgent,
   updateIssue as updateLinearIssue,
   LinearWriteFailure,
-  type LinearListFilter
+  type LinearListFilter,
+  type LinearIssueListOptions
 } from '../linear/issues'
 import {
   LinearAgentAccessError,
@@ -539,6 +550,7 @@ import {
   createIssue as createJiraIssue,
   getIssue as getJiraIssue,
   getIssueComments as getJiraIssueComments,
+  getProjectStatusOrder as getJiraProjectStatusOrder,
   listAssignableUsers as listJiraAssignableUsers,
   listCreateFields as listJiraCreateFields,
   listIssueTypes as listJiraIssueTypes,
@@ -699,6 +711,10 @@ import {
 } from './terminal-view-attribute-store'
 import { killAllProcessesForWorktree } from './worktree-teardown'
 import { MOBILE_SUBSCRIBE_SCROLLBACK_ROWS } from './scrollback-limits'
+import {
+  createMobileSessionTabsNotifyCoalescer,
+  type MobileSessionTabsNotifyCoalescer
+} from './mobile-session-tabs-notify-coalescer'
 import type {
   IFilesystemProvider,
   IPtyProvider,
@@ -1228,6 +1244,9 @@ function getAgentLaunchPlatformForRepo(
   return isWindowsAbsolutePathLike(repo.path) ? 'win32' : 'linux'
 }
 
+// Why: long enough for a phone to reconnect and retry a create whose response
+// was lost, short enough that an intentional later re-resume forks fresh.
+const MOBILE_TERMINAL_CREATE_RESULT_TTL_MS = 60_000
 const FOREGROUND_AGENT_WRAPPER_RETRY_INTERVAL_MS = 150
 const FOREGROUND_AGENT_WRAPPER_RETRY_TIMEOUT_MS = 6_500
 const BRACKETED_PASTE_BEGIN = '\x1b[200~'
@@ -2110,6 +2129,13 @@ export class OrcaRuntimeService {
     { activate: boolean; selectIfNoActiveTab: boolean }
   >()
   private mobileSessionTabListeners = new Set<(snapshot: RuntimeMobileSessionTabsResult) => void>()
+  // Why: coalesces title/status-driven session.tabs emits so spinner churn
+  // doesn't fan out (and per-client JSON.stringify) a snapshot several times a
+  // second. Emit reads the latest snapshot, so only the freshest version ships.
+  private readonly mobileSessionTabsNotifyCoalescer: MobileSessionTabsNotifyCoalescer =
+    createMobileSessionTabsNotifyCoalescer((worktreeId) =>
+      this.notifyMobileSessionTabsChangedNow(worktreeId)
+    )
   private leaves = new Map<string, RuntimeLeafRecord>()
   // Why: PTY output is a per-keystroke hot path. Looking up affected leaves by
   // ptyId keeps active TUI redraws independent of the total open terminal count.
@@ -2466,6 +2492,11 @@ export class OrcaRuntimeService {
       // terminal output. worktree.ps reads this at query time so mobile shows the
       // same inline agent rows the desktop sidebar does — same source, 1:1.
       getAgentStatusSnapshot?: () => AgentStatusIpcPayload[]
+      // Why: codex-home paths for the Agent Session History scan must be sourced
+      // here, not via the window-only registerCoreHandlers path — that path never
+      // runs under `orca serve`, so remote/SSH hosts would silently drop
+      // managed-Codex sessions. The runtime ctor runs in BOTH window and serve.
+      getAdditionalAiVaultCodexHomePaths?: () => readonly string[]
       buildAgentHookPtyEnv?: () => Record<string, string>
     }
   ) {
@@ -2475,6 +2506,14 @@ export class OrcaRuntimeService {
       this.agentDetector = new AgentDetector(stats)
     }
     this.getAgentStatusSnapshotFn = deps?.getAgentStatusSnapshot ?? null
+    // Why: configure the shared AiVault scan cache from a serve-mode-reachable
+    // seam so the aiVault.listSessions RPC includes managed-Codex + WSL sessions
+    // even on headless `orca serve` hosts where registerCoreHandlers never runs.
+    if (deps?.getAdditionalAiVaultCodexHomePaths) {
+      configureAiVaultSessionSources({
+        getAdditionalCodexHomePaths: deps.getAdditionalAiVaultCodexHomePaths
+      })
+    }
     // Why: the daemon adapter is installed via `setLocalPtyProvider()` during
     // attachMainWindowServices, AFTER this service is constructed. Capturing
     // `getLocalPtyProvider()` at construction time would freeze a reference to
@@ -2879,9 +2918,17 @@ export class OrcaRuntimeService {
       // must not treat browser panes as supported just because runtime RPC is up.
       capabilities,
       hostPlatform: process.platform,
+      terminalWindowsShell: this.store?.getSettings?.().terminalWindowsShell ?? null,
       protocolVersion: RUNTIME_PROTOCOL_VERSION,
       minCompatibleMobileVersion: MIN_COMPATIBLE_RUNTIME_CLIENT_VERSION
     }
+  }
+
+  // Why: scans the transcript-owning host's disk (correct by construction over
+  // RPC — a remote/SSH host scans its own disk). Delegates to the one shared
+  // cache so the desktop panel and the mobile screen never double-scan.
+  listAiVaultSessions(args?: AiVaultListArgs): Promise<AiVaultListResult> {
+    return listAiVaultSessions(args)
   }
 
   setPtyController(controller: RuntimePtyController | null): void {
@@ -3633,7 +3680,10 @@ export class OrcaRuntimeService {
     this.notifyMobileSessionTabsChanged(worktreeId)
   }
 
-  private touchMobileSessionSnapshotsForPty(ptyId: string): void {
+  private touchMobileSessionSnapshotsForPty(
+    ptyId: string,
+    options: { immediate?: boolean } = {}
+  ): void {
     for (const [worktreeId, snapshot] of this.mobileSessionTabsByWorktree) {
       const hasPtyBackedTab = snapshot.tabs.some(
         (tab) =>
@@ -3647,7 +3697,15 @@ export class OrcaRuntimeService {
         ...snapshot,
         snapshotVersion: snapshot.snapshotVersion + 1
       })
-      this.notifyMobileSessionTabsChanged(worktreeId)
+      if (options.immediate) {
+        // Why: readiness/lifecycle changes are structural and must not wait
+        // behind the title/status coalescing window.
+        this.notifyMobileSessionTabsChanged(worktreeId)
+      } else {
+        // Why: title/status flips several times a second under spinner-in-title
+        // agents. Coalesce the emit instead of fanning out every version.
+        this.mobileSessionTabsNotifyCoalescer.schedule(worktreeId)
+      }
     }
   }
 
@@ -5309,6 +5367,9 @@ export class OrcaRuntimeService {
   ): () => void {
     this.mobileSessionTabListeners.add(listener)
     return () => {
+      // Why: flush pending coalesced notifies before dropping this listener so a
+      // subscriber closing mid-window still receives the latest settled state.
+      this.mobileSessionTabsNotifyCoalescer.flushAll()
       this.mobileSessionTabListeners.delete(listener)
     }
   }
@@ -5590,6 +5651,7 @@ export class OrcaRuntimeService {
     }
     titleTrackerEntry.applyingChunk = true
     titleTrackerEntry.chunkTouchedSessionTabs = false
+    let retainedAgentStatusChanged = false
     try {
       titleTrackerEntry.tracker.handleChunk(agentStatusChunk.cleanData, {
         titleScanData: titleInput
@@ -5605,14 +5667,17 @@ export class OrcaRuntimeService {
         // Why: per-chunk cross-channel contract order is status → titles →
         // bell — the chunk's agentStatus:set events must reach the renderer
         // before its pty:sideEffect batch.
-        this.emitTerminalAgentStatusEvents(ptyId, agentStatusChunk)
+        retainedAgentStatusChanged = this.emitTerminalAgentStatusEvents(ptyId, agentStatusChunk)
       } finally {
         // Why: flushed in the finally so a throwing tracker callback cannot
         // strand this chunk's facts to be emitted under the next chunk's seq.
         this.flushPendingTerminalSideEffectFacts(ptyId, titleTrackerEntry)
       }
     }
-    if (titleTrackerEntry.chunkTouchedSessionTabs) {
+    // Why: hook (OSC 9999) transitions often arrive without a title change, so
+    // headless-serve snapshots would never republish and paired remote clients
+    // kept the stale agent state until the next title change (#7970).
+    if (titleTrackerEntry.chunkTouchedSessionTabs || retainedAgentStatusChanged) {
       this.touchMobileSessionSnapshotsForPty(ptyId)
     }
 
@@ -6203,12 +6268,14 @@ export class OrcaRuntimeService {
     return worktreePath && isWindowsAbsolutePathLike(worktreePath) ? 'win32' : 'posix'
   }
 
-  private emitTerminalAgentStatusEvents(ptyId: string, chunk: ProcessedAgentStatusChunk): void {
+  /** Returns true when any retained agent-row snapshot changed in a
+   *  client-visible way, so the caller can republish session snapshots. */
+  private emitTerminalAgentStatusEvents(ptyId: string, chunk: ProcessedAgentStatusChunk): boolean {
     // Why: snapshot retention (for mobile worktree.ps) must run even when no
     // renderer listener is attached, so we don't early-return on a missing
     // onTerminalAgentStatus — only the per-target emit below is gated on it.
     if (chunk.payloads.length === 0) {
-      return
+      return false
     }
     const targets = new Map<
       string,
@@ -6241,9 +6308,17 @@ export class OrcaRuntimeService {
         connectionId
       })
     }
+    let retainedChanged = false
     for (const payload of chunk.payloads) {
       for (const target of targets.values()) {
-        this.retainAgentRowSnapshot(ptyId, target.paneKey, target.worktreeId, target.tabId, payload)
+        retainedChanged =
+          this.retainAgentRowSnapshot(
+            ptyId,
+            target.paneKey,
+            target.worktreeId,
+            target.tabId,
+            payload
+          ) || retainedChanged
         if (!this.onTerminalAgentStatus) {
           continue
         }
@@ -6264,6 +6339,7 @@ export class OrcaRuntimeService {
         }
       }
     }
+    return retainedChanged
   }
 
   private retainAgentRowSnapshot(
@@ -6272,7 +6348,7 @@ export class OrcaRuntimeService {
     worktreeId: string | undefined,
     tabId: string | undefined,
     payload: ParsedAgentStatusPayload
-  ): void {
+  ): boolean {
     const now = Date.now()
     const previous = this.latestAgentStatusByPaneKey.get(paneKey)
     // Why: stateStartedAt must mark the transition into the current state, not
@@ -6289,6 +6365,17 @@ export class OrcaRuntimeService {
       stateStartedAt,
       updatedAt: now
     })
+    // Client-visible change detection: snapshot republish is gated on this so
+    // repeated same-state hook pings don't fan a rebuild out to every client.
+    return (
+      !previous ||
+      previous.payload.state !== payload.state ||
+      previous.payload.prompt !== payload.prompt ||
+      (previous.payload.agentType ?? null) !== (payload.agentType ?? null) ||
+      (previous.payload.toolName ?? null) !== (payload.toolName ?? null) ||
+      (previous.payload.interactivePrompt ?? null) !== (payload.interactivePrompt ?? null) ||
+      (previous.payload.interrupted ?? false) !== (payload.interrupted ?? false)
+    )
   }
 
   private clearAgentRowSnapshotsForPty(ptyId: string): void {
@@ -7524,11 +7611,11 @@ export class OrcaRuntimeService {
   // `rateLimits:update` IPC channel desktop already uses.
   onAccountsChanged(listener: (snapshot: AccountsSnapshot) => void): () => void {
     const services = this.requireAccountServices()
-    return services.rateLimits.onStateChange(() => {
+    return services.rateLimits.onStateChange((rateLimits) => {
       listener({
         claude: services.claudeAccounts.listAccounts(),
         codex: services.codexAccounts.listAccounts(),
-        rateLimits: services.rateLimits.getState()
+        rateLimits
       })
     })
   }
@@ -7909,7 +7996,7 @@ export class OrcaRuntimeService {
       pty.lastExitCode = exitCode
       this.resolvePtyExitWaiters(pty, ptyId)
       this.pruneDisconnectedPtyTranscript(pty)
-      this.touchMobileSessionSnapshotsForPty(ptyId)
+      this.touchMobileSessionSnapshotsForPty(ptyId, { immediate: true })
     }
 
     for (const leaf of this.getLeavesForPty(ptyId)) {
@@ -10342,24 +10429,40 @@ export class OrcaRuntimeService {
       if (!linkedPR && meta?.linkedPR != null) {
         linkedPR = { number: meta.linkedPR, state: 'unknown' }
       }
+      const terminalPlatform = repo ? this.getAgentLaunchPlatformForRepo(repo) : process.platform
+      // Why: use the instance-validated lineage from attachLineageToResolvedWorktrees,
+      // not the raw store entry — shipped mobile clients trust parentWorktreeId as-is,
+      // so a stale same-path entry would nest replacement checkouts under old parents.
+      const lineage = worktree.lineage
       summaries.set(worktree.id, {
         // Why: mobile mirrors desktop workspace grouping/order from persisted
         // metadata, while older runtimes may not have hydrated every field yet.
         workspaceKind: 'git',
         worktreeId: worktree.id,
         repoId: worktree.repoId,
+        ...((worktree.hostId ?? meta?.hostId) ? { hostId: worktree.hostId ?? meta?.hostId } : {}),
+        terminalPlatform,
         repo: repo?.displayName ?? worktree.repoId,
         path: worktree.path,
         branch: worktree.branch,
         isArchived: worktree.isArchived,
         isMainWorktree: worktree.isMainWorktree,
         hasHostSidebarActivity: false,
+        ...(worktree.instanceId !== undefined ? { worktreeInstanceId: worktree.instanceId } : {}),
+        ...(lineage?.worktreeInstanceId !== undefined
+          ? { lineageWorktreeInstanceId: lineage.worktreeInstanceId }
+          : {}),
+        ...(lineage?.parentWorktreeInstanceId !== undefined
+          ? { parentWorktreeInstanceId: lineage.parentWorktreeInstanceId }
+          : {}),
         parentWorktreeId: worktree.parentWorktreeId,
         childWorktreeIds: worktree.childWorktreeIds,
         displayName: worktree.displayName,
         workspaceStatus: meta?.workspaceStatus ?? DEFAULT_WORKSPACE_STATUS_ID,
         sortOrder: meta?.sortOrder ?? 0,
         ...(meta?.manualOrder !== undefined ? { manualOrder: meta.manualOrder } : {}),
+        lastActivityAt: worktree.lastActivityAt,
+        ...(worktree.createdAt !== undefined ? { createdAt: worktree.createdAt } : {}),
         linkedIssue: worktree.linkedIssue,
         linkedPR,
         linkedLinearIssue: meta?.linkedLinearIssue ?? null,
@@ -10399,12 +10502,15 @@ export class OrcaRuntimeService {
         isArchived: worktree.isArchived,
         isMainWorktree: worktree.isMainWorktree,
         hasHostSidebarActivity: false,
+        ...(worktree.instanceId !== undefined ? { worktreeInstanceId: worktree.instanceId } : {}),
         parentWorktreeId: null,
         childWorktreeIds: [],
         displayName: worktree.displayName,
         workspaceStatus: worktree.workspaceStatus ?? DEFAULT_WORKSPACE_STATUS_ID,
         sortOrder: worktree.sortOrder ?? 0,
         ...(worktree.manualOrder !== undefined ? { manualOrder: worktree.manualOrder } : {}),
+        lastActivityAt: worktree.lastActivityAt,
+        ...(worktree.createdAt !== undefined ? { createdAt: worktree.createdAt } : {}),
         linkedIssue: worktree.linkedIssue ?? null,
         linkedPR: null,
         linkedLinearIssue: worktree.linkedLinearIssue ?? null,
@@ -11377,9 +11483,9 @@ export class OrcaRuntimeService {
     await mkdir(trimmedDestination, { recursive: true })
     const claimedTarget = await claimCloneTarget(clonePath)
     await new Promise<void>((resolve, reject) => {
-      let proc: ReturnType<typeof wslAwareSpawn>
+      let proc: ReturnType<typeof gitSpawn>
       try {
-        proc = wslAwareSpawn('git', ['clone', '--progress', '--', trimmedUrl, clonePath], {
+        proc = gitSpawn(['clone', '--progress', '--', trimmedUrl, clonePath], {
           cwd: trimmedDestination,
           stdio: ['ignore', 'ignore', 'pipe']
         })
@@ -13312,6 +13418,10 @@ export class OrcaRuntimeService {
     repoId: string
     worktreeId: string
     activated: boolean
+    /** Mobile-scoped slept-agent wake outcome. `unsupported-headless` means no
+     *  renderer holds the sleeping records (headless `orca serve`), so nothing
+     *  woke — clients must not present the worktree's agents as resumed. */
+    sleepingAgentWake: 'requested' | 'unsupported-headless' | 'not-applicable'
   }> {
     this.assertGraphReady()
     const worktree = await this.resolveWorktreeSelector(worktreeSelector)
@@ -13327,6 +13437,8 @@ export class OrcaRuntimeService {
       this.notifyWorktreesChanged(repo.id)
     }
 
+    let sleepingAgentWake: 'requested' | 'unsupported-headless' | 'not-applicable' =
+      'not-applicable'
     if (opts.notifyClients !== false) {
       // Why: inactive worktree terminal panes are renderer-owned and may not have
       // live PTYs until the desktop activates the worktree and mounts them.
@@ -13342,12 +13454,29 @@ export class OrcaRuntimeService {
       // Why: a phone open must also wake the worktree's slept agents (experimental
       // agent sleep). Only the host renderer holds the sleeping records + wake
       // authority, so fire-and-forget ask it — mobile-scoped so web/desktop are
-      // unaffected, and only when a renderer is attached to receive it.
-      if (opts.clientKind === 'mobile' && this.getAvailableAuthoritativeWindow()) {
-        this.notifier?.resumeSleepingAgents?.(worktree.id)
+      // unaffected. Headless serve has no renderer to wake anything, so report
+      // that explicitly instead of letting mobile assume the agents resumed.
+      if (opts.clientKind === 'mobile') {
+        if (this.getAvailableAuthoritativeWindow()) {
+          this.notifier?.resumeSleepingAgents?.(worktree.id)
+          sleepingAgentWake = 'requested'
+        } else if (
+          // Why: sleeping records are partitioned by execution host; reading
+          // only the local partition would miss slept agents on SSH-host
+          // worktrees and skip the headless warning for them.
+          Object.values(
+            this.store?.getWorkspaceSession?.(getRepoExecutionHostId(repo))
+              .sleepingAgentSessionsByPaneKey ?? {}
+          ).some((record) => record.worktreeId === worktree.id)
+        ) {
+          // Why: headless is only degraded when this worktree actually has a
+          // persisted resume record. Ordinary mobile activation must not show
+          // an unsupported warning merely because no desktop window is open.
+          sleepingAgentWake = 'unsupported-headless'
+        }
       }
     }
-    return { repoId: repo.id, worktreeId: worktree.id, activated: true }
+    return { repoId: repo.id, worktreeId: worktree.id, activated: true, sleepingAgentWake }
   }
 
   private async buildStartupForDraft(
@@ -15282,8 +15411,15 @@ export class OrcaRuntimeService {
       if (this.getFreshFetchCompletedAt(key) !== null) {
         return { ok: true }
       }
+      // Why: this exact refresh gates worktree create; ordinary fetches still own maintenance.
       return gitExecFileAsync(
-        ['fetch', '--no-tags', base.remote, `+refs/heads/${base.branch}:${base.ref}`],
+        [
+          ...GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS,
+          'fetch',
+          '--no-tags',
+          base.remote,
+          `+refs/heads/${base.branch}:${base.ref}`
+        ],
         {
           cwd: repoPath,
           ...gitOptions,
@@ -17065,21 +17201,23 @@ export class OrcaRuntimeService {
     const mutationKey = `${worktreeSelector}\0${mutationId}`
     // Why: a retried create (double-tap, reconnect replay) with the same
     // idempotency key must return the in-flight operation instead of spawning a
-    // duplicate terminal. Settled entries are dropped so a later retry — after a
-    // failure or after the result is consumed — can start a fresh create.
+    // duplicate terminal. Successes are kept briefly so a retry whose response
+    // was lost in transit reuses the created terminal; failures are dropped
+    // immediately so a retry can start a fresh create.
     const inflight = this.mobileTerminalCreateByMutationId.get(mutationKey)
     if (inflight) {
       return inflight
     }
     const run = this.runCreateMobileSessionTerminal(worktreeSelector, opts)
     this.mobileTerminalCreateByMutationId.set(mutationKey, run)
-    void run
-      .catch(() => {})
-      .finally(() => {
-        if (this.mobileTerminalCreateByMutationId.get(mutationKey) === run) {
-          this.mobileTerminalCreateByMutationId.delete(mutationKey)
-        }
-      })
+    const drop = (): void => {
+      if (this.mobileTerminalCreateByMutationId.get(mutationKey) === run) {
+        this.mobileTerminalCreateByMutationId.delete(mutationKey)
+      }
+    }
+    void run.then(() => {
+      setTimeout(drop, MOBILE_TERMINAL_CREATE_RESULT_TTL_MS).unref?.()
+    }, drop)
     return run
   }
 
@@ -19541,6 +19679,9 @@ export class OrcaRuntimeService {
           nextWorktrees.add(worktreeId)
         } else {
           this.mobileSessionTabsByWorktree.delete(worktreeId)
+          // Why: drop any pending coalesced notify so a stale snapshot can't
+          // land after the removed frame.
+          this.mobileSessionTabsNotifyCoalescer.cancel(worktreeId)
           this.notifyMobileSessionTabsRemoved(worktreeId)
         }
       }
@@ -19715,6 +19856,14 @@ export class OrcaRuntimeService {
       this.notifyMobileSessionTabSnapshots()
       return
     }
+    // Why: structural changes (tab add/remove/activate) must propagate promptly,
+    // so cancel any pending coalesced title/status notify — this immediate emit
+    // already reflects the latest snapshot and supersedes it.
+    this.mobileSessionTabsNotifyCoalescer.cancel(worktreeId)
+    this.notifyMobileSessionTabsChangedNow(worktreeId)
+  }
+
+  private notifyMobileSessionTabsChangedNow(worktreeId: string): void {
     if (this.mobileSessionTabListeners.size === 0) {
       return
     }
@@ -20038,43 +20187,115 @@ export class OrcaRuntimeService {
     tab: RuntimeMobileSessionTerminalTab,
     terminalHandle: string | null
   ): { agentStatus: AgentStatusEntry } | Record<string, never> {
-    if (!pty?.lastAgentStatus) {
+    const paneKey = this.getMobileTerminalPaneKey(tab)
+    const retained = this.getFreshRetainedAgentStatusForMobileTab(paneKey, pty, tab)
+    if (!pty?.lastAgentStatus && !retained) {
       return {}
     }
-    const ptyTitle = getLatestAgentCandidateTitle(
-      { title: pty.title, updatedAt: pty.titleUpdatedAt },
-      { title: pty.lastOscTitle, updatedAt: pty.lastOscTitleAt }
-    )
+    const leaf = this.leaves.get(this.getLeafKey(tab.parentTabId, tab.leafId)) ?? null
+    const ptyTitle = pty
+      ? getLatestAgentCandidateTitle(
+          { title: pty.title, updatedAt: pty.titleUpdatedAt },
+          { title: pty.lastOscTitle, updatedAt: pty.lastOscTitleAt }
+        )
+      : leaf
+        ? getLatestAgentCandidateTitle(
+            { title: leaf.paneTitle, updatedAt: leaf.paneTitleUpdatedAt },
+            { title: leaf.lastOscTitle, updatedAt: leaf.lastOscTitleAt }
+          )
+        : null
     const ptyTitleClassification = classifyAgentTitle(ptyTitle)
     if (ptyTitle !== null && ptyTitleClassification !== 'agent') {
-      return {}
+      // Why: a non-agent title means the shell owns the pane again (the agent
+      // exited or was replaced) — suppressing here is what clears stuck
+      // spinners (#1437). A live hook signal (question card / active tool) is
+      // authoritative agent activity even under a task-named title, so it
+      // survives the suppression, mirroring the renderer-synced branch above.
+      const hasLiveHookSignal =
+        retained?.payload.interactivePrompt != null || retained?.payload.toolName != null
+      if (!hasLiveHookSignal) {
+        return {}
+      }
     }
-    const now = pty.lastOutputAt ?? Date.now()
-    const ownerAgent = tab.launchAgent ?? pty.launchAgent ?? pty.foregroundAgent ?? null
+    const ownerAgent = tab.launchAgent ?? pty?.launchAgent ?? pty?.foregroundAgent ?? null
+    const terminalTitle = normalizeCompatibleAgentTitleForOwner(
+      (pty ? getLatestPtyTitle(pty) : null) ?? tab.title,
+      ownerAgent
+    )
+    // Why: hook (OSC 9999) payloads carry the real state, prompt, and agent
+    // identity; the title heuristic below is a fallback with none of that.
+    // Without this, headless-serve clients only ever saw title-derived rows
+    // and hook-only transitions (e.g. opencode waiting) never surfaced (#7970).
+    if (retained) {
+      return {
+        agentStatus: normalizeCompatibleAgentStatusEntryForOwner(
+          {
+            ...retained.payload,
+            paneKey,
+            updatedAt: retained.updatedAt,
+            stateStartedAt: retained.stateStartedAt,
+            stateHistory: [],
+            ...(terminalHandle ? { terminalHandle } : {}),
+            ...((pty?.worktreeId ?? retained.worktreeId)
+              ? { worktreeId: pty?.worktreeId ?? retained.worktreeId }
+              : {}),
+            tabId: tab.parentTabId,
+            terminalTitle
+          },
+          ownerAgent
+        )
+      }
+    }
+    const now = pty!.lastOutputAt ?? Date.now()
     const agentType = ownerAgent ?? undefined
     return {
       agentStatus: {
         state:
-          pty.lastAgentStatus === 'working'
+          pty!.lastAgentStatus === 'working'
             ? 'working'
-            : pty.lastAgentStatus === 'permission'
+            : pty!.lastAgentStatus === 'permission'
               ? 'blocked'
               : 'done',
         prompt: '',
         updatedAt: now,
         stateStartedAt: now,
-        paneKey: this.getMobileTerminalPaneKey(tab),
+        paneKey,
         ...(terminalHandle ? { terminalHandle } : {}),
         ...(agentType ? { agentType } : {}),
-        worktreeId: pty.worktreeId,
+        worktreeId: pty!.worktreeId,
         tabId: tab.parentTabId,
-        terminalTitle: normalizeCompatibleAgentTitleForOwner(
-          getLatestPtyTitle(pty) ?? tab.title,
-          ownerAgent
-        ),
+        terminalTitle,
         stateHistory: []
       }
     }
+  }
+
+  /** The retained OSC 9999 hook row for this mobile tab, when fresh enough to
+   *  trust. Looked up by pane identity first, then by PTY ownership because
+   *  legacy `pane:N` leaf ids can drift from the hook-side pane key. */
+  private getFreshRetainedAgentStatusForMobileTab(
+    paneKey: string,
+    pty: RuntimePtyWorktreeRecord | null,
+    tab: RuntimeMobileSessionTerminalTab
+  ): RuntimeAgentRowSnapshot | null {
+    let retained = this.latestAgentStatusByPaneKey.get(paneKey) ?? null
+    if (!retained) {
+      const ptyId = pty?.ptyId ?? tab.ptyId ?? null
+      if (ptyId) {
+        for (const snapshot of this.latestAgentStatusByPaneKey.values()) {
+          if (snapshot.ptyId !== ptyId) {
+            continue
+          }
+          if (!retained || snapshot.updatedAt > retained.updatedAt) {
+            retained = snapshot
+          }
+        }
+      }
+    }
+    if (!retained || Date.now() - retained.updatedAt > AGENT_STATUS_STALE_AFTER_MS) {
+      return null
+    }
+    return retained
   }
 
   private findPtyForMobileTerminalTab(
@@ -21393,7 +21614,9 @@ export class OrcaRuntimeService {
       : null
     const workspaceId = team?.workspaceId ?? params.workspaceId
     try {
-      const result = await listLinearIssues(filter, limit, workspaceId, team?.id)
+      const result = await listLinearIssues(filter, limit, workspaceId, {
+        teamId: team?.id
+      })
       return {
         issues: result.items.map((issue) => ({
           id: issue.id,
@@ -21521,9 +21744,9 @@ export class OrcaRuntimeService {
     filter?: LinearListFilter,
     limit = 20,
     workspaceId?: LinearWorkspaceSelection,
-    teamId?: string
+    options?: LinearIssueListOptions
   ): ReturnType<typeof listLinearIssues> {
-    return listLinearIssues(filter, clampLinearIssueListLimit(limit), workspaceId, teamId)
+    return listLinearIssues(filter, clampLinearIssueListLimit(limit), workspaceId, options)
   }
 
   linearCreateIssue(
@@ -23296,6 +23519,13 @@ export class OrcaRuntimeService {
 
   jiraListTransitions(key: string, siteId?: string): ReturnType<typeof listJiraTransitions> {
     return listJiraTransitions(key, siteId)
+  }
+
+  jiraGetProjectStatusOrder(
+    projectKey: string,
+    siteId?: string
+  ): ReturnType<typeof getJiraProjectStatusOrder> {
+    return getJiraProjectStatusOrder(projectKey, siteId)
   }
 
   // ── Browser automation ──

@@ -47,6 +47,7 @@ import {
   getFirstCommandToken
 } from '../../shared/command-token-scanner'
 import { agentHookServer } from '../agent-hooks/server'
+import { wslHookRelayManager } from '../agent-hooks/wsl-hook-relay-manager'
 import { isAgentStatusHooksEnabled } from '../agent-hooks/managed-agent-hook-controls'
 import { piTitlebarExtensionService } from '../pi/titlebar-extension-service'
 import { detectPiAgentKindFromCommand, type PiAgentKind } from '../../shared/pi-agent-kind'
@@ -552,6 +553,9 @@ export type BuildPtyHostEnvOptions = {
   launchCommand?: string
   shellPath?: string
   isWsl?: boolean
+  /** Distro for WSL spawns (null = Windows default distro). Drives the WSL
+   *  hook relay ensure + guest endpoint repoint; only read when isWsl. */
+  wslDistro?: string | null
   agentStatusHooksEnabled: boolean
   networkProxySettings?: NetworkProxySettings
 }
@@ -909,6 +913,19 @@ export function buildPtyHostEnv(
   }
   if (opts.agentStatusHooksEnabled) {
     Object.assign(baseEnv, agentHookServer.buildPtyEnv())
+    if (opts.isWsl === true) {
+      // Why: hook POSTs to 127.0.0.1 die inside WSL's NAT namespace. Ensure
+      // the guest-resident relay for this distro (covers fresh spawns and
+      // post-restart reattach re-spawns), and once the relay has reported the
+      // guest home, point restart re-coordination at the relay-written
+      // guest-side endpoint file instead of the /p-translated Windows one.
+      const distro = opts.wslDistro ?? null
+      wslHookRelayManager.ensureForDistro(distro)
+      const guestEndpoint = wslHookRelayManager.getGuestEndpointFilePath(distro)
+      if (guestEndpoint) {
+        baseEnv.ORCA_AGENT_HOOK_ENDPOINT = guestEndpoint
+      }
+    }
   }
 
   // Why: PI_CODING_AGENT_DIR owns Pi's / OMP's full config/session root. Keep
@@ -1192,16 +1209,17 @@ let rendererLifecycleResetHandler: (() => void) | null = null
 let rendererGateResetLoadHandler: (() => void) | null = null
 let rendererGateResetGoneHandler: (() => void) | null = null
 let rendererGateResetWebContents: WebContents | null = null
-// Why: the ACK in-flight counters live in the registerPtyHandlers closure, but
-// renderer lifecycle events are handled at module scope. This indirection lets
-// the lifecycle reset zero the closure-owned delivery gate.
-let resetRendererInFlightDeliveryGate: () => void = () => {}
 // Why: the backgrounded-delivery dedupe map lives in the registerPtyHandlers
 // closure but teardown funnels through module-scope clearProviderPtyState.
 let clearBackgroundedDeliverySyncForPty: (id: string) => void = () => {}
 // Why: after daemon keep-tail thinning, main's mirror contains only the kept
 // tail. Recovery must keep consulting the daemon's complete model until exit.
 const providerSnapshotRequiredPtys = new Set<string>()
+// Why: did-start-loading also fires for in-page subframe loads (e.g. the
+// sandboxed srcDoc iframes notebook HTML output renders), which are not renderer
+// lifecycle resets. A dedicated handler filters those via isLoadingMainFrame so a
+// subframe load cannot reset delivery accounting on the still-alive page.
+let rendererDidStartLoadingHandler: (() => void) | null = null
 
 // Why: the "Restart daemon" path needs to re-bind provider→renderer listeners
 // against the freshly-created adapter after replaceDaemonProvider swaps the
@@ -1241,6 +1259,16 @@ export type PtyRendererDeliveryDebugSnapshot = {
   pendingDroppedChars: number
   /** One-paste freeze diagnostics: per-pty delivery table + event history. */
   diagnostics: PtyMainDeliveryDiagnostics
+  // Why: a nonzero lastLifecycleResetClearedChars is the exact signature of the
+  // leaked-delivery-accounting freeze this reset fixes; the count tracks how
+  // many renderer lifecycle resets have run since launch.
+  rendererLifecycleResetCount: number
+  lastLifecycleResetClearedChars: number
+  // Why: the boot-window hold early-returns before ackGatedFlushSkipCount++, so
+  // without these a held gate is invisible in the snapshot; forcedCount > 0 flags
+  // that the watchdog self-healed a lost handshake.
+  rendererPtyDispatcherReady: boolean
+  rendererDispatcherReadyForcedCount: number
 }
 
 // Why module scope: breadcrumb writers live both inside registerPtyHandlers
@@ -1288,13 +1316,24 @@ const EMPTY_PTY_RENDERER_DELIVERY_DEBUG_SNAPSHOT: PtyRendererDeliveryDebugSnapsh
   hiddenDeliveryDroppedChars: 0,
   hiddenDeliveryDroppedChunks: 0,
   pendingDroppedChars: 0,
-  diagnostics: EMPTY_PTY_MAIN_DELIVERY_DIAGNOSTICS
+  diagnostics: EMPTY_PTY_MAIN_DELIVERY_DIAGNOSTICS,
+  rendererLifecycleResetCount: 0,
+  lastLifecycleResetClearedChars: 0,
+  rendererPtyDispatcherReady: false,
+  rendererDispatcherReadyForcedCount: 0
 }
 
 let readPtyRendererDeliveryDebugSnapshot = (): PtyRendererDeliveryDebugSnapshot => ({
   ...EMPTY_PTY_RENDERER_DELIVERY_DEBUG_SNAPSHOT
 })
 let resetPtyRendererDeliveryDebugSnapshot = (): void => {}
+// Bridged into the registerPtyHandlers closure (like readPtyRendererDeliveryDebugSnapshot)
+// so the module-scope lifecycle-reset handler can zero the closure-owned delivery
+// accounting on a renderer reload/crash.
+let resetRendererDeliveryAccountingForLifecycleReset = (): void => {}
+// Bridged so a re-registration (new window) can cancel the prior closure's
+// dispatcher-ready watchdog before wiring up its own.
+let clearRendererDispatcherReadyWatchdog = (): void => {}
 
 export function getPtyRendererDeliveryDebugSnapshot(): PtyRendererDeliveryDebugSnapshot {
   return readPtyRendererDeliveryDebugSnapshot()
@@ -1320,21 +1359,22 @@ function markRendererPtysHiddenForRendererLifecycleReset(): void {
   // surviving daemon/SSH PTYs fail closed until the new renderer reports again.
   activeRendererPtys.clear()
   visibleRendererPtys.clear()
-  // Why: a reload/navigation destroys the renderer-side dispatcher, so ACKs
-  // for already-sent data can never arrive. Stale in-flight counters would
-  // gate every PTY (including newly created ones) in the fresh renderer.
-  resetRendererInFlightDeliveryGate()
+  // Why: the dead page never ACKs its in-flight bytes, so leaked in-flight/pending
+  // accounting would delivery-gate surviving PTYs forever after a reload/crash.
+  resetRendererDeliveryAccountingForLifecycleReset()
 }
 
 function clearRendererLifecycleResetHandlers(): void {
   if (!rendererLifecycleResetWebContents) {
     return
   }
-  if (rendererLifecycleResetHandler) {
+  if (rendererDidStartLoadingHandler) {
     rendererLifecycleResetWebContents.removeListener(
       'did-start-loading',
-      rendererLifecycleResetHandler
+      rendererDidStartLoadingHandler
     )
+  }
+  if (rendererLifecycleResetHandler) {
     rendererLifecycleResetWebContents.removeListener(
       'render-process-gone',
       rendererLifecycleResetHandler
@@ -1343,6 +1383,7 @@ function clearRendererLifecycleResetHandlers(): void {
   }
   rendererLifecycleResetWebContents = null
   rendererLifecycleResetHandler = null
+  rendererDidStartLoadingHandler = null
 }
 
 function registerRendererLifecycleResetHandlers(webContents: WebContents): void {
@@ -1350,7 +1391,18 @@ function registerRendererLifecycleResetHandlers(webContents: WebContents): void 
   markRendererPtysHiddenForRendererLifecycleReset()
   rendererLifecycleResetWebContents = webContents
   rendererLifecycleResetHandler = markRendererPtysHiddenForRendererLifecycleReset
-  webContents.on('did-start-loading', rendererLifecycleResetHandler)
+  // Why: did-start-loading also fires for in-page subframe loads (sandboxed
+  // srcDoc iframes in notebook HTML output), where isLoadingMainFrame() is false.
+  // Only a main-frame load is a real renderer lifecycle reset; filtering here
+  // stops a subframe load from clearing pendingData and holding the send gate
+  // (a spurious multi-second freeze) on the otherwise-alive page.
+  rendererDidStartLoadingHandler = () => {
+    if (!webContents.isLoadingMainFrame()) {
+      return
+    }
+    markRendererPtysHiddenForRendererLifecycleReset()
+  }
+  webContents.on('did-start-loading', rendererDidStartLoadingHandler)
   webContents.on('render-process-gone', rendererLifecycleResetHandler)
   webContents.on('destroyed', rendererLifecycleResetHandler)
 }
@@ -1402,6 +1454,12 @@ export function registerPtyHandlers(
     isRecoveryReloadInFlight?: (webContentsId: number) => boolean
   }
 ): void {
+  // Why: a re-registration means a new window owns delivery. Cancel any watchdog the
+  // prior closure armed, and neutralize its bridged reset so the registration-time
+  // mark-hidden below can't arm a timer against the now-dead closure — the fresh
+  // closure re-installs both bridges once its state is set up.
+  clearRendererDispatcherReadyWatchdog()
+  resetRendererDeliveryAccountingForLifecycleReset = () => {}
   registerRendererLifecycleResetHandlers(mainWindow.webContents)
 
   const getLocalPtyStartupPromise = (connectionId?: string | null): Promise<void> | undefined => {
@@ -1471,6 +1529,7 @@ export function registerPtyHandlers(
           launchCommand: ctx?.command,
           shellPath: ctx?.shellPath,
           isWsl: ctx?.isWsl,
+          wslDistro: ctx?.wslDistro ?? null,
           agentStatusHooksEnabled: isAgentStatusHooksEnabled(getSettings?.()),
           networkProxySettings: getSettings?.()
         })
@@ -1573,6 +1632,10 @@ export function registerPtyHandlers(
   // so power users don't lose lines their scrollback would have retained.
   const pendingDataCapChars = (): number =>
     terminalOutputBacklogCapChars(getSettings?.().terminalScrollbackRows)
+  // Why: self-heal bound for the dispatcher-ready gate — if a reloaded page never
+  // sends pty:rendererDispatcherReady (lost IPC), force sends back on after this
+  // window so a dropped handshake can't itself become a permanent hold.
+  const PTY_DISPATCHER_READY_WATCHDOG_MS = 10_000
   const PTY_RENDERER_INTERACTIVE_RESERVE_CHARS = 256 * 1024
   // Why: active panes need a bounded lane through old hidden bulk output so a
   // keystroke redraw can reach the renderer before every background ACK lands.
@@ -1596,6 +1659,19 @@ export function registerPtyHandlers(
   let peakRendererInFlightChars = 0
   let peakMaxRendererInFlightCharsByPty = 0
   let ackGatedFlushSkipCount = 0
+  let rendererLifecycleResetCount = 0
+  let lastLifecycleResetClearedChars = 0
+  // Why: how many times the watchdog force-opened the gate because no handshake
+  // arrived; nonzero flags a dropped-handshake self-heal (degrades to pre-§1b
+  // behavior, observable + recoverable at the next reset, never a freeze).
+  let rendererDispatcherReadyForcedCount = 0
+  // Why: gate sends until the current page's pty:data listener is registered.
+  // A reloaded/first-load page has no listener yet, so webContents.send drops
+  // the bytes but still counts them in-flight, permanently pinning the gate.
+  // Flipped true by the pty:rendererDispatcherReady handshake, reset false on
+  // every lifecycle reset (below); starts false so nothing sends pre-handshake.
+  let rendererPtyDispatcherReady = false
+  let dispatcherReadyWatchdogTimer: ReturnType<typeof setTimeout> | null = null
 
   // Why: watermark-driven producer pause/resume (terminal-performance
   // initiative §5). Signal source is per-PTY pendingData only — renderer
@@ -1719,7 +1795,11 @@ export function registerPtyHandlers(
       hiddenDeliveryGatedVisiblePtyCount,
       hiddenDeliveryGatedActivePtyCount,
       pendingDroppedChars,
-      diagnostics: buildMainDeliveryDiagnostics()
+      diagnostics: buildMainDeliveryDiagnostics(),
+      rendererLifecycleResetCount,
+      lastLifecycleResetClearedChars,
+      rendererPtyDispatcherReady,
+      rendererDispatcherReadyForcedCount
     }
   }
 
@@ -1840,6 +1920,34 @@ export function registerPtyHandlers(
     resetHiddenRendererPtyDeliveryDebugCounters()
     recordPtyRendererDeliveryPressure()
   }
+  resetRendererDeliveryAccountingForLifecycleReset = () => {
+    // Why: clearing pendingData is lossless — its bytes were only ever bound for
+    // the dead page, and the replacement page repaints each pane from main's
+    // authoritative sources (daemon snapshot / headless buffer / cold-restore),
+    // which are fed before the pendingData append so they always superset it.
+    lastLifecycleResetClearedChars = rendererInFlightTotalChars
+    rendererLifecycleResetCount += 1
+    // Why: pending bytes and outstanding credits belonged to the dead page.
+    // Release producer pauses before clearing them so no shell stays wedged.
+    producerFlowControl.releaseAll()
+    clearDeliveryResyncProbe()
+    deliveryResyncUnansweredWarnLogged = false
+    rendererDeliveryAccountingByPty.clear()
+    rendererInFlightTotalChars = 0
+    pendingData.clear()
+    pendingOverflowMarkedPtys.clear()
+    // Why: the reloading page's pty:data listener is gone until it re-registers
+    // and re-sends the handshake; hold sends until then so the boot window can't
+    // re-pin the gate with bytes dropped into a listener-less page.
+    rendererPtyDispatcherReady = false
+    // Why: arm the self-heal watchdog so a never-arriving handshake can't leave the
+    // gate held forever; the real handshake cancels it.
+    armDispatcherReadyWatchdog()
+    recordPtyRendererDeliveryPressure()
+  }
+  // Why: let a later re-registration cancel this closure's watchdog (armed via a
+  // hoisted fn, so this bridge assignment can precede its definition).
+  clearRendererDispatcherReadyWatchdog = clearDispatcherReadyWatchdog
 
   function isLikelyInteractiveRedraw(data: string): boolean {
     if (data.length <= INTERACTIVE_OUTPUT_MAX_CHARS) {
@@ -1969,14 +2077,6 @@ export function registerPtyHandlers(
     }, PTY_DELIVERY_RESYNC_TIMEOUT_MS)
     deliveryResyncTimer.unref?.()
     mainWindow.webContents.send('pty:requestDeliveryResync', { requestId })
-  }
-
-  resetRendererInFlightDeliveryGate = () => {
-    clearDeliveryResyncProbe()
-    deliveryResyncUnansweredWarnLogged = false
-    rendererDeliveryAccountingByPty.clear()
-    rendererInFlightTotalChars = 0
-    recordPtyRendererDeliveryPressure()
   }
 
   // Why: bytes sent but never counted received by the renderer after a
@@ -2228,6 +2328,34 @@ export function registerPtyHandlers(
     flushTimer = setTimeout(flushPendingData, delayMs)
   }
 
+  function clearDispatcherReadyWatchdog(): void {
+    if (dispatcherReadyWatchdogTimer) {
+      clearTimeout(dispatcherReadyWatchdogTimer)
+      dispatcherReadyWatchdogTimer = null
+    }
+  }
+
+  function armDispatcherReadyWatchdog(): void {
+    clearDispatcherReadyWatchdog()
+    if (mainWindow.isDestroyed()) {
+      return
+    }
+    // Why: one-shot self-heal — if the reloaded page never signals ready, force the
+    // gate open so a dropped handshake degrades to pre-handshake behavior (bounded
+    // duplicate/overwrite at worst) instead of a permanent hold. Unref'd so it can
+    // never keep the process alive.
+    dispatcherReadyWatchdogTimer = setTimeout(() => {
+      dispatcherReadyWatchdogTimer = null
+      if (rendererPtyDispatcherReady || mainWindow.isDestroyed()) {
+        return
+      }
+      rendererPtyDispatcherReady = true
+      rendererDispatcherReadyForcedCount += 1
+      schedulePendingDataFlush(0)
+    }, PTY_DISPATCHER_READY_WATCHDOG_MS)
+    dispatcherReadyWatchdogTimer.unref?.()
+  }
+
   function flushPendingData(): void {
     flushTimer = null
     if (mainWindow.isDestroyed()) {
@@ -2239,7 +2367,14 @@ export function registerPtyHandlers(
       pendingOverflowMarkedPtys.clear()
       rendererDeliveryAccountingByPty.clear()
       rendererInFlightTotalChars = 0
+      clearDispatcherReadyWatchdog()
       recordPtyRendererDeliveryPressure()
+      return
+    }
+    // Why: hold sends until the page's pty:data listener is registered. Bytes
+    // keep accruing in pendingData (2 MB cap + droppedBacklog rebuild it
+    // losslessly); the ready handshake reschedules this flush.
+    if (!rendererPtyDispatcherReady) {
       return
     }
     const settings = getSettings?.()
@@ -2481,6 +2616,7 @@ export function registerPtyHandlers(
         pendingOverflowMarkedPtys.clear()
         rendererDeliveryAccountingByPty.clear()
         rendererInFlightTotalChars = 0
+        clearDispatcherReadyWatchdog()
         recordPtyRendererDeliveryPressure()
         return
       }
@@ -2521,7 +2657,10 @@ export function registerPtyHandlers(
         nextData,
         performance.now()
       )
-      if (isInteractiveOutput) {
+      // Why: gate the interactive fast path on the dispatcher handshake too, so
+      // boot-window keystroke echo accrues in pendingData instead of being sent
+      // into a listener-less page and pinning the gate.
+      if (isInteractiveOutput && rendererPtyDispatcherReady) {
         // Why: user-input echo should not be pinned behind unrelated bulk
         // terminal output already handed to the renderer. The reserve is
         // bounded, and the per-PTY cap still prevents an active TUI runaway.
@@ -2873,6 +3012,7 @@ export function registerPtyHandlers(
           launchCommand: args.command,
           shellPath: daemonShellOverride ?? process.env.COMSPEC,
           isWsl: shouldSkipCodexHomeEnvForWindowsShell(daemonShellOverride, cwd),
+          wslDistro: codexSelectionTarget.runtime === 'wsl' ? codexSelectionTarget.wslDistro : null,
           agentStatusHooksEnabled: isAgentStatusHooksEnabled(getSettings?.()),
           networkProxySettings: getSettings?.()
         })
@@ -3717,6 +3857,8 @@ export function registerPtyHandlers(
             launchCommand: args.command,
             shellPath: effectiveShellOverride ?? process.env.COMSPEC,
             isWsl: shouldSkipCodexHomeEnvForWindowsShell(effectiveShellOverride, cwd),
+            wslDistro:
+              codexSelectionTarget.runtime === 'wsl' ? codexSelectionTarget.wslDistro : null,
             agentStatusHooksEnabled: isAgentStatusHooksEnabled(getSettings?.()),
             networkProxySettings: getSettings?.()
           })
@@ -4563,6 +4705,33 @@ export function registerPtyHandlers(
     }
   )
 
+  // Why: the renderer sends this once its pty:data listener is live (per page
+  // load / reload). Until it arrives, sends are held so boot-window bytes can't
+  // drop into a listener-less page and pin the delivery gate; on arrival, flush
+  // the backlog that accrued during the boot window.
+  ipcMain.removeAllListeners('pty:rendererDispatcherReady')
+  ipcMain.on('pty:rendererDispatcherReady', (event) => {
+    // Why: the reconcile below destructively clears delivery accounting, so a
+    // straggler handshake from a dying window must not reset the new window.
+    if (!isPtyWriteEventFromMainWindow(event, mainWindow.webContents)) {
+      return
+    }
+    // Why: the handshake is one-shot per page load, so receiving it while the gate
+    // is already open means a fresh page loaded but its lifecycle reset was missed —
+    // a main-frame reload overlapped by an in-page subframe load emits no
+    // did-start-loading, and the watchdog may have force-opened the gate — leaving
+    // main holding the dead page's in-flight accounting, which permanently gates the
+    // survivors. Reconcile by clearing that stale accounting before re-opening.
+    if (rendererPtyDispatcherReady) {
+      resetRendererDeliveryAccountingForLifecycleReset()
+    }
+    // Why: real handshake landed — cancel the self-heal watchdog so it can't later
+    // force-open the gate and inflate rendererDispatcherReadyForcedCount.
+    clearDispatcherReadyWatchdog()
+    rendererPtyDispatcherReady = true
+    schedulePendingDataFlush(0)
+  })
+
   ipcMain.removeAllListeners('pty:setActiveRendererPty')
   ipcMain.on('pty:setActiveRendererPty', (_event, args: { id: string; active: boolean }) => {
     if (typeof args.id !== 'string' || !args.id) {
@@ -4906,7 +5075,7 @@ export function registerHeadlessPtyRuntime(
 }
 
 /**
- * Kill all PTY processes. Call on app quit.
+ * Kill in-process local PTYs. Daemon-backed PTYs are preserved by daemon disconnect.
  */
 export function killAllPty(): void {
   if (localProvider instanceof LocalPtyProvider) {

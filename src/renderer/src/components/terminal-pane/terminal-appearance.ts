@@ -23,6 +23,7 @@ import type { EffectiveMacOptionAsAlt } from '@/lib/keyboard-layout/detect-optio
 import { HEX_COLOR_RE } from '../../../../shared/color-validation'
 import type { TerminalViewAttributes } from '../../../../shared/terminal-view-attributes'
 import { publishTerminalViewAttributes } from './terminal-view-attributes-publisher'
+import { normalizeTerminalLineHeight } from '../../../../shared/terminal-line-height-settings'
 
 export { mode2031SequenceFor }
 
@@ -321,7 +322,7 @@ export function applyTerminalAppearance(
     // detection behavior; the detection layer simply decides *what* value
     // `effectiveMacOptionAsAlt` carries.
     pane.terminal.options.macOptionIsMeta = effectiveMacOptionAsAlt === 'true'
-    pane.terminal.options.lineHeight = settings.terminalLineHeight
+    pane.terminal.options.lineHeight = normalizeTerminalLineHeight(settings.terminalLineHeight)
     // Why call unconditionally: the per-pane helper is a no-op when the
     // current addon state already matches, so passing the resolved value on
     // every appearance apply keeps newly-created panes in sync without a

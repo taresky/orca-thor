@@ -708,6 +708,7 @@ function createWebPreloadApi(): Partial<PreloadApi> {
     notifications: createNotificationsApi(),
     rateLimits: createRateLimitsApi(),
     minimaxCredentials: createMiniMaxCredentialsApi(),
+    grokAccounts: createGrokAccountsApi(),
     codexAccounts: createAccountsApi(),
     claudeAccounts: createAccountsApi(),
     cli: createCliApi(),
@@ -1205,6 +1206,10 @@ function createAiVaultApi(): NonNullable<Partial<PreloadApi>['aiVault']> {
         executionHostId
       })
     },
+    // Why: the runtime RPC surface only exposes aiVault.listSessions; subagent
+    // transcript listing has no server-side method yet, so the browser client
+    // reports an empty (not erroring) result.
+    listSubagentSessions: () => Promise.resolve({ sessions: [], issues: [] }),
     onWindowFocused: () => noopUnsubscribe
   }
 }
@@ -2586,8 +2591,11 @@ function createRateLimitsApi(): NonNullable<Partial<PreloadApi>['rateLimits']> {
     gemini: null,
     opencodeGo: null,
     kimi: null,
+    antigravity: null,
     minimax: null,
+    grok: null,
     minimaxCookieConfigured: false,
+    grokAuthConfigured: false,
     claudeTarget: { runtime: 'host', wslDistro: null },
     codexTarget: { runtime: 'host', wslDistro: null },
     inactiveClaudeAccounts: [],
@@ -2605,6 +2613,7 @@ function createRateLimitsApi(): NonNullable<Partial<PreloadApi>['rateLimits']> {
     fetchInactiveClaudeAccounts: () => Promise.resolve(),
     fetchInactiveCodexAccounts: () => Promise.resolve(),
     refreshMiniMax: () => Promise.resolve(empty),
+    refreshGrok: () => Promise.resolve(empty),
     onUpdate: () => noopUnsubscribe
   }
 }
@@ -2616,6 +2625,19 @@ function createMiniMaxCredentialsApi(): NonNullable<Partial<PreloadApi>['minimax
     getStatus: () => Promise.resolve(notConfigured),
     saveCookie: () => Promise.reject(unsupportedError),
     clearCookie: () => Promise.resolve(notConfigured)
+  }
+}
+
+function createGrokAccountsApi(): NonNullable<Partial<PreloadApi>['grokAccounts']> {
+  const unsigned = {
+    signedIn: false,
+    email: null,
+    teamId: null,
+    tokenFresh: false,
+    error: null
+  }
+  return {
+    getStatus: () => Promise.resolve(unsigned)
   }
 }
 
@@ -2696,6 +2718,7 @@ function createPtyApi(): NonNullable<Partial<PreloadApi>['pty']> {
     reportRendererDeliveryState: () =>
       Promise.resolve({ inFlightTotalChars: 0, inFlightPtyCount: 0, msSinceLastAck: null }),
     getPtyDataListenerCount: () => 0,
+    rendererDispatcherReady: () => {},
     setActiveRendererPty: () => {},
     setRendererPtyVisible: () => {},
     setHiddenRendererPty: () => {},
@@ -2736,7 +2759,11 @@ function createPtyApi(): NonNullable<Partial<PreloadApi>['pty']> {
         hiddenDeliveryDroppedChars: 0,
         hiddenDeliveryDroppedChunks: 0,
         pendingDroppedChars: 0,
-        diagnostics: EMPTY_PTY_MAIN_DELIVERY_DIAGNOSTICS
+        diagnostics: EMPTY_PTY_MAIN_DELIVERY_DIAGNOSTICS,
+        rendererLifecycleResetCount: 0,
+        lastLifecycleResetClearedChars: 0,
+        rendererPtyDispatcherReady: false,
+        rendererDispatcherReadyForcedCount: 0
       }),
     resetRendererDeliveryDebug: () => Promise.resolve(),
     onData: () => noopUnsubscribe,

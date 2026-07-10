@@ -260,6 +260,11 @@ function attachPtySecondaryPushListeners(unsubscribes: (() => void)[]): void {
   if (unsubscribeResync) {
     unsubscribes.push(unsubscribeResync)
   }
+  // Why: tell main the pty:data listener is live now. Before this fires (fresh
+  // load or post-reload boot window) main holds all sends — bytes sent into a
+  // listener-less page are silently dropped yet counted in-flight, which
+  // permanently pins the delivery gate. Fires once per page load.
+  window.api.pty.rendererDispatcherReady?.()
 }
 
 export function subscribeToPtyExit(ptyId: string, watcher: (code: number) => void): () => void {

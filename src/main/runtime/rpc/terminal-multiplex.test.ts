@@ -85,14 +85,19 @@ describe('terminal multiplex RPC', () => {
         sendTerminal: vi.fn().mockResolvedValue({ accepted: true }),
         updateDesktopViewport: vi.fn().mockResolvedValue(true)
       })
-      const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+      const dispatcher = new RpcDispatcher({
+        runtime,
+        methods: TERMINAL_METHODS
+      })
 
       const dispatchPromise = dispatcher.dispatchStreaming(
         makeRequest('terminal.multiplex', {}),
         (msg) => messages.push(msg),
         {
           connectionId: 'conn-1',
-          sendBinary: (bytes) => binaryFrames.push(bytes),
+          sendBinary: (bytes) => {
+            binaryFrames.push(bytes)
+          },
           registerBinaryStreamHandler: (streamId, handler) => {
             handlers.set(streamId, handler)
             return () => handlers.delete(streamId)
@@ -207,7 +212,10 @@ describe('terminal multiplex RPC', () => {
             opcode: TerminalStreamOpcode.SnapshotRequest,
             streamId: 5,
             seq: 4,
-            payload: encodeTerminalStreamJson({ requestId: 7, scrollbackRows: 5000 })
+            payload: encodeTerminalStreamJson({
+              requestId: 7,
+              scrollbackRows: 5000
+            })
           })
         )!
       )
@@ -299,14 +307,19 @@ describe('terminal multiplex RPC', () => {
       sendTerminal: vi.fn().mockResolvedValue({ accepted: true }),
       updateMobileViewport: vi.fn().mockResolvedValue({ updated: true, applied: true })
     })
-    const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+    const dispatcher = new RpcDispatcher({
+      runtime,
+      methods: TERMINAL_METHODS
+    })
 
     const dispatchPromise = dispatcher.dispatchStreaming(
       makeRequest('terminal.multiplex', {}),
       (msg) => messages.push(msg),
       {
         connectionId: 'conn-stale-multiplex-resize',
-        sendBinary: (bytes) => binaryFrames.push(bytes),
+        sendBinary: (bytes) => {
+          binaryFrames.push(bytes)
+        },
         registerBinaryStreamHandler: (streamId, handler) => {
           handlers.set(streamId, handler)
           return () => handlers.delete(streamId)
@@ -335,8 +348,20 @@ describe('terminal multiplex RPC', () => {
     await vi.waitFor(() => expect(resizeListener).toBeDefined())
     binaryFrames.splice(0)
 
-    resizeListener?.({ cols: 90, rows: 24, displayMode: 'auto', reason: 'apply-layout', seq: 2 })
-    resizeListener?.({ cols: 100, rows: 24, displayMode: 'auto', reason: 'apply-layout', seq: 3 })
+    resizeListener?.({
+      cols: 90,
+      rows: 24,
+      displayMode: 'auto',
+      reason: 'apply-layout',
+      seq: 2
+    })
+    resizeListener?.({
+      cols: 100,
+      rows: 24,
+      displayMode: 'auto',
+      reason: 'apply-layout',
+      seq: 3
+    })
     await vi.waitFor(() => expect(restreamResolves).toHaveLength(2))
 
     restreamResolves[1]?.({ data: 'newer', cols: 100, rows: 24 })
@@ -410,14 +435,19 @@ describe('terminal multiplex RPC', () => {
         sendTerminal: vi.fn().mockResolvedValue({ accepted: true }),
         updateDesktopViewport: vi.fn().mockResolvedValue(true)
       })
-      const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+      const dispatcher = new RpcDispatcher({
+        runtime,
+        methods: TERMINAL_METHODS
+      })
 
       const dispatchPromise = dispatcher.dispatchStreaming(
         makeRequest('terminal.multiplex', {}),
         (msg) => messages.push(msg),
         {
           connectionId: 'conn-multibyte-output-batch',
-          sendBinary: (bytes) => binaryFrames.push(bytes),
+          sendBinary: (bytes) => {
+            binaryFrames.push(bytes)
+          },
           registerBinaryStreamHandler: (streamId, handler) => {
             handlers.set(streamId, handler)
             return () => handlers.delete(streamId)
@@ -531,7 +561,9 @@ describe('terminal multiplex RPC', () => {
       (msg) => messages.push(msg),
       {
         connectionId: 'conn-ack-gated',
-        sendBinary: (bytes) => binaryFrames.push(bytes),
+        sendBinary: (bytes) => {
+          binaryFrames.push(bytes)
+        },
         registerBinaryStreamHandler: (streamId, handler) => {
           handlers.set(streamId, handler)
           return () => handlers.delete(streamId)
@@ -679,7 +711,9 @@ describe('terminal multiplex RPC', () => {
       (msg) => messages.push(msg),
       {
         connectionId: 'conn-ack-shared-budget',
-        sendBinary: (bytes) => binaryFrames.push(bytes),
+        sendBinary: (bytes) => {
+          binaryFrames.push(bytes)
+        },
         registerBinaryStreamHandler: (streamId, handler) => {
           handlers.set(streamId, handler)
           return () => handlers.delete(streamId)
@@ -900,7 +934,9 @@ describe('terminal multiplex RPC', () => {
       (msg) => messages.push(msg),
       {
         connectionId: 'conn-ack-overflow',
-        sendBinary: (bytes) => binaryFrames.push(bytes),
+        sendBinary: (bytes) => {
+          binaryFrames.push(bytes)
+        },
         registerBinaryStreamHandler: (streamId, handler) => {
           handlers.set(streamId, handler)
           return () => handlers.delete(streamId)
@@ -1079,7 +1115,9 @@ describe('terminal multiplex RPC', () => {
       (msg) => messages.push(msg),
       {
         connectionId: 'conn-ack-trim',
-        sendBinary: (bytes) => binaryFrames.push(bytes),
+        sendBinary: (bytes) => {
+          binaryFrames.push(bytes)
+        },
         registerBinaryStreamHandler: (streamId, handler) => {
           handlers.set(streamId, handler)
           return () => handlers.delete(streamId)
@@ -1180,9 +1218,11 @@ describe('terminal multiplex RPC', () => {
     const cleanups = new Map<string, () => void>()
     const runtime = stubRuntime({
       resolveLiveLeafForHandle: vi.fn().mockReturnValue({ ptyId: 'pty-1' }),
-      readTerminal: vi
-        .fn()
-        .mockResolvedValue({ tail: ['line 120'], truncated: false, limited: true }),
+      readTerminal: vi.fn().mockResolvedValue({
+        tail: ['line 120'],
+        truncated: false,
+        limited: true
+      }),
       serializeTerminalBuffer: vi.fn().mockResolvedValue(null),
       getTerminalSize: vi.fn().mockReturnValue({ cols: 120, rows: 40 }),
       getMobileDisplayMode: vi.fn().mockReturnValue('auto'),
@@ -1204,14 +1244,19 @@ describe('terminal multiplex RPC', () => {
       waitForTerminal: vi.fn(() => new Promise<RuntimeTerminalWait>(() => {})),
       sendTerminal: vi.fn().mockResolvedValue({ accepted: true })
     })
-    const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+    const dispatcher = new RpcDispatcher({
+      runtime,
+      methods: TERMINAL_METHODS
+    })
 
     const dispatchPromise = dispatcher.dispatchStreaming(
       makeRequest('terminal.multiplex', {}),
       (msg) => messages.push(msg),
       {
         connectionId: 'conn-multiplex-limited',
-        sendBinary: (bytes) => binaryFrames.push(bytes),
+        sendBinary: (bytes) => {
+          binaryFrames.push(bytes)
+        },
         registerBinaryStreamHandler: (streamId, handler) => {
           handlers.set(streamId, handler)
           return () => handlers.delete(streamId)
@@ -1280,8 +1325,16 @@ describe('terminal multiplex RPC', () => {
       serializeTerminalBuffer: vi
         .fn()
         .mockResolvedValueOnce({ data: 'initial', cols: 120, rows: 40 })
-        .mockResolvedValueOnce({ data: 'x'.repeat(2 * 1024 * 1024 + 1), cols: 120, rows: 40 })
-        .mockResolvedValueOnce({ data: 'budgeted snapshot', cols: 120, rows: 40 }),
+        .mockResolvedValueOnce({
+          data: 'x'.repeat(2 * 1024 * 1024 + 1),
+          cols: 120,
+          rows: 40
+        })
+        .mockResolvedValueOnce({
+          data: 'budgeted snapshot',
+          cols: 120,
+          rows: 40
+        }),
       getTerminalSize: vi.fn().mockReturnValue({ cols: 120, rows: 40 }),
       getMobileDisplayMode: vi.fn().mockReturnValue('auto'),
       getLayout: vi.fn().mockReturnValue({ seq: 1 }),
@@ -1298,14 +1351,19 @@ describe('terminal multiplex RPC', () => {
       sendTerminal: vi.fn().mockResolvedValue({ accepted: true }),
       updateDesktopViewport: vi.fn().mockResolvedValue(true)
     })
-    const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+    const dispatcher = new RpcDispatcher({
+      runtime,
+      methods: TERMINAL_METHODS
+    })
 
     const dispatchPromise = dispatcher.dispatchStreaming(
       makeRequest('terminal.multiplex', {}),
       (msg) => messages.push(msg),
       {
         connectionId: 'conn-budgeted-request',
-        sendBinary: (bytes) => binaryFrames.push(bytes),
+        sendBinary: (bytes) => {
+          binaryFrames.push(bytes)
+        },
         registerBinaryStreamHandler: (streamId, handler) => {
           handlers.set(streamId, handler)
           return () => handlers.delete(streamId)
@@ -1342,7 +1400,10 @@ describe('terminal multiplex RPC', () => {
           opcode: TerminalStreamOpcode.SnapshotRequest,
           streamId: 14,
           seq: 2,
-          payload: encodeTerminalStreamJson({ requestId: 55, scrollbackRows: 5000 })
+          payload: encodeTerminalStreamJson({
+            requestId: 55,
+            scrollbackRows: 5000
+          })
         })
       )!
     )
@@ -1406,7 +1467,10 @@ describe('terminal multiplex RPC', () => {
       sendTerminal: vi.fn().mockResolvedValue({ accepted: true }),
       updateDesktopViewport: vi.fn().mockResolvedValue(true)
     })
-    const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+    const dispatcher = new RpcDispatcher({
+      runtime,
+      methods: TERMINAL_METHODS
+    })
 
     const dispatchPromise = dispatcher.dispatchStreaming(
       makeRequest('terminal.multiplex', {}),
@@ -1507,7 +1571,10 @@ describe('terminal multiplex RPC', () => {
       sendTerminal: vi.fn().mockResolvedValue({ accepted: true }),
       updateDesktopViewport: vi.fn().mockResolvedValue(true)
     })
-    const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+    const dispatcher = new RpcDispatcher({
+      runtime,
+      methods: TERMINAL_METHODS
+    })
 
     const dispatchPromise = dispatcher.dispatchStreaming(
       makeRequest('terminal.multiplex', {}),
@@ -1594,7 +1661,10 @@ describe('terminal multiplex RPC', () => {
       sendTerminal: vi.fn().mockResolvedValue({ accepted: true }),
       updateDesktopViewport: vi.fn().mockResolvedValue(true)
     })
-    const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+    const dispatcher = new RpcDispatcher({
+      runtime,
+      methods: TERMINAL_METHODS
+    })
 
     const dispatchPromise = dispatcher.dispatchStreaming(
       makeRequest('terminal.subscribe', {
@@ -1683,7 +1753,10 @@ describe('terminal multiplex RPC', () => {
         sendTerminal: vi.fn().mockResolvedValue({ accepted: true }),
         updateDesktopViewport: vi.fn().mockResolvedValue(true)
       })
-      const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+      const dispatcher = new RpcDispatcher({
+        runtime,
+        methods: TERMINAL_METHODS
+      })
 
       const dispatchPromise = dispatcher.dispatchStreaming(
         makeRequest('terminal.subscribe', {
@@ -1694,7 +1767,9 @@ describe('terminal multiplex RPC', () => {
         (msg) => messages.push(msg),
         {
           connectionId: 'conn-subscribe-output-chunking',
-          sendBinary: (bytes) => binaryFrames.push(bytes),
+          sendBinary: (bytes) => {
+            binaryFrames.push(bytes)
+          },
           registerBinaryStreamHandler: (streamId, handler) => {
             handlers.set(streamId, handler)
             return () => handlers.delete(streamId)
@@ -1769,7 +1844,10 @@ describe('terminal multiplex RPC', () => {
         sendTerminal: vi.fn().mockResolvedValue({ accepted: true }),
         updateDesktopViewport: vi.fn().mockResolvedValue(true)
       })
-      const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+      const dispatcher = new RpcDispatcher({
+        runtime,
+        methods: TERMINAL_METHODS
+      })
 
       const dispatchPromise = dispatcher.dispatchStreaming(
         makeRequest('terminal.subscribe', {
@@ -1780,13 +1858,18 @@ describe('terminal multiplex RPC', () => {
         (msg) => messages.push(msg),
         {
           connectionId: 'conn-buffered-output-on-subscribe',
-          sendBinary: (bytes) => binaryFrames.push(bytes),
+          sendBinary: (bytes) => {
+            binaryFrames.push(bytes)
+          },
           registerBinaryStreamHandler: vi.fn(() => vi.fn())
         }
       )
 
       await vi.waitFor(() => expect(dataListenerRef.current).toBeDefined())
-      dataListenerRef.current?.('starting shell\r\n', { seq: 16, rawLength: 16 })
+      dataListenerRef.current?.('starting shell\r\n', {
+        seq: 16,
+        rawLength: 16
+      })
       resolveSnapshot({ data: '', cols: 120, rows: 40 })
       await vi.waitFor(() =>
         expect(messages.some((msg) => JSON.parse(msg).result?.type === 'subscribed')).toBe(true)
@@ -1827,7 +1910,12 @@ describe('terminal multiplex RPC', () => {
         readTerminal: vi.fn().mockResolvedValue({ tail: [], truncated: false }),
         serializeTerminalBuffer: vi.fn(
           () =>
-            new Promise<{ data: string; cols: number; rows: number; seq: number }>((resolve) => {
+            new Promise<{
+              data: string
+              cols: number
+              rows: number
+              seq: number
+            }>((resolve) => {
               resolveSnapshot = resolve
             })
         ),
@@ -1853,7 +1941,10 @@ describe('terminal multiplex RPC', () => {
         sendTerminal: vi.fn().mockResolvedValue({ accepted: true }),
         updateDesktopViewport: vi.fn().mockResolvedValue(true)
       })
-      const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+      const dispatcher = new RpcDispatcher({
+        runtime,
+        methods: TERMINAL_METHODS
+      })
 
       const dispatchPromise = dispatcher.dispatchStreaming(
         makeRequest('terminal.subscribe', {
@@ -1864,7 +1955,9 @@ describe('terminal multiplex RPC', () => {
         (msg) => messages.push(msg),
         {
           connectionId: 'conn-buffered-output-covered-by-snapshot',
-          sendBinary: (bytes) => binaryFrames.push(bytes),
+          sendBinary: (bytes) => {
+            binaryFrames.push(bytes)
+          },
           registerBinaryStreamHandler: vi.fn(() => vi.fn())
         }
       )
@@ -1924,7 +2017,12 @@ describe('terminal multiplex RPC', () => {
         readTerminal: vi.fn().mockResolvedValue({ tail: [], truncated: false }),
         serializeTerminalBuffer: vi.fn(
           () =>
-            new Promise<{ data: string; cols: number; rows: number; seq: number }>((resolve) => {
+            new Promise<{
+              data: string
+              cols: number
+              rows: number
+              seq: number
+            }>((resolve) => {
               resolveSnapshot = resolve
             })
         ),
@@ -1950,7 +2048,10 @@ describe('terminal multiplex RPC', () => {
         sendTerminal: vi.fn().mockResolvedValue({ accepted: true }),
         updateDesktopViewport: vi.fn().mockResolvedValue(true)
       })
-      const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+      const dispatcher = new RpcDispatcher({
+        runtime,
+        methods: TERMINAL_METHODS
+      })
 
       const dispatchPromise = dispatcher.dispatchStreaming(
         makeRequest('terminal.subscribe', {
@@ -1961,7 +2062,9 @@ describe('terminal multiplex RPC', () => {
         (msg) => messages.push(msg),
         {
           connectionId: 'conn-buffered-output-partially-covered-by-snapshot',
-          sendBinary: (bytes) => binaryFrames.push(bytes),
+          sendBinary: (bytes) => {
+            binaryFrames.push(bytes)
+          },
           registerBinaryStreamHandler: vi.fn(() => vi.fn())
         }
       )
@@ -2021,7 +2124,10 @@ describe('terminal multiplex RPC', () => {
         cleanups.set(id, cleanup)
       })
     })
-    const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+    const dispatcher = new RpcDispatcher({
+      runtime,
+      methods: TERMINAL_METHODS
+    })
 
     const dispatchPromise = dispatcher.dispatchStreaming(
       makeRequest('terminal.multiplex', {}),
@@ -2029,7 +2135,9 @@ describe('terminal multiplex RPC', () => {
       {
         signal: controller.signal,
         connectionId: 'conn-phone-multiplex',
-        sendBinary: (bytes) => binaryFrames.push(bytes),
+        sendBinary: (bytes) => {
+          binaryFrames.push(bytes)
+        },
         registerBinaryStreamHandler: (streamId, handler) => {
           handlers.set(streamId, handler)
           return () => handlers.delete(streamId)
@@ -2131,7 +2239,9 @@ describe('terminal multiplex RPC', () => {
       (msg) => messages.push(msg),
       {
         connectionId: 'conn-overwrite',
-        sendBinary: (bytes) => binaryFrames.push(bytes),
+        sendBinary: (bytes) => {
+          binaryFrames.push(bytes)
+        },
         registerBinaryStreamHandler: (streamId, handler) => {
           handlers.set(streamId, handler)
           return () => handlers.delete(streamId)
@@ -2249,7 +2359,9 @@ describe('terminal multiplex RPC', () => {
       (msg) => messages.push(msg),
       {
         connectionId: 'conn-evicted-error',
-        sendBinary: (bytes) => binaryFrames.push(bytes),
+        sendBinary: (bytes) => {
+          binaryFrames.push(bytes)
+        },
         registerBinaryStreamHandler: (streamId, handler) => {
           handlers.set(streamId, handler)
           return () => handlers.delete(streamId)
@@ -2323,14 +2435,19 @@ describe('terminal multiplex RPC', () => {
         cleanups.set(id, cleanup)
       })
     })
-    const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+    const dispatcher = new RpcDispatcher({
+      runtime,
+      methods: TERMINAL_METHODS
+    })
 
     const dispatchPromise = dispatcher.dispatchStreaming(
       makeRequest('terminal.multiplex', {}),
       (msg) => messages.push(msg),
       {
         connectionId: 'conn-stale-handle',
-        sendBinary: (bytes) => binaryFrames.push(bytes),
+        sendBinary: (bytes) => {
+          binaryFrames.push(bytes)
+        },
         registerBinaryStreamHandler: (streamId, handler) => {
           handlers.set(streamId, handler)
           return () => handlers.delete(streamId)
@@ -2414,14 +2531,19 @@ describe('terminal multiplex RPC', () => {
         sendTerminal: vi.fn().mockResolvedValue({ accepted: true }),
         updateDesktopViewport: vi.fn().mockResolvedValue(true)
       })
-      const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+      const dispatcher = new RpcDispatcher({
+        runtime,
+        methods: TERMINAL_METHODS
+      })
 
       const dispatchPromise = dispatcher.dispatchStreaming(
         makeRequest('terminal.multiplex', {}),
         (msg) => messages.push(msg),
         {
           connectionId: 'conn-buffered',
-          sendBinary: (bytes) => binaryFrames.push(bytes),
+          sendBinary: (bytes) => {
+            binaryFrames.push(bytes)
+          },
           registerBinaryStreamHandler: (streamId, handler) => {
             handlers.set(streamId, handler)
             return () => handlers.delete(streamId)
@@ -2523,14 +2645,19 @@ describe('terminal multiplex RPC', () => {
         sendTerminal: vi.fn().mockResolvedValue({ accepted: true }),
         updateDesktopViewport: vi.fn().mockResolvedValue(true)
       })
-      const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+      const dispatcher = new RpcDispatcher({
+        runtime,
+        methods: TERMINAL_METHODS
+      })
 
       const dispatchPromise = dispatcher.dispatchStreaming(
         makeRequest('terminal.multiplex', {}),
         (msg) => messages.push(msg),
         {
           connectionId: 'conn-buffered-multibyte',
-          sendBinary: (bytes) => binaryFrames.push(bytes),
+          sendBinary: (bytes) => {
+            binaryFrames.push(bytes)
+          },
           registerBinaryStreamHandler: (streamId, handler) => {
             handlers.set(streamId, handler)
             return () => handlers.delete(streamId)
@@ -2620,7 +2747,11 @@ describe('terminal multiplex RPC', () => {
                 resolveRequestedSnapshot = resolve
               })
           )
-          .mockResolvedValueOnce({ data: 'retry snapshot', cols: 120, rows: 40 }),
+          .mockResolvedValueOnce({
+            data: 'retry snapshot',
+            cols: 120,
+            rows: 40
+          }),
         getTerminalSize: vi.fn().mockReturnValue({ cols: 120, rows: 40 }),
         getMobileDisplayMode: vi.fn().mockReturnValue('auto'),
         getLayout: vi.fn().mockReturnValue({ seq: 1 }),
@@ -2640,14 +2771,19 @@ describe('terminal multiplex RPC', () => {
         sendTerminal: vi.fn().mockResolvedValue({ accepted: true }),
         updateDesktopViewport: vi.fn().mockResolvedValue(true)
       })
-      const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+      const dispatcher = new RpcDispatcher({
+        runtime,
+        methods: TERMINAL_METHODS
+      })
 
       const dispatchPromise = dispatcher.dispatchStreaming(
         makeRequest('terminal.multiplex', {}),
         (msg) => messages.push(msg),
         {
           connectionId: 'conn-request-overflow',
-          sendBinary: (bytes) => binaryFrames.push(bytes),
+          sendBinary: (bytes) => {
+            binaryFrames.push(bytes)
+          },
           registerBinaryStreamHandler: (streamId, handler) => {
             handlers.set(streamId, handler)
             return () => handlers.delete(streamId)
@@ -2684,7 +2820,10 @@ describe('terminal multiplex RPC', () => {
             opcode: TerminalStreamOpcode.SnapshotRequest,
             streamId: 12,
             seq: 2,
-            payload: encodeTerminalStreamJson({ requestId: 44, scrollbackRows: 5000 })
+            payload: encodeTerminalStreamJson({
+              requestId: 44,
+              scrollbackRows: 5000
+            })
           })
         )!
       )

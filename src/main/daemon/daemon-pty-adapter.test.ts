@@ -6,6 +6,7 @@ import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync
 import { DaemonClient } from './client'
 import { DaemonPtyAdapter } from './daemon-pty-adapter'
 import { DaemonServer } from './daemon-server'
+import { HeadlessEmulator } from './headless-emulator'
 import { getHistorySessionDirName } from './history-paths'
 import type { HistoryReader } from './history-reader'
 import type { SubprocessHandle } from './session'
@@ -30,7 +31,7 @@ function createTestDir(): string {
   return mkdtempSync(join(tmpdir(), 'daemon-adapter-test-'))
 }
 
-function createMockSubprocess(): SubprocessHandle & {
+function createMockSubprocess(dataOnSubscribe?: string): SubprocessHandle & {
   pause: ReturnType<typeof vi.fn<() => void>>
   resume: ReturnType<typeof vi.fn<() => void>>
   _simulateData: (data: string) => void
@@ -52,6 +53,9 @@ function createMockSubprocess(): SubprocessHandle & {
     signal: vi.fn(),
     onData(cb) {
       onDataCb = cb
+      if (dataOnSubscribe) {
+        cb(dataOnSubscribe)
+      }
     },
     onExit(cb) {
       onExitCb = cb
@@ -91,8 +95,10 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
     env?: Record<string, string>
     command?: string
   } | null
+  let subprocessDataOnSubscribe: string | undefined
 
   beforeEach(async () => {
+    subprocessDataOnSubscribe = undefined
     dir = createTestDir()
     socketPath = getDaemonSocketPath(dir)
     tokenPath = join(dir, 'test.token')
@@ -102,7 +108,7 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
       tokenPath,
       spawnSubprocess: (opts) => {
         lastSpawnOpts = opts
-        lastSubprocess = createMockSubprocess()
+        lastSubprocess = createMockSubprocess(subprocessDataOnSubscribe)
         return lastSubprocess
       }
     })
@@ -1188,7 +1194,7 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
       expect(existsSync(join(historyDir, getHistorySessionDirName(id)))).toBe(true)
     })
 
-    it('persists final take records that are not represented in the snapshot', async () => {
+    itOnPosix('persists final take records that are not represented in the snapshot', async () => {
       historyAdapter = new DaemonPtyAdapter({ socketPath, tokenPath, historyPath: historyDir })
 
       const { id } = await historyAdapter.spawn({
@@ -1585,9 +1591,9 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
 
       expect(result.coldRestore).toBeDefined()
       expect(result.coldRestore!.scrollback).toContain('raced output')
-      // Documented race delta: the fresh shell spawns with the renderer's
-      // requested params, not the recovered ones.
-      expect(lastSpawnOpts).toMatchObject({ sessionId, cols: 80, rows: 24 })
+      // The unseeded race winner is replaced before exposure, so the retained
+      // shell uses the recovered dimensions as well as the recovered history.
+      expect(lastSpawnOpts).toMatchObject({ sessionId, cols: 100, rows: 30 })
       // The recovery data must survive — openSession would have deleted it.
       expect(existsSync(join(sessionDir, 'scrollback.bin'))).toBe(true)
       const internals = historyAdapter as unknown as {
@@ -1768,6 +1774,87 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
       expect(meta.cwd).toBe('/tmp')
       expect(meta.cols).toBe(80)
       expect(meta.rows).toBe(24)
+    })
+
+    it('keeps recovered scrollback when the fresh daemon session re-anchors history', async () => {
+      const sessionId = 'cold-restore-reanchor'
+      const sessionDir = join(historyDir, getHistorySessionDirName(sessionId))
+      mkdirSync(sessionDir, { recursive: true })
+      writeFileSync(
+        join(sessionDir, 'meta.json'),
+        JSON.stringify({
+          cwd: '/tmp',
+          cols: 80,
+          rows: 24,
+          startedAt: '2026-07-10T08:00:00Z',
+          endedAt: null,
+          exitCode: null
+        })
+      )
+      writeFileSync(join(sessionDir, 'scrollback.bin'), 'recovered marker\r\n')
+      subprocessDataOnSubscribe = 'fresh shell output\r\n'
+      historyAdapter = new DaemonPtyAdapter({ socketPath, tokenPath, historyPath: historyDir })
+      const result = await historyAdapter.spawn({ cols: 80, rows: 24, sessionId })
+      expect(result.coldRestore?.scrollback).toContain('recovered marker')
+
+      const internals = historyAdapter as unknown as {
+        checkpointSessions(sessionIds: Iterable<string>): Promise<Set<string>>
+      }
+      await internals.checkpointSessions([sessionId])
+      const checkpointPath = join(sessionDir, 'checkpoint.json')
+      const checkpoint = JSON.parse(readFileSync(checkpointPath, 'utf8'))
+
+      expect(checkpoint.snapshotAnsi).toContain('recovered marker')
+      expect(checkpoint.snapshotAnsi).toContain('fresh shell output')
+      expect(checkpoint.snapshotAnsi.indexOf('recovered marker')).toBeLessThan(
+        checkpoint.snapshotAnsi.indexOf('fresh shell output')
+      )
+    })
+
+    it('keeps recovery persistence suspended across an adapter restart after seed failure', async () => {
+      const sessionId = 'cold-restore-seed-failure'
+      const sessionDir = join(historyDir, getHistorySessionDirName(sessionId))
+      mkdirSync(sessionDir, { recursive: true })
+      writeFileSync(
+        join(sessionDir, 'meta.json'),
+        JSON.stringify({
+          cwd: '/tmp',
+          cols: 80,
+          rows: 24,
+          startedAt: '2026-07-10T08:00:00Z',
+          endedAt: null,
+          exitCode: null
+        })
+      )
+      writeFileSync(join(sessionDir, 'scrollback.bin'), 'recovered marker\r\n')
+
+      const first = new DaemonPtyAdapter({ socketPath, tokenPath, historyPath: historyDir })
+      const originalWriteSync = HeadlessEmulator.prototype.writeSync
+      const writeSyncSpy = vi
+        .spyOn(HeadlessEmulator.prototype, 'writeSync')
+        .mockImplementation(function (this: HeadlessEmulator, data) {
+          return data.includes('recovered marker') ? false : originalWriteSync.call(this, data)
+        })
+      try {
+        await first.spawn({ cols: 80, rows: 24, sessionId })
+        lastSubprocess._simulateData('fresh-only output\r\n')
+        await first.disconnectOnly()
+
+        historyAdapter = new DaemonPtyAdapter({ socketPath, tokenPath, historyPath: historyDir })
+        const result = await historyAdapter.spawn({ cols: 80, rows: 24, sessionId })
+        expect(result.coldRestore?.scrollback).toContain('recovered marker')
+        const internals = historyAdapter as unknown as {
+          checkpointSessions(sessionIds: Iterable<string>): Promise<Set<string>>
+        }
+        await internals.checkpointSessions([sessionId])
+
+        expect(existsSync(join(sessionDir, 'checkpoint.json'))).toBe(false)
+        expect(readFileSync(join(sessionDir, 'scrollback.bin'), 'utf8')).toContain(
+          'recovered marker'
+        )
+      } finally {
+        writeSyncSpy.mockRestore()
+      }
     })
 
     it('does not cold-restore for clean shutdown (endedAt set)', async () => {

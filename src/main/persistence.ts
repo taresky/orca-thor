@@ -203,6 +203,7 @@ import {
   normalizeTuiAgentEnvRecord
 } from '../shared/tui-agent-launch-defaults'
 import { normalizeTerminalCursorStyleDefault } from '../shared/terminal-cursor-style-settings'
+import { normalizeTerminalLineHeight } from '../shared/terminal-line-height-settings'
 import { normalizeUiLanguage } from '../shared/ui-language'
 import { normalizeBrowserPageZoomLevel } from '../shared/browser-page-zoom'
 import { persistedUIValuesEqual } from '../shared/persisted-ui-equality'
@@ -2987,6 +2988,15 @@ export class Store {
           parsed.settings
         )
         const migratedTerminalCursorStyle = normalizeTerminalCursorStyleDefault(parsed.settings)
+        const migratedTerminalLineHeight = normalizeTerminalLineHeight(
+          parsed.settings?.terminalLineHeight
+        )
+        if (
+          parsed.settings?.terminalLineHeight !== undefined &&
+          parsed.settings.terminalLineHeight !== migratedTerminalLineHeight
+        ) {
+          this.loadNeedsSave = true
+        }
         const rawTaskProviderSettings = normalizeTaskProviderSettings({
           visibleTaskProviders: parsed.settings?.visibleTaskProviders,
           defaultTaskSource: parsed.settings?.defaultTaskSource
@@ -3094,6 +3104,12 @@ export class Store {
           ),
           settings: {
             ...defaults.settings,
+            // Why (#7977): a persisted experimentalNewWorktreeCardStyle:true is
+            // kept even though the default is now false. The v1.4.130 open-
+            // onboarding auto-default wrote the same plain boolean as a real
+            // opt-in, so a rollback migration would also revert genuine opt-ins;
+            // product intent was only to change the default, and the setting
+            // stays user-toggleable.
             ...stripLegacyTerminalScrollbackBytes(parsed.settings),
             // Why: v1.3.42 renamed the cosmetic sidekick setting to pet. Carry
             // the old persisted flag forward once so enabled users don't lose it.
@@ -3113,6 +3129,7 @@ export class Store {
               primarySelectionDefaultedForTerminalDefaults || stampPrimarySelectionTerminalDefaults,
             ...migratedAutoRenameBranchFromWork,
             ...migratedTerminalCursorStyle,
+            terminalLineHeight: migratedTerminalLineHeight,
             ...migratedTerminalTuiScrollSensitivity.settings,
             experimentalActivity: migratedExperimentalActivity,
             experimentalActivityDefaultedOffForAllUsers: true,

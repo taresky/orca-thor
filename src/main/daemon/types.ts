@@ -113,6 +113,8 @@ export type CreateOrAttachRequest = {
     terminalWindowsPowerShellImplementation?: 'auto' | 'powershell.exe' | 'pwsh.exe'
     shellReadySupported?: boolean
     shellReadyTimeoutMs?: number
+    /** Recovered ANSI applied before the new subprocess can emit startup output. */
+    historySeed?: string
   }
 }
 
@@ -358,6 +360,7 @@ export type CreateOrAttachResult = {
   snapshot: TerminalSnapshot | null
   pid: number | null
   shellState: ShellReadyState
+  historySeeded?: boolean
 }
 
 export type GetSnapshotResult = {

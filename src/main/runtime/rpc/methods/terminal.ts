@@ -1164,7 +1164,10 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
     name: 'terminal.resizeForClient',
     params: TerminalResizeForClient,
     handler: async (params, { runtime }) => {
-      const leaf = runtime.resolveLeafForHandle(params.terminal)
+      // Why: guarded resolution — a stale handle (pane's PTY replaced under it)
+      // must fail with terminal_handle_stale instead of resizing the wrong PTY
+      // (#7718). Clients recover by re-deriving the handle.
+      const leaf = runtime.resolveLiveLeafForHandle(params.terminal)
       if (!leaf?.ptyId) {
         throw new Error('no_connected_pty')
       }
@@ -1218,7 +1221,10 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
     name: 'terminal.setDisplayMode',
     params: TerminalSetDisplayMode,
     handler: async (params, { runtime }) => {
-      const leaf = runtime.resolveLeafForHandle(params.terminal)
+      // Why: guarded resolution — a stale handle must fail with
+      // terminal_handle_stale instead of mutating the wrong PTY's display
+      // mode/viewport (#7718). Clients recover by re-deriving the handle.
+      const leaf = runtime.resolveLiveLeafForHandle(params.terminal)
       if (!leaf?.ptyId) {
         throw new Error('no_connected_pty')
       }
@@ -1240,7 +1246,10 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
     name: 'terminal.restoreFit',
     params: TerminalHandle,
     handler: async (params, { runtime }) => {
-      const leaf = runtime.resolveLeafForHandle(params.terminal)
+      // Why: guarded resolution — a stale handle must fail with
+      // terminal_handle_stale instead of reclaiming the wrong PTY back to
+      // desktop dims (#7718). Clients recover by re-deriving the handle.
+      const leaf = runtime.resolveLiveLeafForHandle(params.terminal)
       if (!leaf?.ptyId) {
         throw new Error('no_connected_pty')
       }
@@ -1261,7 +1270,10 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
     name: 'terminal.updateViewport',
     params: TerminalUpdateViewport,
     handler: async (params, { runtime }) => {
-      const leaf = runtime.resolveLeafForHandle(params.terminal)
+      // Why: guarded resolution — a stale handle must fail with
+      // terminal_handle_stale instead of writing viewport state to the wrong
+      // PTY (#7718). Clients recover by re-deriving the handle.
+      const leaf = runtime.resolveLiveLeafForHandle(params.terminal)
       if (!leaf?.ptyId) {
         throw new Error('no_connected_pty')
       }
@@ -1303,18 +1315,20 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
         opcode: TerminalStreamOpcode,
         payload: Uint8Array<ArrayBufferLike> = new Uint8Array(),
         seq?: number
-      ): void => {
+      ): boolean => {
         if (closed) {
-          return
+          return false
         }
-        sendBinary(
-          encodeTerminalStreamFrame({
-            opcode,
-            streamId,
-            seq: typeof seq === 'number' ? seq : cursor++,
-            payload
-          })
+        // Why: Output `seq` is a UTF-16 high-water the client uses for frame-drop
+        // gap detection, so a seq-less Output chunk must carry the sentinel 0
+        // (== "no seq") rather than the cursor value that orders control frames;
+        // a cursor value would poison the client's expected-seq tracker.
+        const resolvedSeq =
+          typeof seq === 'number' ? seq : opcode === TerminalStreamOpcode.Output ? 0 : cursor++
+        const sent = sendBinary(
+          encodeTerminalStreamFrame({ opcode, streamId, seq: resolvedSeq, payload })
         )
+        return sent !== false
       }
       const sendStreamError = (streamId: number, message: string): void => {
         sendFrame(streamId, TerminalStreamOpcode.Error, encodeTerminalStreamText(message))
