@@ -28,7 +28,7 @@ const {
   removeWorktreeMock,
   forceDeleteLocalBranchMock,
   resolveLocalGitUsernameMock,
-  getDefaultBaseRefMock,
+  getBaseRefDefaultMock,
   resolveDefaultBaseRefViaExecMock,
   getDefaultRemoteMock,
   getBranchConflictKindMock,
@@ -77,7 +77,7 @@ const {
   removeWorktreeMock: vi.fn(),
   forceDeleteLocalBranchMock: vi.fn(),
   resolveLocalGitUsernameMock: vi.fn(),
-  getDefaultBaseRefMock: vi.fn(),
+  getBaseRefDefaultMock: vi.fn(),
   resolveDefaultBaseRefViaExecMock: vi.fn(),
   getDefaultRemoteMock: vi.fn(),
   getBranchConflictKindMock: vi.fn(),
@@ -130,7 +130,7 @@ vi.mock('../git/runner', () => ({
 }))
 
 vi.mock('../git/repo', () => ({
-  getDefaultBaseRef: getDefaultBaseRefMock,
+  getBaseRefDefault: getBaseRefDefaultMock,
   resolveDefaultBaseRefViaExec: resolveDefaultBaseRefViaExecMock,
   getDefaultRemote: getDefaultRemoteMock,
   getBranchConflictKind: getBranchConflictKindMock
@@ -299,7 +299,7 @@ describe('registerWorktreeHandlers', () => {
       removeWorktreeMock,
       forceDeleteLocalBranchMock,
       resolveLocalGitUsernameMock,
-      getDefaultBaseRefMock,
+      getBaseRefDefaultMock,
       resolveDefaultBaseRefViaExecMock,
       getDefaultRemoteMock,
       getBranchConflictKindMock,
@@ -400,7 +400,7 @@ describe('registerWorktreeHandlers', () => {
     ])
     store.getAllWorktreeLineage.mockReturnValue({})
     resolveLocalGitUsernameMock.mockResolvedValue('')
-    getDefaultBaseRefMock.mockReturnValue('origin/main')
+    getBaseRefDefaultMock.mockResolvedValue('origin/main')
     resolveDefaultBaseRefViaExecMock.mockResolvedValue('origin/main')
     getDefaultRemoteMock.mockResolvedValue('origin')
     getBranchConflictKindMock.mockResolvedValue(null)
@@ -523,6 +523,7 @@ describe('registerWorktreeHandlers', () => {
 
     await handlers['worktrees:prefetchCreateBase'](null, { repoId: 'repo-1' })
 
+    expect(getBaseRefDefaultMock).toHaveBeenCalledWith('/workspace/repo')
     expect(runtimeStub.resolveRemoteTrackingBase).toHaveBeenCalledWith(
       '/workspace/repo',
       'origin/master'
