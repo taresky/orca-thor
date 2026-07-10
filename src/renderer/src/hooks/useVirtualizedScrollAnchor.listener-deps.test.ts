@@ -113,7 +113,9 @@ describe('useVirtualizedScrollAnchor listener effect dependencies', () => {
     harness.effects[1]?.effect()
 
     expect(scrollElementRef.current.scrollTop).toBe(4116)
-    expect(anchorRef.current).toEqual({ key: 'row-1', offset: 3358 })
+    // Why: the anchor identity is preserved through the transitional restore;
+    // only its source scrollTop is refreshed to the restored offset.
+    expect(anchorRef.current).toEqual({ key: 'row-1', offset: 3358, scrollTop: 4116 })
   })
 
   it('can ignore generic scroll anchor recording while preserving the saved anchor', async () => {
