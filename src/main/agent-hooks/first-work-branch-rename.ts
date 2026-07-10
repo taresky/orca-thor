@@ -30,6 +30,7 @@ import {
 import type { CommitMessageAgentEnvironmentResolvers } from '../text-generation/commit-message-agent-environment'
 import type { AgentGenerationFailureOutput } from '../text-generation/agent-failure-output'
 import { resolveGenerationTarget } from './first-work-generation-target'
+import { runFolderWorkspaceTitleAutoRename } from './first-work-workspace-title-rename'
 
 export type FirstWorkBranchRenameEvent = {
   paneKey: string
@@ -333,58 +334,5 @@ async function runAutoRename(
   console.info(
     `[auto-branch-rename] renamed ${currentBranch} -> ${newBranch}; ${displayLog}${folderLog}`
   )
-  return true
-}
-
-async function runFolderWorkspaceTitleAutoRename(
-  worktreeId: string,
-  prompt: string,
-  assistantMessage: string | undefined,
-  deps: FirstWorkBranchRenameDeps,
-  stop: (reason: string, clearError?: boolean) => true,
-  retry: (reason: string) => false
-): Promise<boolean> {
-  if (deps.isPendingFirstAgentMessageRename?.(worktreeId) !== true) {
-    return stop('folder workspace is not pending title rename', true)
-  }
-  const folderPath = deps.getFolderWorkspacePath?.(worktreeId)
-  if (!folderPath) {
-    return stop('folder workspace path unavailable')
-  }
-
-  const settings = deps.getSettings()
-  const resolvedParams = resolveTextGenerationParams(settings, 'local', 'branchName', null)
-  if (!resolvedParams.ok) {
-    deps.setRenameError(worktreeId, resolvedParams.error)
-    return stop(`no generation agent: ${resolvedParams.error}`)
-  }
-  const target = await resolveGenerationTarget(
-    folderPath,
-    resolvedParams.params.agentId,
-    null,
-    deps
-  )
-  if (!target) {
-    deps.setRenameError(worktreeId, 'Could not prepare the workspace-name generation environment.')
-    return retry('could not prepare generation environment')
-  }
-
-  const generated = await generateBranchNameFromContext(
-    { firstPrompt: prompt, assistantMessage },
-    resolvedParams.params,
-    target
-  )
-  if (!generated.success) {
-    if (!generated.canceled) {
-      deps.setRenameError(worktreeId, generated.error, generated.failureOutput ?? null)
-    }
-    return retry(`generation failed: ${generated.error}`)
-  }
-
-  const newDisplayName = humanizeBranchSlug(generated.slug)
-  deps.setDisplayName(worktreeId, newDisplayName)
-  deps.setRenameError(worktreeId, null)
-  deps.onRenamed(worktreeId)
-  console.info(`[auto-branch-rename] renamed folder workspace title -> "${newDisplayName}"`)
   return true
 }
