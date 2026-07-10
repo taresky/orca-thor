@@ -1,72 +1,137 @@
 import type { RpcClient } from '../transport/rpc-client'
-import type { RpcSuccess } from '../transport/types'
-import { shouldResolveHostedReviewStartPoint } from './hosted-review-start-point'
+import { resolveComposerMrBase, resolveComposerPrBase } from './composer-source-base-resolve'
+import type {
+  MobileComposerCreateSelection,
+  MobileLinkedWorkItem
+} from './mobile-composer-source-types'
 import { resolveMobileWorkspaceCreateName } from './mobile-workspace-name'
+import type { WorkspaceAgentChoice } from './workspace-agent-selection'
 import {
   buildTaskWorkspaceCreateParams,
-  type WorkspaceCreateHostedStartPoint,
-  type WorkspaceCreateSetupDecision
+  type WorkspaceCreateSetupDecision,
+  type WorkspaceCreateTaskItem
 } from './workspace-create-params'
-import type { WorkspaceAgentChoice } from './workspace-agent-selection'
-import type { WorkspaceSource } from './workspace-source-selection'
 import { createWorktreeWithNameRetry, type WorktreeCreateResult } from './worktree-create-retry'
 
-// The agent bundle the modal already resolved: the choice drives buildTaskWorkspaceCreateParams
-// for task sources; the explicit launch command is used for branch sources (which
-// have no work-item URL to seed the agent draft).
+// The agent bundle the modal already resolved: the choice drives
+// buildTaskWorkspaceCreateParams for work-item sources; the explicit launch
+// command is used for branch sources (which have no work-item URL to seed the draft).
 export type WorkspaceCreateAgentBundle = {
   choice: WorkspaceAgentChoice
   startupCommand: string | undefined
 }
 
-type NonBlankSource = Exclude<WorkspaceSource, { kind: 'blank' }>
-
-export async function createWorkspaceFromSource(args: {
+export type CreateWorkspaceFromComposerArgs = {
   client: RpcClient
-  source: NonBlankSource
+  selection: MobileComposerCreateSelection
   targetRepoId: string
   setupDecision: WorkspaceCreateSetupDecision
   agent: WorkspaceCreateAgentBundle
   workspaceName: string | undefined
   note: string | undefined
-}): Promise<WorktreeCreateResult> {
-  const { source } = args
-  if (source.kind === 'branch' || source.kind === 'new-branch') {
-    return createBranchWorkspace({ ...args, source })
-  }
-  return createTaskWorkspace({ ...args, source })
+  nameIsAutoManaged?: boolean
 }
 
-async function createTaskWorkspace(args: {
+export async function createWorkspaceFromComposerSource(
+  args: CreateWorkspaceFromComposerArgs
+): Promise<WorktreeCreateResult> {
+  if (args.selection.kind === 'branch') {
+    return createBranchWorkspace({ ...args, selection: args.selection })
+  }
+  if (args.selection.kind === 'new-branch') {
+    return createNewBranchWorkspace({ ...args, selection: args.selection })
+  }
+  return createWorkItemWorkspace({ ...args, selection: args.selection })
+}
+
+function toTaskItem(item: MobileLinkedWorkItem, targetRepoId: string): WorkspaceCreateTaskItem {
+  if (item.provider === 'github') {
+    return {
+      provider: 'github',
+      source: {
+        type: item.type === 'pr' ? 'pr' : 'issue',
+        repoId: item.repoId ?? targetRepoId,
+        number: item.number,
+        title: item.title,
+        url: item.url
+      }
+    }
+  }
+  if (item.provider === 'gitlab') {
+    return {
+      provider: 'gitlab',
+      source: {
+        type: item.type === 'mr' ? 'mr' : 'issue',
+        repoId: item.repoId ?? targetRepoId,
+        number: item.number,
+        title: item.title,
+        url: item.url
+      }
+    }
+  }
+  return {
+    provider: 'linear',
+    source: {
+      identifier: item.linearIdentifier ?? '',
+      title: item.title,
+      url: item.url,
+      ...(item.linearWorkspaceId ? { workspaceId: item.linearWorkspaceId } : {}),
+      ...(item.linearOrganizationUrlKey
+        ? { organizationUrlKey: item.linearOrganizationUrlKey }
+        : {})
+    }
+  }
+}
+
+async function createWorkItemWorkspace(args: {
   client: RpcClient
-  source: Extract<NonBlankSource, { kind: 'task' }>
+  selection: Extract<MobileComposerCreateSelection, { kind: 'work-item' }>
   targetRepoId: string
   setupDecision: WorkspaceCreateSetupDecision
   agent: WorkspaceCreateAgentBundle
   workspaceName: string | undefined
   note: string | undefined
+  nameIsAutoManaged?: boolean
 }): Promise<WorktreeCreateResult> {
-  const { client, source, targetRepoId, setupDecision, agent, workspaceName, note } = args
+  const { client, selection, targetRepoId, setupDecision, agent, workspaceName, note } = args
+  const item = selection.item
+  const taskItem = toTaskItem(item, targetRepoId)
 
-  let hostedStartPoint: WorkspaceCreateHostedStartPoint | undefined
-  if (
-    (source.hostedType === 'pr' || source.hostedType === 'mr') &&
-    shouldResolveHostedReviewStartPoint({ type: source.hostedType })
-  ) {
-    hostedStartPoint = await resolveHostedStartPoint(client, source)
+  // The composer resolves PR/MR base at select time; only re-resolve as a
+  // fallback when a linked PR/MR reached create without one.
+  let baseBranch = selection.baseBranch
+  let compareBaseRef = selection.compareBaseRef
+  let pushTarget = selection.pushTarget
+  let branchNameOverride = selection.branchNameOverride
+  if (!baseBranch && item.provider !== 'linear' && (item.type === 'pr' || item.type === 'mr')) {
+    const repoId = item.repoId ?? targetRepoId
+    const resolved =
+      item.type === 'pr'
+        ? await resolveComposerPrBase({ client, repoId, prNumber: item.number }).catch(() => null)
+        : await resolveComposerMrBase({ client, repoId, mrIid: item.number }).catch(() => null)
+    if (resolved) {
+      baseBranch = resolved.baseBranch
+      compareBaseRef = resolved.compareBaseRef
+      pushTarget = resolved.pushTarget
+      branchNameOverride = resolved.branchNameOverride ?? branchNameOverride
+    }
   }
 
   const params = buildTaskWorkspaceCreateParams({
-    item: source.item,
+    item: taskItem,
     targetRepoId,
     setupDecision,
     agent: agent.choice,
     workspaceName,
     note,
-    hostedStartPoint
+    baseBranch,
+    compareBaseRef,
+    branchNameOverride,
+    pushTarget,
+    nameIsAutoManaged: args.nameIsAutoManaged
   })
-  // buildTaskWorkspaceCreateParams computes the name; reuse it as the retry base so
-  // collisions still append -2, -3, ... like the blank path does.
+  // buildTaskWorkspaceCreateParams computes the name; reuse it as the retry base
+  // so collisions still append -2, -3, ... like the blank path does.
   const baseName = String(params.name)
   return createWorktreeWithNameRetry({
     client,
@@ -75,51 +140,16 @@ async function createTaskWorkspace(args: {
   })
 }
 
-// Faithful port of the PR/MR base-resolve in mobile/app/h/[hostId]/tasks.tsx: the
-// runtime returns either a start point or a soft { error } payload (not an RPC error).
-async function resolveHostedStartPoint(
-  client: RpcClient,
-  source: Extract<NonBlankSource, { kind: 'task' }>
-): Promise<WorkspaceCreateHostedStartPoint> {
-  const item = source.item
-  if (item.provider === 'linear') {
-    // Unreachable: only github/gitlab pr/mr sources resolve a hosted base.
-    throw new Error('Linear sources do not resolve a hosted base branch')
-  }
-  const method = item.provider === 'github' ? 'worktree.resolvePrBase' : 'worktree.resolveMrBase'
-  const numberKey = item.provider === 'github' ? 'prNumber' : 'mrIid'
-  const branchKey = item.provider === 'github' ? 'headRefName' : 'sourceBranch'
-  const params: Record<string, unknown> = {
-    repo: `id:${item.source.repoId}`,
-    [numberKey]: item.source.number,
-    ...(source.branchName ? { [branchKey]: source.branchName } : {}),
-    ...(source.isCrossRepository !== undefined
-      ? { isCrossRepository: source.isCrossRepository }
-      : {})
-  }
-  const response = await client.sendRequest(method, params, { timeoutMs: 30_000 })
-  if (!response.ok) {
-    throw new Error(response.error.message)
-  }
-  const result = (response as RpcSuccess).result as
-    | WorkspaceCreateHostedStartPoint
-    | { error: string }
-  if ('error' in result) {
-    throw new Error(result.error)
-  }
-  return result
-}
-
 async function createBranchWorkspace(args: {
   client: RpcClient
-  source: Extract<NonBlankSource, { kind: 'branch' | 'new-branch' }>
+  selection: Extract<MobileComposerCreateSelection, { kind: 'branch' }>
   targetRepoId: string
   setupDecision: WorkspaceCreateSetupDecision
   agent: WorkspaceCreateAgentBundle
   workspaceName: string | undefined
   note: string | undefined
 }): Promise<WorktreeCreateResult> {
-  const { client, source, targetRepoId, setupDecision, agent, workspaceName, note } = args
+  const { client, selection, targetRepoId, setupDecision, agent, workspaceName, note } = args
   const createdWithAgentId = agent.choice === 'blank' ? undefined : agent.choice
   const comment = note?.trim()
   const applyCommon = (params: Record<string, unknown>): Record<string, unknown> => {
@@ -132,51 +162,89 @@ async function createBranchWorkspace(args: {
     return params
   }
 
-  if (source.kind === 'new-branch') {
-    // New branch: the retry base is the branch name so a collision bumps the
-    // branch itself (the colliding constraint), not just the display name. An
-    // empty baseRef leaves baseBranch unset so the runtime picks the default base.
-    const baseBranch = source.baseRefName
-    const displayNameOverride = workspaceName?.trim()
+  if (selection.reuse) {
+    // Reusing a fixed existing branch: branchNameOverride is pinned to the reused
+    // branch, so a branch collision can't be cleared by suffixing the display
+    // name — fail fast instead of burning the retry budget.
+    const baseName = resolveMobileWorkspaceCreateName({
+      draft: workspaceName,
+      fallback: selection.localBranchName
+    })
     return createWorktreeWithNameRetry({
       client,
-      baseName: source.branchName,
-      buildParams: (candidateBranch) => {
-        const params: Record<string, unknown> = {
+      baseName,
+      maxAttempts: 1,
+      buildParams: (name) =>
+        applyCommon({
           repo: `id:${targetRepoId}`,
-          name: displayNameOverride || candidateBranch,
+          name,
           setupDecision,
-          branchNameOverride: candidateBranch,
+          baseBranch: selection.refName,
+          branchNameOverride: selection.localBranchName,
           startupCommand: agent.startupCommand
-        }
-        if (baseBranch) {
-          params.baseBranch = baseBranch
-        }
-        return applyCommon(params)
-      }
+        })
     })
   }
 
-  // Existing branch: reuse the branch off its ref. branchNameOverride is fixed to
-  // the reused branch, so a branch collision (e.g. it's checked out elsewhere)
-  // can't be cleared by suffixing the display name — fail fast instead of
-  // retrying 25 identical creates.
+  // New branch off the selected ref. The retry base is the branch name so a
+  // collision bumps the branch itself.
   const baseName = resolveMobileWorkspaceCreateName({
     draft: workspaceName,
-    fallback: source.localBranchName
+    fallback: selection.branchNameOverride || selection.localBranchName
   })
   return createWorktreeWithNameRetry({
     client,
     baseName,
-    maxAttempts: 1,
-    buildParams: (name) =>
-      applyCommon({
+    buildParams: (candidate) => {
+      const params: Record<string, unknown> = {
         repo: `id:${targetRepoId}`,
-        name,
+        name: candidate,
         setupDecision,
-        baseBranch: source.refName,
-        branchNameOverride: source.localBranchName,
+        baseBranch: selection.baseBranch,
         startupCommand: agent.startupCommand
-      })
+      }
+      if (selection.branchNameOverride) {
+        params.branchNameOverride = candidate
+      }
+      return applyCommon(params)
+    }
+  })
+}
+
+async function createNewBranchWorkspace(args: {
+  client: RpcClient
+  selection: Extract<MobileComposerCreateSelection, { kind: 'new-branch' }>
+  targetRepoId: string
+  setupDecision: WorkspaceCreateSetupDecision
+  agent: WorkspaceCreateAgentBundle
+  workspaceName: string | undefined
+  note: string | undefined
+}): Promise<WorktreeCreateResult> {
+  const { client, selection, targetRepoId, setupDecision, agent, note } = args
+  const createdWithAgentId = agent.choice === 'blank' ? undefined : agent.choice
+  const comment = note?.trim()
+  // A brand-new branch off the repo's default base. The typed name is kept as the
+  // git branch (via branchNameOverride) so a slash like `feature/login` survives;
+  // the runtime sanitizes the worktree folder from the same name. The retry base is
+  // the branch name so a collision bumps the branch (and folder) together.
+  return createWorktreeWithNameRetry({
+    client,
+    baseName: selection.branchName,
+    buildParams: (candidate) => {
+      const params: Record<string, unknown> = {
+        repo: `id:${targetRepoId}`,
+        name: candidate,
+        setupDecision,
+        branchNameOverride: candidate,
+        startupCommand: agent.startupCommand
+      }
+      if (createdWithAgentId) {
+        params.createdWithAgent = createdWithAgentId
+      }
+      if (comment) {
+        params.comment = comment
+      }
+      return params
+    }
   })
 }

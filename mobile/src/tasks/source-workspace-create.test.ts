@@ -1,21 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { RpcClient } from '../transport/rpc-client'
-import { createWorkspaceFromSource } from './source-workspace-create'
-import {
-  buildBranchSource,
-  buildGitHubTaskSource,
-  buildGitLabTaskSource,
-  buildLinearTaskSource,
-  buildNewBranchSource
-} from './workspace-source-selection'
+import { createWorkspaceFromComposerSource } from './source-workspace-create'
+import type { MobileComposerCreateSelection } from './mobile-composer-source-types'
 
-type Call = { method: string; params: unknown }
+type Call = { method: string; params: Record<string, unknown> }
 
-function fakeClient(script: (method: string) => unknown, calls: Call[]): RpcClient {
+function fakeClient(handle: (method: string, call: number) => unknown, calls: Call[]): RpcClient {
   return {
     sendRequest: async (method: string, params?: unknown) => {
-      calls.push({ method, params })
-      const result = script(method)
+      calls.push({ method, params: (params ?? {}) as Record<string, unknown> })
+      const result = handle(method, calls.length)
       if (result instanceof Error) {
         return {
           id: '1',
@@ -29,192 +23,198 @@ function fakeClient(script: (method: string) => unknown, calls: Call[]): RpcClie
   } as unknown as RpcClient
 }
 
-describe('createWorkspaceFromSource', () => {
-  it('resolves the PR base then creates a workspace linked to the PR', async () => {
+const agent = { choice: 'blank' as const, startupCommand: undefined }
+
+const baseArgs = {
+  targetRepoId: 'repo-1',
+  setupDecision: 'inherit' as const,
+  agent,
+  workspaceName: undefined,
+  note: undefined
+}
+
+describe('createWorkspaceFromComposerSource', () => {
+  it('creates a GitHub issue workspace linking the issue to its own repo', async () => {
     const calls: Call[] = []
-    const client = fakeClient((method) => {
-      if (method === 'worktree.resolvePrBase') {
-        return { baseBranch: 'main', pushTarget: { remoteName: 'origin', branchName: 'feat' } }
-      }
-      return { worktree: { id: 'wt-1' } }
-    }, calls)
-
-    const result = await createWorkspaceFromSource({
-      client,
-      source: buildGitHubTaskSource('repo-1', {
-        type: 'pr',
-        number: 42,
-        title: 'Fix login',
-        url: 'https://github.com/acme/app/pull/42',
-        branchName: 'feat',
-        isCrossRepository: false
-      }) as never,
-      targetRepoId: 'repo-1',
-      setupDecision: 'inherit',
-      agent: { choice: 'codex', startupCommand: undefined },
-      workspaceName: undefined,
-      note: undefined
-    })
-
-    expect(result).toEqual({ worktreeId: 'wt-1', name: 'pr-42' })
-    expect(calls[0]).toEqual({
-      method: 'worktree.resolvePrBase',
-      params: { repo: 'id:repo-1', prNumber: 42, headRefName: 'feat', isCrossRepository: false }
-    })
-    const createParams = calls[1]?.params as Record<string, unknown>
-    expect(calls[1]?.method).toBe('worktree.create')
-    expect(createParams.linkedPR).toBe(42)
-    expect(createParams.baseBranch).toBe('main')
-    expect(createParams.createdWithAgent).toBe('codex')
-    expect(createParams.startupDraft).toBe('https://github.com/acme/app/pull/42')
-    expect(createParams.pushTarget).toEqual({ remoteName: 'origin', branchName: 'feat' })
-  })
-
-  it('resolves the MR base then creates a workspace linked to the GitLab MR', async () => {
-    const calls: Call[] = []
-    const client = fakeClient((method) => {
-      if (method === 'worktree.resolveMrBase') {
-        return { baseBranch: 'develop', pushTarget: { remoteName: 'origin', branchName: 'fix' } }
-      }
-      return { worktree: { id: 'wt-mr' } }
-    }, calls)
-
-    const result = await createWorkspaceFromSource({
-      client,
-      source: buildGitLabTaskSource('repo-2', {
-        type: 'mr',
+    const client = fakeClient(() => ({ worktree: { id: 'wt-1' } }), calls)
+    const selection: MobileComposerCreateSelection = {
+      kind: 'work-item',
+      item: {
+        provider: 'github',
+        type: 'issue',
         number: 7,
-        title: 'Fix logout',
-        url: 'https://gitlab.com/acme/app/-/merge_requests/7',
-        branchName: 'fix',
-        isCrossRepository: true
-      }) as never,
-      targetRepoId: 'repo-2',
-      setupDecision: 'inherit',
-      agent: { choice: 'blank', startupCommand: undefined },
-      workspaceName: undefined,
-      note: undefined
+        title: 'Bug',
+        url: 'u',
+        repoId: 'repo-9'
+      }
+    }
+    // The composer supplies the title-derived name as workspaceName; with none,
+    // buildTaskWorkspaceCreateParams falls back to the "<type>-<number>" slug.
+    const result = await createWorkspaceFromComposerSource({ client, selection, ...baseArgs })
+    expect(result).toEqual({ worktreeId: 'wt-1', name: 'issue-7' })
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.method).toBe('worktree.create')
+    expect(calls[0]!.params).toMatchObject({
+      repo: 'id:repo-9',
+      linkedIssue: 7,
+      displayName: 'Bug'
     })
-
-    expect(result).toEqual({ worktreeId: 'wt-mr', name: 'mr-7' })
-    expect(calls[0]).toEqual({
-      method: 'worktree.resolveMrBase',
-      params: { repo: 'id:repo-2', mrIid: 7, sourceBranch: 'fix', isCrossRepository: true }
-    })
-    expect(calls[1]?.method).toBe('worktree.create')
-    const createParams = calls[1]?.params as Record<string, unknown>
-    expect(createParams.linkedGitLabMR).toBe(7)
-    expect(createParams.baseBranch).toBe('develop')
-    expect(createParams.pushTarget).toEqual({ remoteName: 'origin', branchName: 'fix' })
   })
 
-  it('creates a branch workspace with baseBranch + branchNameOverride and no resolve call', async () => {
+  it('passes composer-resolved PR base fields straight through (no re-resolve)', async () => {
     const calls: Call[] = []
     const client = fakeClient(() => ({ worktree: { id: 'wt-2' } }), calls)
-
-    const result = await createWorkspaceFromSource({
-      client,
-      source: buildBranchSource('origin/main', 'main') as never,
-      targetRepoId: 'repo-9',
-      setupDecision: 'run',
-      agent: { choice: 'blank', startupCommand: undefined },
-      workspaceName: undefined,
-      note: undefined
+    const selection: MobileComposerCreateSelection = {
+      kind: 'work-item',
+      item: {
+        provider: 'github',
+        type: 'pr',
+        number: 3,
+        title: 'Feat',
+        url: 'u',
+        repoId: 'repo-1'
+      },
+      baseBranch: 'main',
+      compareBaseRef: 'origin/main',
+      pushTarget: { remoteName: 'origin', branchName: 'feat-3' },
+      branchNameOverride: 'feat-3'
+    }
+    await createWorkspaceFromComposerSource({ client, selection, ...baseArgs })
+    expect(calls.map((c) => c.method)).toEqual(['worktree.create'])
+    expect(calls[0]!.params).toMatchObject({
+      linkedPR: 3,
+      baseBranch: 'main',
+      compareBaseRef: 'origin/main',
+      branchNameOverride: 'feat-3',
+      pushTarget: { remoteName: 'origin', branchName: 'feat-3' }
     })
-
-    expect(result).toEqual({ worktreeId: 'wt-2', name: 'main' })
-    expect(calls).toHaveLength(1)
-    expect(calls[0]?.method).toBe('worktree.create')
-    const params = calls[0]?.params as Record<string, unknown>
-    expect(params).toMatchObject({
-      repo: 'id:repo-9',
-      name: 'main',
-      baseBranch: 'origin/main',
-      branchNameOverride: 'main',
-      setupDecision: 'run'
-    })
-    expect(params.createdWithAgent).toBeUndefined()
   })
 
-  it('links a Linear issue to the target repo without a resolve call', async () => {
+  it('resolves a PR base as a fallback when the selection carries none', async () => {
     const calls: Call[] = []
-    const client = fakeClient(() => ({ worktree: { id: 'wt-3' } }), calls)
-
-    await createWorkspaceFromSource({
-      client,
-      source: buildLinearTaskSource({
-        identifier: 'ENG-42',
-        title: 'Onboarding',
-        url: 'https://linear.app/acme/issue/ENG-42'
-      }) as never,
-      targetRepoId: 'repo-5',
-      setupDecision: 'inherit',
-      agent: { choice: 'blank', startupCommand: undefined },
-      workspaceName: undefined,
-      note: undefined
-    })
-
-    expect(calls).toHaveLength(1)
-    const params = calls[0]?.params as Record<string, unknown>
-    expect(params.repo).toBe('id:repo-5')
-    expect(params.linkedLinearIssue).toBe('ENG-42')
+    const client = fakeClient(
+      (method) =>
+        method === 'worktree.resolvePrBase'
+          ? { baseBranch: 'develop' }
+          : { worktree: { id: 'wt-3' } },
+      calls
+    )
+    const selection: MobileComposerCreateSelection = {
+      kind: 'work-item',
+      item: { provider: 'github', type: 'pr', number: 4, title: 'X', url: 'u', repoId: 'repo-1' }
+    }
+    await createWorkspaceFromComposerSource({ client, selection, ...baseArgs })
+    expect(calls.map((c) => c.method)).toEqual(['worktree.resolvePrBase', 'worktree.create'])
+    expect(calls[1]!.params).toMatchObject({ baseBranch: 'develop', linkedPR: 4 })
   })
 
-  it('bumps the branch name (not just display) when a new branch collides', async () => {
+  it('creates a Linear workspace with workspace + org routing', async () => {
     const calls: Call[] = []
-    let attempt = 0
-    const client = fakeClient((method) => {
-      if (method === 'worktree.create') {
-        attempt += 1
-        if (attempt === 1) {
-          return new Error('Branch feature already exists locally')
-        }
+    const client = fakeClient(() => ({ worktree: { id: 'wt-4' } }), calls)
+    const selection: MobileComposerCreateSelection = {
+      kind: 'work-item',
+      item: {
+        provider: 'linear',
+        type: 'issue',
+        number: 0,
+        title: 'Ship it',
+        url: 'https://linear.app/acme/issue/ENG-9',
+        linearIdentifier: 'ENG-9',
+        linearWorkspaceId: 'ws-1',
+        linearOrganizationUrlKey: 'acme'
       }
-      return { worktree: { id: 'wt-nb' } }
-    }, calls)
-
-    const result = await createWorkspaceFromSource({
-      client,
-      source: buildNewBranchSource('main', 'feature') as never,
-      targetRepoId: 'repo-1',
-      setupDecision: 'inherit',
-      agent: { choice: 'blank', startupCommand: undefined },
-      workspaceName: undefined,
-      note: undefined
+    }
+    await createWorkspaceFromComposerSource({ client, selection, ...baseArgs })
+    expect(calls[0]!.params).toMatchObject({
+      repo: 'id:repo-1',
+      linkedLinearIssue: 'ENG-9',
+      linkedLinearIssueWorkspaceId: 'ws-1',
+      linkedLinearIssueOrganizationUrlKey: 'acme'
     })
-
-    expect(result).toEqual({ worktreeId: 'wt-nb', name: 'feature-2' })
-    const creates = calls.filter((call) => call.method === 'worktree.create')
-    expect(creates).toHaveLength(2)
-    const first = creates[0]?.params as Record<string, unknown>
-    const second = creates[1]?.params as Record<string, unknown>
-    expect(first.branchNameOverride).toBe('feature')
-    expect(second.branchNameOverride).toBe('feature-2')
-    expect(second.name).toBe('feature-2')
-    expect(second.baseBranch).toBe('main')
   })
 
-  it('fails fast (no retry) when reusing an existing branch that collides', async () => {
+  it('reuses an existing branch with a single attempt (no suffix retry)', async () => {
     const calls: Call[] = []
-    const client = fakeClient((method) => {
-      if (method === 'worktree.create') {
-        return new Error('Branch "main" already exists locally.')
-      }
-      return { worktree: { id: 'wt-4' } }
-    }, calls)
-
-    const result = await createWorkspaceFromSource({
-      client,
-      source: buildBranchSource('origin/main', 'main') as never,
-      targetRepoId: 'repo-1',
-      setupDecision: 'inherit',
-      agent: { choice: 'blank', startupCommand: undefined },
-      workspaceName: undefined,
-      note: undefined
+    const client = fakeClient(() => new Error('Branch "feature" already exists.'), calls)
+    const selection: MobileComposerCreateSelection = {
+      kind: 'branch',
+      baseBranch: 'feature',
+      refName: 'feature',
+      localBranchName: 'feature',
+      reuse: true,
+      branchNameOverride: 'feature'
+    }
+    const result = await createWorkspaceFromComposerSource({ client, selection, ...baseArgs })
+    expect('error' in result).toBe(true)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.params).toMatchObject({
+      baseBranch: 'feature',
+      branchNameOverride: 'feature'
     })
+  })
 
-    // branchNameOverride is fixed for reuse, so suffixing can't help — one attempt only.
-    expect(result).toEqual({ error: 'Branch "main" already exists locally.' })
-    expect(calls.filter((call) => call.method === 'worktree.create')).toHaveLength(1)
+  it('creates a brand-new branch by name, keeping a slashy name as the branch', async () => {
+    const calls: Call[] = []
+    const client = fakeClient(() => ({ worktree: { id: 'wt-nb' } }), calls)
+    const selection: MobileComposerCreateSelection = {
+      kind: 'new-branch',
+      branchName: 'feature/login'
+    }
+    const result = await createWorkspaceFromComposerSource({ client, selection, ...baseArgs })
+    expect(result).toEqual({ worktreeId: 'wt-nb', name: 'feature/login' })
+    expect(calls[0]!.params).toMatchObject({
+      repo: 'id:repo-1',
+      name: 'feature/login',
+      branchNameOverride: 'feature/login'
+    })
+  })
+
+  it('suppresses displayName when the name is user-edited (not auto-managed)', async () => {
+    const calls: Call[] = []
+    const client = fakeClient(() => ({ worktree: { id: 'wt-dn' } }), calls)
+    const selection: MobileComposerCreateSelection = {
+      kind: 'work-item',
+      item: {
+        provider: 'github',
+        type: 'issue',
+        number: 7,
+        title: 'Bug',
+        url: 'u',
+        repoId: 'repo-1'
+      }
+    }
+    await createWorkspaceFromComposerSource({
+      client,
+      selection,
+      ...baseArgs,
+      workspaceName: 'my-name',
+      nameIsAutoManaged: false
+    })
+    expect(calls[0]!.params.displayName).toBeUndefined()
+    expect(calls[0]!.params).toMatchObject({ name: 'my-name', linkedIssue: 7 })
+  })
+
+  it('creates a new branch off a ref, bumping the branch on collision', async () => {
+    const calls: Call[] = []
+    const client = fakeClient(
+      (_m, n) => (n === 1 ? new Error('already exists locally') : { worktree: { id: 'wt-5' } }),
+      calls
+    )
+    const selection: MobileComposerCreateSelection = {
+      kind: 'branch',
+      baseBranch: 'main',
+      refName: 'main',
+      localBranchName: 'topic',
+      reuse: false,
+      branchNameOverride: 'topic'
+    }
+    const result = await createWorkspaceFromComposerSource({ client, selection, ...baseArgs })
+    expect(result).toEqual({ worktreeId: 'wt-5', name: 'topic-2' })
+    expect(calls).toHaveLength(2)
+    expect(calls[1]!.params).toMatchObject({
+      baseBranch: 'main',
+      branchNameOverride: 'topic-2',
+      name: 'topic-2'
+    })
   })
 })

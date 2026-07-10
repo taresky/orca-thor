@@ -17,7 +17,6 @@ import { colors, spacing, radii, typography } from '../theme/mobile-theme'
 import { BottomDrawer } from './BottomDrawer'
 import { PickerListDrawer } from './PickerListDrawer'
 import { MobileAgentIcon } from './MobileAgentIcon'
-import { MobileWorkspaceNameInput } from './MobileWorkspaceNameInput'
 import { getSuggestedCreatureName } from './worktree-name-suggestion'
 import { deriveWorkspaceSshGate, workspaceSshStatusLabel } from '../tasks/workspace-ssh-gate'
 import {
@@ -49,13 +48,7 @@ import {
   resolveMobileNewWorkspaceDialogRepoId
 } from '../worktree/new-workspace-dialog-repo-selection'
 import { createBlankWorkspace } from '../tasks/blank-workspace-create'
-import { createWorkspaceFromSource } from '../tasks/source-workspace-create'
-import {
-  describeWorkspaceSource,
-  isRepoBoundSource,
-  resolveSourceRepoId,
-  type WorkspaceSource
-} from '../tasks/workspace-source-selection'
+import { createWorkspaceFromComposerSource } from '../tasks/source-workspace-create'
 import { MOBILE_TASKS_CAPABILITY } from '../tasks/mobile-tasks-capability'
 import { normalizeWorkspaceAgent } from '../tasks/workspace-agent-selection'
 import {
@@ -63,7 +56,11 @@ import {
   normalizeVisibleTaskProviders,
   type TaskProvider
 } from '../tasks/mobile-task-providers'
-import { WorkspaceSourcePickerDrawer } from './WorkspaceSourcePickerDrawer'
+import { useMobileComposerSource } from '../tasks/use-mobile-composer-source'
+import type { SmartModeAvailabilityInput } from '../tasks/mobile-smart-source-modes'
+import { deriveRepoSlug, type PasteRepoCandidate } from '../tasks/smart-source-paste-intent'
+import { SmartWorkspaceSourceField } from './SmartWorkspaceSourceField'
+import { SmartWorkspaceAdvancedFields } from './SmartWorkspaceAdvancedFields'
 import { SetupHookTrustDrawer, type SetupTrustPrompt } from './SetupHookTrustDrawer'
 
 type Repo = {
@@ -72,6 +69,9 @@ type Repo = {
   path: string
   badgeColor?: string
   connectionId?: string | null
+  kind?: 'git' | 'folder'
+  upstream?: { owner: string; repo: string } | null
+  gitRemoteIdentity?: { remoteUrl?: string; canonicalKey?: string } | null
 }
 
 type SetupDecision = 'inherit' | 'run' | 'skip'
@@ -183,7 +183,6 @@ function NewWorktreeModalContent({
   const [repos, setRepos] = useState<Repo[]>(initialRepos ?? [])
   const [selectedRepo, setSelectedRepo] = useState<Repo | null>(null)
   const [showRepoPicker, setShowRepoPicker] = useState(false)
-  const [nameAutoFocusEnabled, setNameAutoFocusEnabled] = useState(true)
   const [selectedAgentState, setSelectedAgent] = useState<AgentOption>(AGENT_OPTIONS[0]!)
   const [runtimeSettings, setRuntimeSettings] = useState<RuntimeSettings | null>(null)
   const [detectedAgentIdsState, setDetectedAgentIdsState] = useState<DetectedAgentIdsState | null>(
@@ -193,10 +192,7 @@ function NewWorktreeModalContent({
   const [showAgentPicker, setShowAgentPicker] = useState(false)
   const [sshState, setSshState] = useState<SshConnectionState | null>(null)
   const [sshConnectingTargetId, setSshConnectingTargetId] = useState<string | null>(null)
-  const [name, setName] = useState('')
   const [note, setNote] = useState('')
-  const [workspaceSource, setWorkspaceSource] = useState<WorkspaceSource>({ kind: 'blank' })
-  const [showSourcePicker, setShowSourcePicker] = useState(false)
   const [availableProviders, setAvailableProviders] = useState<TaskProvider[]>([])
   const [tasksSupported, setTasksSupported] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -213,11 +209,15 @@ function NewWorktreeModalContent({
   const [loading, setLoading] = useState(initialRepos == null)
   const lastVisitedRepo = useLastVisitedWorktreeRepoId(hostId, visible)
 
-  // Why: matches the desktop UI — the input shows a generic "Workspace name"
-  // placeholder, not the suggested creature. The creature name is only used
-  // as a server-bound fallback when the user submits with a blank field, so
-  // it's recomputed lazily inside handleCreate() to stay fresh against
-  // existingWorktreePaths at submission time.
+  // The Smart source picker owns the workspace name AND the linked-source
+  // selection: typing names the workspace and drives source search, and picking
+  // a source resolves the base/branch/push metadata (matching desktop). The
+  // creature-name fallback is only computed lazily at submit for a blank name.
+  const composer = useMobileComposerSource({
+    client,
+    selectedRepoId: selectedRepo?.id ?? null,
+    onError: setError
+  })
 
   const selectedRepoConnectionId = selectedRepo?.connectionId ?? null
   const sshGate = deriveWorkspaceSshGate({
@@ -253,6 +253,25 @@ function NewWorktreeModalContent({
     setAgentOverridden(selectedAgentResolution.agentOverridden)
   }
   const selectedAgent = selectedAgentResolution.selectedAgent
+
+  const selectedRepoIsGit = selectedRepo ? selectedRepo.kind !== 'folder' : true
+  const sourceAvailability: SmartModeAvailabilityInput = {
+    textOnly: selectedRepo != null && !selectedRepoIsGit,
+    tasksSupported,
+    hasRepo: selectedRepo != null,
+    githubAvailable: availableProviders.includes('github'),
+    gitlabAvailable: availableProviders.includes('gitlab'),
+    linearAvailable: availableProviders.includes('linear')
+  }
+  const pasteRepos = useMemo<PasteRepoCandidate[]>(
+    () =>
+      repos.map((repo) => ({
+        id: repo.id,
+        displayName: repo.displayName,
+        slug: deriveRepoSlug(repo)
+      })),
+    [repos]
+  )
 
   useEffect(() => {
     if (!visible || !lastVisitedRepo.loaded || selectedRepo || repos.length === 0) {
@@ -608,7 +627,7 @@ function NewWorktreeModalContent({
       // server invent one. The pre-flight basename dedupe is only a hint;
       // the authoritative collision is checked server-side against git
       // branches/remotes/PRs, so we also retry-with-suffix on conflict.
-      const trimmedName = name.trim()
+      const trimmedName = composer.name.trim()
       const baseName = trimmedName || getSuggestedCreatureName(existingWorktreePaths ?? [])
 
       let setupDecision: SetupDecision = 'inherit'
@@ -645,29 +664,30 @@ function NewWorktreeModalContent({
 
       const createdWithAgentId = selectedAgent.id !== '__blank__' ? selectedAgent.id : undefined
       const trimmedNote = note.trim() || undefined
-      const result =
-        workspaceSource.kind === 'blank'
-          ? await createBlankWorkspace({
-              client,
-              repoId: selectedRepo.id,
-              baseName,
-              startupCommand: command,
-              createdWithAgentId,
-              comment: trimmedNote,
-              setupDecision
-            })
-          : await createWorkspaceFromSource({
-              client,
-              source: workspaceSource,
-              targetRepoId: resolveSourceRepoId(workspaceSource) ?? selectedRepo.id,
-              setupDecision,
-              agent: {
-                choice: normalizeWorkspaceAgent(selectedAgent.id) ?? 'blank',
-                startupCommand: command
-              },
-              workspaceName: name.trim() || undefined,
-              note: trimmedNote
-            })
+      const createSelection = composer.createSelection
+      const result = createSelection
+        ? await createWorkspaceFromComposerSource({
+            client,
+            selection: createSelection,
+            targetRepoId: selectedRepo.id,
+            setupDecision,
+            agent: {
+              choice: normalizeWorkspaceAgent(selectedAgent.id) ?? 'blank',
+              startupCommand: command
+            },
+            workspaceName: trimmedName || undefined,
+            note: trimmedNote,
+            nameIsAutoManaged: composer.isNameAutoManaged
+          })
+        : await createBlankWorkspace({
+            client,
+            repoId: selectedRepo.id,
+            baseName,
+            startupCommand: command,
+            createdWithAgentId,
+            comment: trimmedNote,
+            setupDecision
+          })
       if ('error' in result) {
         setError(result.error)
         return
@@ -707,22 +727,19 @@ function NewWorktreeModalContent({
   )
 
   function prepareSelectionPickerOpen(): void {
-    // Why: picker taps can beat the delayed name-field focus; suppressing it
-    // prevents the keyboard from reopening under the picker drawer.
-    setNameAutoFocusEnabled(false)
+    // Why: picker taps can beat an open soft keyboard; dismissing it prevents the
+    // keyboard from reopening under the picker drawer.
     Keyboard.dismiss()
   }
 
-  function handleSourceSelected(source: WorkspaceSource): void {
-    // A GitHub/GitLab work item dictates its own repo; pin the repo picker to it.
-    const pinnedRepoId = resolveSourceRepoId(source)
-    if (pinnedRepoId) {
-      const pinnedRepo = repos.find((repo) => repo.id === pinnedRepoId)
-      if (pinnedRepo) {
-        setSelectedRepo(pinnedRepo)
-      }
+  function handleRepoSelected(repo: Repo): void {
+    const repoChanged = repo.id !== selectedRepo?.id
+    setSelectedRepo(repo)
+    // Branch and GitHub/GitLab sources are tied to the repo they were searched
+    // from; switching repos invalidates them, so clear the selection.
+    if (repoChanged) {
+      composer.handleClearSmartNameSelection()
     }
-    setWorkspaceSource(source)
   }
 
   async function approveSetupTrust(alwaysTrust: boolean): Promise<void> {
@@ -787,21 +804,24 @@ function NewWorktreeModalContent({
               </Pressable>
             </View>
 
-            <View style={styles.field}>
-              <Text style={styles.label}>Start from</Text>
-              <Pressable
-                style={styles.fieldButton}
-                onPress={() => {
-                  prepareSelectionPickerOpen()
-                  setShowSourcePicker(true)
-                }}
-              >
-                <Text style={styles.fieldButtonText} numberOfLines={1}>
-                  {describeWorkspaceSource(workspaceSource).label}
-                </Text>
-                <ChevronDown size={14} color={colors.textMuted} />
-              </Pressable>
-            </View>
+            <SmartWorkspaceSourceField
+              visible={visible}
+              composer={composer}
+              client={client}
+              availability={sourceAvailability}
+              repoId={selectedRepo?.id ?? null}
+              repos={pasteRepos}
+              sshReady={!sshGate.requiresConnection}
+              label={selectedRepoIsGit ? 'Name or Create From' : 'Workspace name'}
+              disabled={sshGate.requiresConnection}
+              onRepoChange={(repoId) => {
+                const nextRepo = repos.find((repo) => repo.id === repoId)
+                if (nextRepo) {
+                  setSelectedRepo(nextRepo)
+                }
+              }}
+              onBeforeOpen={() => setError('')}
+            />
 
             {selectedRepoConnectionId ? (
               <View style={styles.field}>
@@ -847,28 +867,6 @@ function NewWorktreeModalContent({
             ) : null}
 
             <View style={styles.field}>
-              <Text style={styles.label}>
-                Workspace Name <Text style={styles.labelHint}>[Optional]</Text>
-              </Text>
-              <MobileWorkspaceNameInput
-                style={styles.input}
-                value={name}
-                onChangeText={(t) => {
-                  setName(t)
-                  setError('')
-                }}
-                placeholderTextColor={colors.textMuted}
-                shouldAutoFocus={nameAutoFocusEnabled && visible && !loading && repos.length > 0}
-                returnKeyType="done"
-                onSubmitEditing={() => {
-                  if (canCreate) {
-                    void handleCreate()
-                  }
-                }}
-              />
-            </View>
-
-            <View style={styles.field}>
               <Text style={styles.label}>Agent</Text>
               <Pressable
                 style={[styles.fieldButton, sshGate.requiresConnection && styles.disabled]}
@@ -897,6 +895,11 @@ function NewWorktreeModalContent({
 
             {showAdvanced && (
               <>
+                <SmartWorkspaceAdvancedFields
+                  composer={composer}
+                  selectedRepoIsGit={selectedRepoIsGit}
+                />
+
                 <View style={styles.field}>
                   <Text style={styles.label}>Note</Text>
                   <TextInput
@@ -993,16 +996,7 @@ function NewWorktreeModalContent({
         title="Repository"
         items={repoPickerItems}
         selectedId={selectedRepo?.id ?? ''}
-        onSelect={(item) => {
-          const repoChanged = item.repo.id !== selectedRepo?.id
-          setSelectedRepo(item.repo)
-          // Branch and GitHub/GitLab sources are tied to the repo they were
-          // searched from; switching repos invalidates them, so reset to blank.
-          // Linear issues are repo-agnostic and survive.
-          if (repoChanged && isRepoBoundSource(workspaceSource)) {
-            setWorkspaceSource({ kind: 'blank' })
-          }
-        }}
+        onSelect={(item) => handleRepoSelected(item.repo)}
         onClose={() => setShowRepoPicker(false)}
         renderIcon={(item) => {
           return <View style={[styles.repoDot, { backgroundColor: repoBadgeColor(item.repo) }]} />
@@ -1020,17 +1014,6 @@ function NewWorktreeModalContent({
         }}
         onClose={() => setShowAgentPicker(false)}
         renderIcon={(agent) => <MobileAgentIcon agentId={agent.id} size={18} />}
-      />
-
-      <WorkspaceSourcePickerDrawer
-        visible={visible && showSourcePicker}
-        client={client}
-        tasksSupported={tasksSupported}
-        availableProviders={availableProviders}
-        repoId={selectedRepo?.id ?? null}
-        sshReady={!sshGate.requiresConnection}
-        onSelect={handleSourceSelected}
-        onClose={() => setShowSourcePicker(false)}
       />
 
       <SetupHookTrustDrawer
