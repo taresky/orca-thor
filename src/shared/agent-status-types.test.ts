@@ -118,6 +118,38 @@ Fix dispatch fallback preview for normalized status prompts`
     expect(result!.prompt).not.toContain('heartbeat')
   })
 
+  it('ignores task-marker text inside base-drift commit subjects', () => {
+    const result = normalizeAgentStatusPayload({
+      state: 'working',
+      // Why: use CRLF to cover Windows hook payloads while proving repository
+      // commit text cannot impersonate Orca's standalone task separator.
+      prompt: [
+        'You are working inside Orca, a multi-agent IDE. You are a dispatched worker.',
+        'Your task ID is: task_drift_marker',
+        '',
+        '--- BASE DRIFT ---',
+        '  - docs: explain === TASK === marker parsing',
+        '---',
+        '',
+        '=== TASK ===',
+        'Fix the actual dispatch fallback preview'
+      ].join('\r\n')
+    })
+
+    expect(result!.prompt).toContain('=== TASK === Fix the actual dispatch fallback preview')
+    expect(result!.prompt).not.toContain('marker parsing')
+  })
+
+  it('keeps dispatch detection bounded for oversized whitespace prompts', () => {
+    const trimStartSpy = vi.spyOn(String.prototype, 'trimStart')
+    const prompt = ' '.repeat(1_000_000)
+
+    expect(normalizeAgentStatusPayload({ state: 'working', prompt })!.prompt).toBe('')
+    expect(
+      trimStartSpy.mock.contexts.some((context) => String(context).length === prompt.length)
+    ).toBe(false)
+  })
+
   it('defaults missing prompt to empty string', () => {
     const result = parseAgentStatusPayload('{"state":"done"}')
     expect(result!.prompt).toBe('')

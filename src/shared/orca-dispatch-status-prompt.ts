@@ -14,7 +14,17 @@ const ORCA_DISPATCH_STATUS_TASK_ID_MARKER = 'Your task ID is:'
 const ORCA_DISPATCH_STATUS_SOURCE_SCAN_LIMIT = 24_576
 
 export function isOrcaDispatchStatusPrompt(value: string): boolean {
-  return value.trimStart().startsWith(ORCA_DISPATCH_STATUS_PREAMBLE_PREFIX)
+  // Why: status payloads cross a trust boundary. Keep dispatch detection
+  // bounded too, or leading whitespace can bypass the normalizer's scan cap.
+  const scanEnd = Math.min(value.length, ORCA_DISPATCH_STATUS_SOURCE_SCAN_LIMIT)
+  let start = 0
+  while (start < scanEnd && isEcmaTrimWhitespace(value.charCodeAt(start))) {
+    start++
+  }
+  return (
+    start + ORCA_DISPATCH_STATUS_PREAMBLE_PREFIX.length <= scanEnd &&
+    value.startsWith(ORCA_DISPATCH_STATUS_PREAMBLE_PREFIX, start)
+  )
 }
 
 /**
@@ -50,7 +60,7 @@ export function compactDispatchPromptForStatus(
   }
 
   let taskBody = ''
-  const taskMarkerIndex = scan.indexOf(ORCA_DISPATCH_STATUS_TASK_MARKER)
+  const taskMarkerIndex = findTaskMarkerIndex(scan)
   if (taskMarkerIndex !== -1) {
     const body = scan.slice(taskMarkerIndex + ORCA_DISPATCH_STATUS_TASK_MARKER.length)
     for (const line of body.split(/\r?\n/)) {
@@ -72,6 +82,35 @@ export function compactDispatchPromptForStatus(
     compact += ` ${ORCA_DISPATCH_STATUS_TASK_MARKER} ${taskBody}`
   }
   return normalizeSingleLine(compact, maxLength)
+}
+
+function findTaskMarkerIndex(value: string): number {
+  // Why: base-drift commit subjects are repository-controlled and may mention
+  // the marker. Raw preambles must use the standalone line emitted by Orca.
+  let searchFrom = 0
+  while (searchFrom < value.length) {
+    const markerIndex = value.indexOf(ORCA_DISPATCH_STATUS_TASK_MARKER, searchFrom)
+    if (markerIndex === -1) {
+      break
+    }
+    const markerEnd = markerIndex + ORCA_DISPATCH_STATUS_TASK_MARKER.length
+    const startsLine = markerIndex === 0 || isLineBreak(value.charCodeAt(markerIndex - 1))
+    const endsLine = markerEnd === value.length || isLineBreak(value.charCodeAt(markerEnd))
+    if (startsLine && endsLine) {
+      return markerIndex
+    }
+    searchFrom = markerEnd
+  }
+
+  // Already-normalized dispatch previews are single-line and intentionally
+  // carry the marker inline; normalization must stay idempotent across hops.
+  return value.includes('\n') || value.includes('\r')
+    ? -1
+    : value.indexOf(ORCA_DISPATCH_STATUS_TASK_MARKER)
+}
+
+function isLineBreak(code: number): boolean {
+  return code === 10 || code === 13
 }
 
 function isEcmaTrimWhitespace(code: number): boolean {
