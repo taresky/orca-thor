@@ -95,7 +95,9 @@ describe('registerFilesystemWatcherHandlers', () => {
       batch: { events: [], overflowed: true, timer: null, firstEventAt: 0 }
     }
     let resolveWatcher!: (value: typeof root) => void
+    let normalizedRootKey!: string
     vi.mocked(createWslWatcher).mockImplementation((rootKey, _worktreePath, deps) => {
+      normalizedRootKey = rootKey
       deps.scheduleBatchFlush(rootKey, root as never)
       return new Promise((resolve) => {
         resolveWatcher = resolve
@@ -113,8 +115,8 @@ describe('registerFilesystemWatcherHandlers', () => {
     await pending
     await vi.advanceTimersByTimeAsync(150)
     expect(sender.send).toHaveBeenCalledWith('fs:changed', {
-      worktreePath,
-      events: [{ kind: 'overflow', absolutePath: worktreePath }]
+      worktreePath: normalizedRootKey,
+      events: [{ kind: 'overflow', absolutePath: normalizedRootKey }]
     })
   })
 

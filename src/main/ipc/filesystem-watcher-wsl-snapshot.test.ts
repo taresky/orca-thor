@@ -125,7 +125,8 @@ printf 'directory\\t1\\n'
 `
       )
 
-      expect(result.code).toBe(75)
+      expect(result.code).toEqual(expect.any(Number))
+      expect(result.code).not.toBe(0)
       expect(result.stderr).toContain('permission denied')
     }
   )

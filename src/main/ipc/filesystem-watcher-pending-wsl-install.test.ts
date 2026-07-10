@@ -9,6 +9,7 @@ vi.mock('electron', () => ({ ipcMain: { handle: handleMock } }))
 vi.mock('fs/promises', () => ({ stat: vi.fn() }))
 vi.mock('@parcel/watcher', () => ({ subscribe: vi.fn() }))
 vi.mock('./filesystem-watcher-wsl', () => ({ createWslWatcher: createWslWatcherMock }))
+vi.mock('../wsl', () => ({ isWslPath: () => true }))
 vi.mock('../providers/ssh-filesystem-dispatch', () => ({
   getSshFilesystemProvider: vi.fn()
 }))
