@@ -20,6 +20,10 @@ export type ProviderAccountRuntimeView = {
   wslDistro?: string | null
 }
 
+// Why: sentinel for the "WSL default" distro slot; shared so the AccountsPane
+// distro Select and this active-account resolution can't drift out of sync.
+export const WSL_DEFAULT_DISTRO_KEY = '__default__'
+
 export function getProviderAccountRuntime(account: ProviderAccount): {
   runtime: 'host' | 'wsl'
   wslDistro: string | null
@@ -45,8 +49,8 @@ export function getProviderAccountActiveIdForView(
     return selection.activeAccountIdsByRuntime?.wsl?.[runtime.wslDistro] ?? null
   }
   const wsl = selection.activeAccountIdsByRuntime?.wsl ?? {}
-  if (wsl.__default__) {
-    return wsl.__default__
+  if (wsl[WSL_DEFAULT_DISTRO_KEY]) {
+    return wsl[WSL_DEFAULT_DISTRO_KEY]
   }
   const selectedIds = Array.from(new Set(Object.values(wsl).filter(Boolean)))
   return selectedIds.length === 1 ? selectedIds[0] : null

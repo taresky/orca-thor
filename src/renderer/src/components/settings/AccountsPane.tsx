@@ -67,6 +67,7 @@ import {
   getProviderAccountRuntime,
   providerAccountIsActiveInView,
   providerAccountMatchesView,
+  WSL_DEFAULT_DISTRO_KEY,
   type ProviderAccountRuntimeView
 } from './provider-account-visibility'
 import { translate } from '@/i18n/i18n'
@@ -367,8 +368,16 @@ export function AccountsPane({
     providerAccountMatchesView(account, accountRuntime, accountVisibilityOptions)
   )
   const activeCodexAccountId = getProviderAccountActiveIdForView(codexAccounts, accountRuntime)
-  const activeClaudeAccountId = getProviderAccountActiveIdForView(claudeAccounts, accountRuntime)
   const accountActiveOptions = { remoteOwner: isRemoteAccountScope }
+  // Why: under remote WSL flattening a WSL account can be active while the host
+  // default id is still null, so the forced-host activeAccountId would light up
+  // the System default row alongside it; defer that row to any active account row.
+  const systemCodexActive = !visibleCodexAccounts.some((account) =>
+    providerAccountIsActiveInView(account, codexAccounts, accountRuntime, accountActiveOptions)
+  )
+  const systemClaudeActive = !visibleClaudeAccounts.some((account) =>
+    providerAccountIsActiveInView(account, claudeAccounts, accountRuntime, accountActiveOptions)
+  )
   // Why: the auth warning is derived from the desktop's own rate-limit poll;
   // with a remote owner it would misattribute local auth state to the server.
   const activeCodexAuthWarning =
@@ -569,11 +578,11 @@ export function AccountsPane({
             />
             {wslSupportedPlatform && accountRuntime.runtime === 'wsl' ? (
               <Select
-                value={accountRuntime.wslDistro ?? '__default__'}
+                value={accountRuntime.wslDistro ?? WSL_DEFAULT_DISTRO_KEY}
                 onValueChange={(value) =>
                   updateSettings({
                     localAccountRuntime: 'wsl',
-                    localAccountWslDistro: value === '__default__' ? null : value
+                    localAccountWslDistro: value === WSL_DEFAULT_DISTRO_KEY ? null : value
                   })
                 }
                 disabled={wslCapabilitiesLoading || !wslAvailable}
@@ -594,7 +603,7 @@ export function AccountsPane({
                   />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__default__">
+                  <SelectItem value={WSL_DEFAULT_DISTRO_KEY}>
                     {translate('auto.components.settings.AccountsPane.2358ac71d2', 'WSL default')}
                   </SelectItem>
                   {wslDistros.map((distro) => (
@@ -812,7 +821,7 @@ export function AccountsPane({
               }
               disabled={claudeAction !== 'idle' || accountRuntimeUnavailable}
               className={`flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2.5 text-left transition-colors ${
-                activeClaudeAccountId === null
+                systemClaudeActive
                   ? 'border-foreground/20 bg-accent/15'
                   : 'border-border/70 hover:border-border hover:bg-accent/8'
               } disabled:cursor-default disabled:opacity-100`}
@@ -825,7 +834,7 @@ export function AccountsPane({
                       'System default'
                     )}
                   </span>
-                  {activeClaudeAccountId === null ? (
+                  {systemClaudeActive ? (
                     <Badge
                       variant="outline"
                       className="h-4 shrink-0 rounded px-1.5 text-[10px] font-medium leading-none text-foreground/80"
@@ -1098,7 +1107,7 @@ export function AccountsPane({
               className={`flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2.5 text-left transition-colors ${
                 systemCodexNeedsReauthentication
                   ? 'border-destructive/50 bg-destructive/5'
-                  : activeCodexAccountId === null
+                  : systemCodexActive
                     ? 'border-foreground/20 bg-accent/15'
                     : 'border-border/70 hover:border-border hover:bg-accent/8'
               } disabled:cursor-default disabled:opacity-100`}
@@ -1111,7 +1120,7 @@ export function AccountsPane({
                       'System default'
                     )}
                   </span>
-                  {activeCodexAccountId === null ? (
+                  {systemCodexActive ? (
                     <Badge
                       variant="outline"
                       className="h-4 shrink-0 rounded px-1.5 text-[10px] font-medium leading-none text-foreground/80"
