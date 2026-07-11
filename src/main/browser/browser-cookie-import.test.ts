@@ -443,6 +443,14 @@ describe('importCookiesFromBrowser Chromium', () => {
         copyFileSyncMock.mock.calls.some(([source]) => source === `${sourceCookiesPath}-wal`)
       ).toBe(true)
       expect(
+        copyFileSyncMock.mock.calls.some(
+          ([source, destination]) =>
+            source === sourceCookiesPath &&
+            typeof destination === 'string' &&
+            destination.includes(join('userData', 'cookie-import-snapshots'))
+        )
+      ).toBe(true)
+      expect(
         ['', '-wal', '-shm'].map((suffix) => readFileSync(sourceCookiesPath + suffix))
       ).toEqual(sourceFilesBefore)
       expect(cookiesRemoveMock).not.toHaveBeenCalled()
