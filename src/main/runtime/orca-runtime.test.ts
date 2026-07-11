@@ -10565,6 +10565,9 @@ describe('OrcaRuntimeService', () => {
     runtime.onPtyData(
       'pty-bg',
       [
+        // Trust dialog body can mention "Cursor Agent" before the ready banner;
+        // lastIndexOf must pick the later banner, not this earlier hit.
+        'Cursor Agent\n',
         '⚠ Workspace Trust Required\n',
         'Do you trust the contents of this directory?\n',
         '  ▶ [a] Trust this workspace\n',
@@ -10596,6 +10599,8 @@ describe('OrcaRuntimeService', () => {
     runtime.onPtyData(
       'pty-bg',
       [
+        // Same earlier "Cursor Agent" hit as the idle case — banner must win.
+        'Cursor Agent\n',
         '⚠ Workspace Trust Required\n',
         'Do you trust the contents of this directory?\n',
         '  ▶ [a] Trust this workspace\n',
