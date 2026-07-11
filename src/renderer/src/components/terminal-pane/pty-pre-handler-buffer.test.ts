@@ -11,6 +11,7 @@ import {
 
 const RESCAN_PTY_ID = 'pty-pre-handler-rescan'
 const TRIM_PTY_ID = 'pty-pre-handler-trim'
+const UTF8_TRIM_PTY_ID = 'pty-pre-handler-utf8-trim'
 const REUSED_PTY_ID = 'pty-pre-handler-reused'
 const EXIT_PTY_IDS = Array.from(
   { length: PRE_HANDLER_PTY_MAX_PTYS + 1 },
@@ -29,6 +30,7 @@ describe('pre-handler PTY buffer', () => {
   afterEach(() => {
     clearPreHandlerPtyState(RESCAN_PTY_ID)
     clearPreHandlerPtyState(TRIM_PTY_ID)
+    clearPreHandlerPtyState(UTF8_TRIM_PTY_ID)
     clearPreHandlerPtyState(REUSED_PTY_ID)
     for (const ptyId of EXIT_PTY_IDS) {
       clearPreHandlerPtyState(ptyId)
@@ -97,6 +99,22 @@ describe('pre-handler PTY buffer', () => {
     drainPreHandlerPtyData(TRIM_PTY_ID, (data) => drained.push(data))
     expect(drained).toHaveLength(512)
     expect(drained.join('')).toHaveLength(512 * 1_024)
+  })
+
+  it('keeps clamped UTF-8 bytes separate from UTF-16 stream sequence units', () => {
+    const data = '😀'.repeat(200 * 1_024)
+    bufferPreHandlerPtyData(UTF8_TRIM_PTY_ID, data, {
+      seq: data.length,
+      rawLength: data.length
+    })
+
+    const handler = vi.fn()
+    drainPreHandlerPtyData(UTF8_TRIM_PTY_ID, handler)
+
+    expect(handler).toHaveBeenCalledOnce()
+    const [tail, meta] = handler.mock.calls[0]
+    expect(tail).toHaveLength(256 * 1_024)
+    expect(meta).toEqual({ seq: data.length, rawLength: tail.length })
   })
 
   it('bounds exits that arrive before any handler is registered', () => {

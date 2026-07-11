@@ -50,9 +50,11 @@ export function bufferPreHandlerPtyData(ptyId: string, data: string, meta?: PtyD
       warnedLostHandlerPtyIds.delete(oldestPtyId)
     }
   }
+  // Why: stream sequence cursors count UTF-16 code units; `bytes` is only the
+  // memory-cap unit and would move non-ASCII chunks to the wrong sequence.
   const bufferedMeta =
     meta && chunk.data.length !== data.length && typeof meta.rawLength === 'number'
-      ? { ...meta, rawLength: chunk.bytes }
+      ? { ...meta, rawLength: chunk.data.length }
       : meta
   let state = preHandlerPtyData.get(ptyId)
   if (!state) {
