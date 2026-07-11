@@ -100,7 +100,7 @@ export function buildResolvedLaunch(params: BuildResolvedLaunchParams): Resolved
     }
   })
 
-  const fingerprint = computeAdmissionFingerprint({
+  const fingerprintInputs = {
     basis: params.basis,
     requestedAgent: params.requestedAgent,
     baseAgent: params.baseAgent,
@@ -121,6 +121,16 @@ export function buildResolvedLaunch(params: BuildResolvedLaunchParams): Resolved
       homePath: params.targetHomePath
     },
     transportConfidential: params.transportConfidential
+  }
+  const fingerprint = computeAdmissionFingerprint(fingerprintInputs)
+  // Config-only digest for U4's two-stage worktree recheck: identical to the
+  // admission fingerprint but with the volatile path variables excluded, so it
+  // stays stable between pre-create identity pinning (worktree path not yet
+  // authoritative) and post-create final resolution. Path availability is
+  // rechecked separately at final resolution, never folded into this digest.
+  const stableInputDigest = computeAdmissionFingerprint({
+    ...fingerprintInputs,
+    variableValues: { repoPath: null, worktreePath: null }
   })
 
   return {
@@ -155,6 +165,6 @@ export function buildResolvedLaunch(params: BuildResolvedLaunchParams): Resolved
       agentKind: tuiAgentToAgentKind(params.baseAgent),
       usedCustomAgent: params.mode === 'custom'
     },
-    admissionGuard: { fingerprint, basis: params.basis }
+    admissionGuard: { fingerprint, stableInputDigest, basis: params.basis }
   }
 }

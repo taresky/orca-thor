@@ -23,9 +23,11 @@ import {
 } from '../../../shared/tui-agent-launch-defaults'
 import { resolveLocalWindowsAgentStartupShell } from '../../../shared/windows-terminal-shell'
 import { TUI_AGENT_CONFIG } from '../../../shared/tui-agent-config'
+import { resolveTuiAgentBaseAgent } from '../../../shared/custom-tui-agents'
 import { repoIsRemote } from '../../../shared/agent-launch-remote'
 import { seedCommandCodeSubmittedPromptStatus } from '@/lib/command-code-prompt-status-seed'
 import type { TuiAgent } from '../../../shared/types'
+import type { AgentLaunchSpawnRequest } from '../../../shared/agent-launch-spawn-request'
 import type { LaunchSource } from '../../../shared/telemetry-events'
 import { translate } from '@/i18n/i18n'
 import { getConnectionIdFromState } from '@/lib/connection-context'
@@ -54,6 +56,13 @@ export type LaunchAgentInNewTabArgs = {
   launchPlatform?: NodeJS.Platform
   /** Called after the prompt is actually delivered to the agent input path. */
   onPromptDelivered?: () => void
+  // Why: the U5-held session-fork caller replays a captured launch by assembling
+  // the command/launchConfig client-side (draftPromptFlag native injection is not
+  // expressible in the host launch contract). Until fork migrates to host
+  // snapshot replay (U5), it opts into the legacy assembly; every other caller
+  // routes identity + prompt through the host `agentLaunch` boundary. Delete this
+  // when fork migrates.
+  legacyResumeAssembly?: boolean
 }
 
 export type LaunchAgentInNewTabResult = {
@@ -96,7 +105,8 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
     launchSource,
     quickCommandLabel,
     launchPlatform,
-    onPromptDelivered
+    onPromptDelivered,
+    legacyResumeAssembly
   } = args
   const store = useAppStore.getState()
   const worktree = store.allWorktrees?.().find((entry: { id: string }) => entry.id === worktreeId)
@@ -134,7 +144,19 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
   }
   const trimmedPrompt = prompt?.trim() ?? ''
   const hasPrompt = trimmedPrompt.length > 0
-  const isFollowupPath = TUI_AGENT_CONFIG[agent].promptInjectionMode === 'stdin-after-start'
+  // Why: key the fold-vs-paste decision on the resolved BASE agent. Under
+  // noImplicitAny:false a custom id would index TUI_AGENT_CONFIG as `any`,
+  // reading promptInjectionMode as undefined and silently folding a
+  // stdin-after-start base into argv instead of pasting after start. A custom
+  // id inherits its base's injection mode; an unresolvable id is unlaunchable
+  // downstream, so treat it as non-followup here.
+  const baseAgent = resolveTuiAgentBaseAgent(
+    agent,
+    store.settings?.customTuiAgents,
+    store.settings?.deletedCustomTuiAgents
+  )
+  const isFollowupPath =
+    baseAgent !== null && TUI_AGENT_CONFIG[baseAgent].promptInjectionMode === 'stdin-after-start'
   // Why: argv/flag agents fold the prompt into the launch command and
   // auto-submit — keeping behavior consistent with the composer/tab-bar `+`
   // mental model, where the prompt is "the first turn the user sent".
@@ -238,14 +260,30 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
       )
     })
   })
+  // Why: the prompt rides `agentLaunch` only when it folds into the launch
+  // itself (argv/flag agents, non-paste path). Every paste path (submit-after-
+  // ready, draft, stdin-after-start followup) launches bare and the renderer
+  // delivers the prompt via post-ready bracketed paste below, so the request
+  // carries `allowEmptyPromptLaunch` instead.
+  const promptFoldsIntoLaunch = pasteDraftAfterLaunch === null && hasPrompt
+  const agentLaunch: AgentLaunchSpawnRequest = {
+    selection: { kind: 'agent', agent },
+    ...(promptFoldsIntoLaunch ? { prompt: trimmedPrompt } : { allowEmptyPromptLaunch: true })
+  }
   store.queueTabStartupCommand(tab.id, {
-    command: startupPlan.launchCommand,
-    ...(startupPlan.env ? { env: startupPlan.env } : {}),
-    launchConfig: startupPlan.launchConfig,
-    launchAgent: agent,
-    ...(startupPlan.startupCommandDelivery
-      ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
-      : {}),
+    // The host owns command/config/token assembly on the agentLaunch path; the
+    // fork caller still assembles client-side until it migrates (U5).
+    ...(legacyResumeAssembly
+      ? {
+          command: startupPlan.launchCommand,
+          ...(startupPlan.env ? { env: startupPlan.env } : {}),
+          launchConfig: startupPlan.launchConfig,
+          launchAgent: agent,
+          ...(startupPlan.startupCommandDelivery
+            ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
+            : {})
+        }
+      : { command: '', agentLaunch }),
     ...(agent === 'command-code' && hasPrompt && promptDelivery === 'auto-submit'
       ? { initialAgentStatus: { agent, prompt: trimmedPrompt } }
       : {}),

@@ -3,6 +3,8 @@ import { isTuiAgent } from '../../../../shared/tui-agent-config'
 import type { TuiAgent } from '../../../../shared/types'
 import { workspaceSourceSchema } from '../../../../shared/telemetry-events'
 import { sleepingAgentLaunchConfigSchema } from '../../../../shared/workspace-session-sleeping-agents'
+import { AgentLaunchSpawnRequestSchema } from './agent-launch-spawn-schema'
+import { isCanonicalLowercaseUuid } from '../../../agent-launch/agent-launch-operation-store'
 import {
   OptionalBoolean,
   OptionalFiniteNumber,
@@ -143,6 +145,9 @@ export const WorktreeCreate = z
       .unknown()
       .transform((value) => (isTuiAgent(value) ? value : undefined))
       .optional(),
+    // Host-resolved launch: same one request shape as pty:spawn / terminal.create.
+    // When present the host owns resolution and ignores startup*/createdWithAgent.
+    agentLaunch: AgentLaunchSpawnRequestSchema.optional(),
     automationProvenanceRequest: AutomationWorkspaceProvenanceRequest.optional()
   })
   .superRefine((params, ctx) => {
@@ -265,3 +270,37 @@ export const WorktreeResolveMrBase = z.object({
   targetBranch: OptionalString,
   isCrossRepository: OptionalBoolean
 })
+
+// clientMutationId is required in canonical lowercase UUID form BEFORE any
+// idempotency lookup/write; expectedFailureId is an anti-race guard shown in
+// client metadata, never an authorization secret.
+export const WorktreeRetryAgentLaunch = WorktreeSelector.extend({
+  expectedFailureId: z.string().min(1).max(256),
+  clientMutationId: z
+    .string()
+    .refine(isCanonicalLowercaseUuid, {
+      message: 'clientMutationId must be a canonical lowercase UUID'
+    }),
+  action: z.union([
+    z.object({ kind: z.literal('retry-same') }),
+    z.object({
+      kind: z.literal('change-agent'),
+      agent: z.custom<TuiAgent>(isTuiAgent, { message: 'Unknown agent' })
+    })
+  ])
+})
+
+export const WorktreeForgetAgentLaunch = WorktreeSelector.extend({
+  // expectedOperationId is an anti-race guard from client-visible worktree
+  // metadata, never authorization.
+  expectedOperationId: z.string().min(1).max(256),
+  clientMutationId: z
+    .string()
+    .refine(isCanonicalLowercaseUuid, {
+      message: 'clientMutationId must be a canonical lowercase UUID'
+    })
+})
+
+// The capacity-recovery summary takes no params: the principal is scoped from the
+// authenticated clientKind, never from client JSON, so there is nothing to carry.
+export const WorktreePendingAgentLaunchSummary = z.object({})

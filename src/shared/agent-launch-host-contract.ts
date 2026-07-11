@@ -105,6 +105,10 @@ export type ResolvedAgentLaunch = {
   // Host-private relevant-input guard; never persisted, returned, or logged.
   admissionGuard: {
     fingerprint: string
+    /** Config-only digest (path variables excluded) for U4's two-stage worktree
+     *  recheck: stable between pre-create identity pinning and post-create final
+     *  resolution, where the authoritative worktree path differs. */
+    stableInputDigest: string
     basis: 'explicit' | 'default' | 'snapshot'
   }
 }

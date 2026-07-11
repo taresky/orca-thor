@@ -49,7 +49,20 @@ import type { LinearIssueAttributeFilter } from '../shared/linear-issue-attribut
 import type { ProjectExecutionRuntimeResolution } from '../shared/project-execution-runtime'
 import type { StartupCommandDelivery } from '../shared/codex-startup-delivery'
 import type { SleepingAgentLaunchConfig } from '../shared/agent-session-resume'
-import type { AgentLaunchSpawnRequest } from '../shared/agent-launch-spawn-request'
+import type {
+  AgentLaunchSpawnOutcome,
+  AgentLaunchSpawnRequest
+} from '../shared/agent-launch-spawn-request'
+import type {
+  AgentLaunchNoticeCode,
+  PersistedLaunchNoticeState
+} from '../shared/agent-launch-contract'
+import type {
+  RetryAgentLaunchAction,
+  WorktreeRetryAgentLaunchResult,
+  ForgetUnknownAgentLaunchResult
+} from '../shared/agent-launch-worktree-recovery'
+import type { PendingAgentLaunchSummary } from '../shared/agent-launch-pending-summary'
 import type {
   AgentCatalogMutationRequest,
   AgentCatalogMutationResult,
@@ -905,6 +918,79 @@ export type AppApi = {
   pickFloatingWorkspaceDirectory: () => Promise<string | null>
 }
 
+/** pty:spawn arguments. `agentLaunch` opts into host-resolved agent launch:
+ *  when present the host resolves the launch itself and IGNORES any
+ *  command/launchConfig/launchAgent/env, returning an AgentLaunchSpawnOutcome. */
+export type PtySpawnOptions = {
+  cols: number
+  rows: number
+  cwd?: string
+  cwdFallback?: 'worktree'
+  env?: Record<string, string>
+  command?: string
+  launchConfig?: SleepingAgentLaunchConfig
+  launchToken?: string
+  launchAgent?: TuiAgent
+  agentLaunch?: AgentLaunchSpawnRequest
+  startupCommandDelivery?: StartupCommandDelivery
+  connectionId?: string | null
+  worktreeId?: string
+  sessionId?: string
+  // Why: lets a single tab open in a different shell than the user's default.
+  // Preserved from the deleted index.d.ts PtyApi duplicate during the
+  // single-source-of-truth collapse (see docs/preload-typecheck-hole.md §1).
+  shellOverride?: string
+  projectRuntime?: ProjectExecutionRuntimeResolution
+  terminalColorQueryReplies?: { foreground?: string; background?: string }
+  // Why: hidden-at-spawn declaration — main marks the PTY hidden before its
+  // first byte so the delivery gate + model responder own spawn-time queries
+  // (terminal-query-authority.md §races).
+  initiallyHidden?: boolean
+  // Why: closes the SIGKILL race documented in INVESTIGATION.md — main
+  // sync-flushes the (worktreeId, tabId, leafId → ptyId) binding before
+  // pty:spawn returns. Only the renderer's daemon-host path threads these.
+  tabId?: string
+  leafId?: string
+  // Why: telemetry-plan.md§Agent launch semantics — main emits `agent_started`
+  // only after the PTY/session is created successfully, so the renderer threads
+  // the launch metadata through this field.
+  telemetry?: { agent_kind: AgentKind; launch_source: LaunchSource; request_kind: RequestKind }
+}
+
+/** Normal pty:spawn result. When the call carried `agentLaunch`, a successful
+ *  host-resolved launch also sets `agentLaunch` to a {status:'launched'}
+ *  outcome carrying the receipt (never argv/env/snapshot). */
+export type PtySpawnResult = {
+  id: string
+  launchAgent?: TuiAgent
+  launchConfig?: SleepingAgentLaunchConfig
+  snapshot?: string
+  snapshotCols?: number
+  snapshotRows?: number
+  isReattach?: boolean
+  isAlternateScreen?: boolean
+  replay?: string
+  sessionExpired?: boolean
+  coldRestore?: { scrollback: string; cwd: string }
+  startupCwdFallback?: { kind: 'worktree'; cwd: string }
+  agentLaunch?: AgentLaunchSpawnOutcome
+  // Host-resolved stdin-after-start prompt for the renderer's readiness-gated
+  // paste writer to deliver. User-authored text this renderer supplied one hop
+  // ago; carried beside the receipt-only outcome, never inside it.
+  followupPrompt?: string
+  // Host-resolved draft prompt to paste UNSUBMITTED after readiness, present only
+  // for a promptDelivery:'draft' launch whose agent has no native flag/env
+  // affordance (or an oversized inline draft). Same desktop-only posture as
+  // followupPrompt; native-flag/env drafts deliver host-side and set nothing.
+  draftPrompt?: string
+}
+
+/** Pre-spawn typed failure/rejection for an `agentLaunch` call: the host created
+ *  no PTY, so no pty fields are present — only the outcome. */
+export type PtySpawnAgentLaunchFailure = {
+  agentLaunch: Extract<AgentLaunchSpawnOutcome, { status: 'failed' | 'rejected' }>
+}
+
 export type PreloadApi = {
   app: AppApi
   orcaProfiles: {
@@ -1185,6 +1271,26 @@ export type PreloadApi = {
       noParent?: boolean
     }) => Promise<WorktreeLineage | null>
     persistSortOrder: (args: { orderedIds: string[] }) => Promise<void>
+    /** Retry a settled agent-launch failure on an existing worktree. The host
+     *  owns idempotency, the failure-id guard, and recovery-card gating; the
+     *  renderer supplies a fresh canonical-lowercase-UUID clientMutationId. */
+    retryAgentLaunch: (args: {
+      worktreeId: string
+      expectedFailureId: string
+      clientMutationId: string
+      action: RetryAgentLaunchAction
+    }) => Promise<WorktreeRetryAgentLaunchResult>
+    /** Forget a launch stranded in launch_state_unknown. Never kills or spawns;
+     *  releases Orca's local bookkeeping only. */
+    forgetAgentLaunch: (args: {
+      worktreeId: string
+      expectedOperationId: string
+      clientMutationId: string
+    }) => Promise<ForgetUnknownAgentLaunchResult>
+    /** Redacted pending-launch rows for the capacity-recovery sheet, scoped by the
+     *  host to the authenticated principal. Never carries a prompt, custom id/label,
+     *  argv, path, token, or env. */
+    pendingAgentLaunchSummary: () => Promise<PendingAgentLaunchSummary>
     onChanged: (callback: (data: { repoId: string }) => void) => () => void
     onBaseStatus: (callback: (data: WorktreeBaseStatusEvent) => void) => () => void
     onRemoteBranchConflict: (
@@ -1215,57 +1321,23 @@ export type PreloadApi = {
     ) => () => void
   }
   pty: {
-    spawn: (opts: {
-      cols: number
-      rows: number
-      cwd?: string
-      cwdFallback?: 'worktree'
-      env?: Record<string, string>
-      command?: string
-      launchConfig?: SleepingAgentLaunchConfig
-      launchToken?: string
-      launchAgent?: TuiAgent
-      agentLaunch?: AgentLaunchSpawnRequest
-      startupCommandDelivery?: StartupCommandDelivery
-      connectionId?: string | null
-      worktreeId?: string
-      sessionId?: string
-      // Why: lets a single tab open in a different shell than the user's default.
-      // Preserved from the deleted index.d.ts PtyApi duplicate during the
-      // single-source-of-truth collapse (see docs/preload-typecheck-hole.md §1).
-      shellOverride?: string
-      projectRuntime?: ProjectExecutionRuntimeResolution
-      terminalColorQueryReplies?: { foreground?: string; background?: string }
-      // Why: hidden-at-spawn declaration — main marks the PTY hidden before
-      // its first byte so the delivery gate + model responder own spawn-time
-      // queries (terminal-query-authority.md §races).
-      initiallyHidden?: boolean
-      // Why: closes the SIGKILL race documented in INVESTIGATION.md — main
-      // sync-flushes the (worktreeId, tabId, leafId → ptyId) binding before
-      // pty:spawn returns. Only the renderer's daemon-host path threads these.
-      tabId?: string
-      leafId?: string
-      // Why: telemetry-plan.md§Agent launch semantics — main emits
-      // `agent_started` only after the PTY/session is created successfully,
-      // so the renderer threads the launch metadata through this field and
-      // the IPC handler fires the event from the spawn-success branch.
-      telemetry?: { agent_kind: AgentKind; launch_source: LaunchSource; request_kind: RequestKind }
-    }) => Promise<{
-      id: string
-      launchAgent?: TuiAgent
-      launchConfig?: SleepingAgentLaunchConfig
-      snapshot?: string
-      snapshotCols?: number
-      snapshotRows?: number
-      isReattach?: boolean
-      isAlternateScreen?: boolean
-      replay?: string
-      sessionExpired?: boolean
-      coldRestore?: { scrollback: string; cwd: string }
-      startupCwdFallback?: { kind: 'worktree'; cwd: string }
-    }>
+    // Why overloaded: an `agentLaunch` call may return a pre-spawn typed
+    // failure/rejection with no PTY created; a call without it always resolves
+    // to a normal result, so existing callers keep the non-union result.
+    spawn: {
+      (
+        opts: PtySpawnOptions & { agentLaunch: AgentLaunchSpawnRequest }
+      ): Promise<PtySpawnResult | PtySpawnAgentLaunchFailure>
+      (opts: PtySpawnOptions): Promise<PtySpawnResult>
+    }
     write: (id: string, data: string) => void
     writeAccepted: (id: string, data: string) => Promise<boolean>
+    dismissLaunchNotice: (args: {
+      worktreeId: string
+      tabId: string
+      launchToken: string
+      code: AgentLaunchNoticeCode
+    }) => Promise<{ ok: boolean; changed: boolean }>
     resize: (id: string, cols: number, rows: number) => void
     reportGeometry: (id: string, cols: number, rows: number) => void
     signal: (id: string, signal: string) => void
@@ -2817,6 +2889,7 @@ export type PreloadApi = {
         launchConfig?: SleepingAgentLaunchConfig
         launchToken?: string
         launchAgent?: TuiAgent
+        launchNotices?: PersistedLaunchNoticeState
         title?: string
         ptyId?: string
         activate?: boolean

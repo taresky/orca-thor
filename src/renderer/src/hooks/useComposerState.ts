@@ -8,9 +8,7 @@ import { toast } from 'sonner'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/store'
 import { getDefaultRepoHookSettings } from '../../../shared/constants'
-import { getAgentLaunchPlatformForRepo } from '@/lib/agent-launch-platform'
 import { getAgentCatalog } from '@/lib/agent-catalog'
-import { createBrowserUuid } from '@/lib/browser-uuid'
 import {
   parseGitHubIssueOrPRNumber,
   parseGitHubIssueOrPRLink,
@@ -19,17 +17,13 @@ import {
 import { activateAndRevealWorktree, type AgentStartedTelemetry } from '@/lib/worktree-activation'
 import { runBackgroundWorktreeCreation } from '@/lib/worktree-creation-flow'
 import type { WorktreeCreationRequest } from '@/lib/pending-worktree-creation'
-import { buildAgentDraftLaunchPlan, buildAgentStartupPlan } from '@/lib/tui-agent-startup'
+import type { AgentLaunchSpawnRequest } from '../../../shared/agent-launch-spawn-request'
+import { track } from '@/lib/telemetry'
 import {
   filterEnabledTuiAgents,
   isTuiAgentEnabled,
   toLegacyAutoPreference
 } from '../../../shared/tui-agent-selection'
-import { repoIsRemote } from '../../../shared/agent-launch-remote'
-import {
-  resolveTuiAgentLaunchArgs,
-  resolveTuiAgentLaunchEnv
-} from '../../../shared/tui-agent-launch-defaults'
 import { resolveTelemetryAgentKind } from '@/lib/telemetry-agent-kind'
 import { isGitRepoKind } from '../../../shared/repo-kind'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
@@ -58,10 +52,8 @@ import type {
 } from '../../../shared/types'
 import { isWorkspaceStatusId } from '../../../shared/workspace-statuses'
 import {
-  CLIENT_PLATFORM,
   DEFAULT_ISSUE_COMMAND_TEMPLATE,
   buildAgentPromptWithContext,
-  ensureAgentStartupInTerminal,
   getAttachmentLabel,
   getLinkedWorkItemProvider,
   getLinkedWorkItemSuggestedName,
@@ -78,7 +70,6 @@ import {
   getLinkedWorkItemPromptContext,
   resolveQuickCreateLinkedWorkItemPrompt
 } from '@/lib/linked-work-item-context'
-import { getLocalRepoProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
 import {
   buildLinearIssueLinkedWorkItem,
   isLinearLinkedWorkItem
@@ -165,6 +156,10 @@ import {
   getWorkspaceCreateErrorToastMessage,
   type WorkspaceCreateErrorDisplay
 } from '@/lib/workspace-create-error-format'
+import {
+  agentLaunchFailureMessage,
+  agentLaunchRequestErrorMessage
+} from '@/lib/agent-launch-failure-copy'
 import type { SshConnectionStatus } from '../../../shared/ssh-types'
 import {
   isBranchCheckedOutInWorktrees,
@@ -761,29 +756,6 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     null
   )
   const [ephemeralVmRecipeError, setEphemeralVmRecipeError] = useState<string | null>(null)
-  const selectedRepoAgentLaunchPlatform = useMemo(() => {
-    if (!selectedRepo) {
-      return CLIENT_PLATFORM
-    }
-    const projectRuntime = selectedRepo.connectionId
-      ? undefined
-      : getLocalRepoProjectExecutionRuntimeContext(
-          {
-            activeRepoId,
-            activeWorktreeId: null,
-            projects,
-            repos,
-            settings,
-            worktreesByRepo
-          },
-          selectedRepo.id,
-          CLIENT_PLATFORM
-        )
-    return getAgentLaunchPlatformForRepo(selectedRepo, projectRuntime)
-  }, [activeRepoId, projects, repos, selectedRepo, settings, worktreesByRepo])
-  // Why: SSH remotes deploy the CLI shim as plain `orca`, so the Linux-only
-  // `orca-ide` rename must not be applied to remote launch commands.
-  const selectedRepoIsRemote = selectedRepo ? repoIsRemote(selectedRepo) : false
   const selectedRepoProjectId =
     selectedWorkspaceTarget.status === 'ready' ? selectedWorkspaceTarget.target.projectId : null
   const selectedProjectId = selectedProjectGroup
@@ -3345,12 +3317,6 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
           note,
           quickAgent: agent,
           autoRenameBranchFromWork: settings?.autoRenameBranchFromWork,
-          agentCmdOverrides: settings?.agentCmdOverrides,
-          agentArgs: agent
-            ? resolveTuiAgentLaunchArgs(agent, settings?.agentDefaultArgs)
-            : undefined,
-          agentEnv: agent ? resolveTuiAgentLaunchEnv(agent, settings?.agentDefaultEnv) : undefined,
-          isRemote: folderTargetIsRemote,
           launchSource: telemetrySource === 'onboarding' ? 'onboarding' : 'new_workspace_composer',
           runtimeEnvironmentId: folderTargetRuntimeEnvironmentId,
           createFolderWorkspace: (input) =>
@@ -3391,7 +3357,6 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       createFolderWorkspace,
       disabledTuiAgents,
       folderCreateDisabled,
-      folderTargetIsRemote,
       folderTargetRuntimeEnvironmentId,
       folderSourceRepos.length,
       linkedWorkItem,
@@ -3401,9 +3366,6 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       persistDraft,
       resolvePendingSmartGitHubSubmit,
       selectedProjectGroup,
-      settings?.agentCmdOverrides,
-      settings?.agentDefaultArgs,
-      settings?.agentDefaultEnv,
       settings?.autoRenameBranchFromWork,
       telemetrySource
     ]
@@ -3597,39 +3559,20 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         Boolean(tuiAgent) &&
         !effectiveBranchNameOverride &&
         !createDisplayName
-      const startupPlan = buildAgentStartupPlan({
-        agent: tuiAgent,
-        prompt: submitStartupPrompt,
-        cmdOverrides: settings?.agentCmdOverrides ?? {},
-        agentArgs: resolveTuiAgentLaunchArgs(tuiAgent, settings?.agentDefaultArgs),
-        agentEnv: resolveTuiAgentLaunchEnv(tuiAgent, settings?.agentDefaultEnv),
-        platform: selectedRepoAgentLaunchPlatform,
-        isRemote: selectedRepoIsRemote
-      })
-      const shouldSeedInitialAgentStatus =
-        tuiAgent === 'command-code' && submitStartupPrompt.trim().length > 0
-
-      // Why: backend startup is safe only when the launch command is
-      // self-contained. Agents that need post-ready paste/follow-up stay on
-      // the renderer path so prompt delivery is not skipped.
       const composerTelemetry: AgentStartedTelemetry = {
         agent_kind: resolveTelemetryAgentKind(tuiAgent),
         launch_source: telemetrySource === 'onboarding' ? 'onboarding' : 'new_workspace_composer',
         request_kind: 'new'
       }
-      const backendStartup =
-        startupPlan && !startupPlan.draftPrompt && !startupPlan.followupPrompt
-          ? {
-              command: startupPlan.launchCommand,
-              ...(startupPlan.env ? { env: startupPlan.env } : {}),
-              launchConfig: startupPlan.launchConfig,
-              launchAgent: tuiAgent,
-              ...(startupPlan.startupCommandDelivery
-                ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
-                : {}),
-              telemetry: composerTelemetry
-            }
-          : undefined
+      // The host owns command/args/env resolution and prompt delivery for every
+      // agent class (native-submit, native-draft, aider-followup, codex-draft);
+      // the renderer names only the requested agent and the interactive prompt.
+      // An empty prompt still launches a bare TUI.
+      const agentLaunch: AgentLaunchSpawnRequest = {
+        selection: { kind: 'agent', agent: tuiAgent },
+        ...(submitStartupPrompt.trim() ? { prompt: submitStartupPrompt } : {}),
+        allowEmptyPromptLaunch: true
+      }
       if (!(await persistSetupAgentStartupPolicy())) {
         throw new Error(
           translate(
@@ -3660,7 +3603,9 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         resolvedInitialWorkspaceStatus,
         smartGitHubResolution.kind === 'none' ? (linkedGitLabMR ?? undefined) : undefined,
         smartGitHubResolution.kind === 'none' ? (linkedGitLabIssue ?? undefined) : undefined,
-        backendStartup,
+        // The host owns startup resolution via `agentLaunch`; the legacy
+        // self-contained startup arg is never used on the create path.
+        undefined,
         pendingFirstAgentMessageRename,
         undefined,
         linkedLinearIssueWorkspaceId,
@@ -3668,8 +3613,21 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         undefined,
         undefined,
         undefined,
-        submitCompareBaseRef
+        submitCompareBaseRef,
+        { agentLaunch }
       )
+      // A pre-create agent-launch rejection created no worktree; throw the
+      // client-safe recovery copy so the surrounding catch keeps the composer
+      // open with its draft rather than navigating to a workspace that does not
+      // exist.
+      if (result.created === false) {
+        const rejection = result.agentLaunchResult
+        throw new Error(
+          rejection.status === 'failed'
+            ? agentLaunchFailureMessage(rejection.failure)
+            : agentLaunchRequestErrorMessage(rejection.requestError)
+        )
+      }
       const worktree = result.worktree
 
       const trimmedNote = note.trim()
@@ -3686,49 +3644,20 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
               })
             }
           : undefined
-      const backendSpawnedStartup = result.startupTerminal?.spawned === true
-      if (startupPlan && !backendSpawnedStartup && !startupPlan.launchToken) {
-        // Why: delayed delivery must target the exact pane spawned from this
-        // queued startup, so both halves share one renderer-session token.
-        startupPlan.launchToken = createBrowserUuid()
+      // agent_started rides the renderer off the host's launched receipt — the
+      // host create-spawn threads no telemetry (parity with the merged-tab path).
+      if (result.agentLaunchResult?.status === 'launched') {
+        track('agent_started', composerTelemetry)
       }
       const activation = activateAndRevealWorktree(worktree.id, {
         sidebarRevealBehavior: 'auto',
         setup: result.setup,
         defaultTabs: result.defaultTabs,
         issueCommand,
-        ...(startupPlan && !backendSpawnedStartup
-          ? {
-              startup: {
-                command: startupPlan.launchCommand,
-                ...(startupPlan.env ? { env: startupPlan.env } : {}),
-                launchConfig: startupPlan.launchConfig,
-                ...(startupPlan.launchToken ? { launchToken: startupPlan.launchToken } : {}),
-                launchAgent: tuiAgent,
-                ...(startupPlan.draftPrompt ? { draftPrompt: startupPlan.draftPrompt } : {}),
-                ...(startupPlan.startupCommandDelivery
-                  ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
-                  : {}),
-                ...(shouldSeedInitialAgentStatus
-                  ? {
-                      initialAgentStatus: {
-                        agent: tuiAgent,
-                        prompt: submitStartupPrompt.trim()
-                      }
-                    }
-                  : {}),
-                telemetry: composerTelemetry
-              }
-            }
-          : {})
+        // The host spawned the primary agent terminal (I9); suppress the client
+        // reopen/auto-create so the renderer never spawns a duplicate.
+        hostSpawnedPrimary: true
       })
-      if (startupPlan && !backendSpawnedStartup) {
-        void ensureAgentStartupInTerminal({
-          worktreeId: worktree.id,
-          primaryTabId: activation === false ? null : activation.primaryTabId,
-          startup: startupPlan
-        })
-      }
       setSidebarOpen(true)
       if (persistDraft) {
         clearNewWorkspaceDraft()
@@ -3773,14 +3702,9 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     resolvedSetupDecision,
     resolvedInitialWorkspaceStatus,
     selectedRepo,
-    selectedRepoAgentLaunchPlatform,
-    selectedRepoIsRemote,
     selectedRepoIsGit,
     selectedRepoRequiresConnection,
     showProjectRequiredError,
-    settings?.agentCmdOverrides,
-    settings?.agentDefaultArgs,
-    settings?.agentDefaultEnv,
     settings?.autoRenameBranchFromWork,
     smartNameMode,
     setSidebarOpen,
@@ -4005,54 +3929,9 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
           !effectiveBranchNameOverride &&
           !createDisplayName
         const trimmedNote = note.trim()
-        // Why: backend startup is safe only when the launch command is
-        // self-contained. Agents that need post-ready paste/follow-up stay on
-        // the renderer path so prompt delivery is not skipped.
         const promptLinkedWorkItem = agent === null ? null : submitLinkedWorkItem
         const { prompt: quickPrompt, draftPrompt: quickDraftPrompt } =
           resolveQuickCreateLinkedWorkItemPrompt(promptLinkedWorkItem, trimmedNote)
-        const draftLaunchPlan =
-          agent === null || !quickDraftPrompt
-            ? null
-            : buildAgentDraftLaunchPlan({
-                agent,
-                draft: quickDraftPrompt,
-                cmdOverrides: settings?.agentCmdOverrides ?? {},
-                agentArgs: resolveTuiAgentLaunchArgs(agent, settings?.agentDefaultArgs),
-                agentEnv: resolveTuiAgentLaunchEnv(agent, settings?.agentDefaultEnv),
-                platform: selectedRepoAgentLaunchPlatform,
-                isRemote: selectedRepoIsRemote
-              })
-
-        let startupPlan: ReturnType<typeof buildAgentStartupPlan> = null
-        if (draftLaunchPlan) {
-          startupPlan = {
-            agent: draftLaunchPlan.agent,
-            launchCommand: draftLaunchPlan.launchCommand,
-            expectedProcess: draftLaunchPlan.expectedProcess,
-            followupPrompt: null,
-            launchConfig: draftLaunchPlan.launchConfig,
-            ...(draftLaunchPlan.startupCommandDelivery
-              ? { startupCommandDelivery: draftLaunchPlan.startupCommandDelivery }
-              : {}),
-            ...(draftLaunchPlan.env ? { env: draftLaunchPlan.env } : {})
-          }
-        } else if (agent !== null) {
-          startupPlan = buildAgentStartupPlan({
-            agent,
-            prompt: quickPrompt,
-            cmdOverrides: settings?.agentCmdOverrides ?? {},
-            agentArgs: resolveTuiAgentLaunchArgs(agent, settings?.agentDefaultArgs),
-            agentEnv: resolveTuiAgentLaunchEnv(agent, settings?.agentDefaultEnv),
-            platform: selectedRepoAgentLaunchPlatform,
-            isRemote: selectedRepoIsRemote,
-            allowEmptyPromptLaunch: true
-          })
-          if (startupPlan && quickDraftPrompt) {
-            startupPlan.draftPrompt = quickDraftPrompt
-          }
-        }
-
         const quickTelemetry: AgentStartedTelemetry | null =
           agent === null
             ? null
@@ -4062,19 +3941,24 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
                   telemetrySource === 'onboarding' ? 'onboarding' : 'new_workspace_composer',
                 request_kind: 'new'
               }
-        const backendStartup =
-          startupPlan && !startupPlan.draftPrompt && !startupPlan.followupPrompt
-            ? {
-                command: startupPlan.launchCommand,
-                ...(startupPlan.env ? { env: startupPlan.env } : {}),
-                launchConfig: startupPlan.launchConfig,
-                ...(agent ? { launchAgent: agent } : {}),
-                ...(startupPlan.startupCommandDelivery
-                  ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
-                  : {}),
-                ...(quickTelemetry ? { telemetry: quickTelemetry } : {})
-              }
-            : undefined
+        // The host owns command/args/env resolution and prompt delivery for every
+        // agent class; the renderer names only the requested agent and the
+        // draft-vs-submit intent. A linked work item's body seeds the draft;
+        // otherwise the summary is submitted (empty prompt still launches a bare TUI).
+        const agentLaunch: AgentLaunchSpawnRequest | undefined =
+          agent === null
+            ? undefined
+            : quickDraftPrompt
+              ? {
+                  selection: { kind: 'agent', agent },
+                  prompt: quickDraftPrompt,
+                  promptDelivery: 'draft'
+                }
+              : {
+                  selection: { kind: 'agent', agent },
+                  ...(quickPrompt ? { prompt: quickPrompt } : {}),
+                  allowEmptyPromptLaunch: true
+                }
         if (!(await persistSetupAgentStartupPolicy())) {
           throw new Error(
             translate(
@@ -4161,11 +4045,9 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
           ...(smartGitHubResolution.kind === 'none' && linkedGitLabIssue != null
             ? { linkedGitLabIssue }
             : {}),
-          ...(backendStartup ? { startup: backendStartup } : {}),
+          ...(agentLaunch ? { agentLaunch } : {}),
           pendingFirstAgentMessageRename,
           note: trimmedNote,
-          startupPlan,
-          quickPrompt,
           quickTelemetry,
           ...(createMultiple ? { suppressTerminalFocusOnCompletion: true } : {})
         }
@@ -4218,8 +4100,6 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       resolvedSetupDecision,
       resolvedInitialWorkspaceStatus,
       selectedRepo,
-      selectedRepoAgentLaunchPlatform,
-      selectedRepoIsRemote,
       selectedRepoIsGit,
       selectedRepoSettings,
       selectedRepoRequiresConnection,
@@ -4227,9 +4107,6 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       selectedEphemeralVmRecipeId,
       ephemeralVmsEnabled,
       showProjectRequiredError,
-      settings?.agentCmdOverrides,
-      settings?.agentDefaultArgs,
-      settings?.agentDefaultEnv,
       settings?.autoRenameBranchFromWork,
       smartNameMode,
       disabledTuiAgents,

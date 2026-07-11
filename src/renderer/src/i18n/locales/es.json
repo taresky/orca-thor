@@ -12855,6 +12855,28 @@
         "searchLabels": "Filtrar etiquetas…",
         "searchAssignee": "Filtrar asignatario…",
         "back": "Atrás"
+      },
+      "AgentLaunchNotices": {
+        "disabledFallback": "{{value0}} está deshabilitado. Se inició {{value1}} estándar sin ejecutable personalizado, argumentos personalizados ni entorno de agente personalizado.",
+        "missingFallback": "{{value0}} se eliminó. Se inició {{value1}} estándar sin ejecutable personalizado, argumentos personalizados ni entorno de agente personalizado.",
+        "envWithheld": "Este lanzamiento no usó todos los valores de entorno de {{value0}}. Administra el entorno de lanzamiento emparejado en el host de escritorio.",
+        "snapshotChanged": "Se reanudó con la configuración capturada cuando se inició esta sesión.",
+        "dismiss": "Descartar"
+      },
+      "AgentLaunchRecoveryCard": {
+        "title": "El agente de este espacio de trabajo no se inició.",
+        "retry": "Reintentar",
+        "retryCurrentSettings": "Reintentar con la configuración actual",
+        "launchCurrentSettings": "Iniciar con la configuración actual",
+        "chooseAgent": "Elegir agente",
+        "editAgentSettings": "Editar la configuración del agente",
+        "repairOnHost": "Reparar en el host de escritorio",
+        "reconnectSecurely": "Reconectar de forma segura",
+        "reconnect": "Reconectar",
+        "recoverCapacity": "Recuperar capacidad de lanzamiento…",
+        "openTerminal": "Abrir terminal",
+        "forgetLaunch": "Olvidar lanzamiento…",
+        "manageAgents": "Administrar agentes"
       }
     },
     "i18n": {
@@ -12962,6 +12984,59 @@
           "gitlabMergeRequestNumber": "MR #{{value0}}",
           "githubPullRequestNumber": "PR #{{value0}}"
         }
+      }
+    }
+  },
+  "agentLaunch": {
+    "failure": {
+      "unknownAgent": "Ese agente ya no existe. Elige otro agente e inténtalo de nuevo.",
+      "noAgentSelected": "Selecciona un agente antes de iniciar.",
+      "needsRepair": "La configuración de este agente está incompleta. Termina de configurarlo en Ajustes e inténtalo de nuevo.",
+      "customDisabled": "Este agente está desactivado. Actívalo en Ajustes para iniciarlo.",
+      "configurationChangedPostCreate": "La configuración del agente cambió mientras se creaba este espacio de trabajo. Reintenta para iniciar con la configuración actual o elige otro agente.",
+      "configurationChangedPreSpawn": "La configuración del agente cambió antes del inicio. Reintenta con la configuración actual o elige otro agente.",
+      "baseDisabled": "El agente base está desactivado. Actívalo en Ajustes para iniciar.",
+      "baseUnavailable": "El agente base no está disponible en este host.",
+      "missingVariable": "No se pudo resolver la ruta del espacio de trabajo para este inicio.",
+      "missingTargetHome": "No se pudo resolver el directorio de inicio en el host de destino.",
+      "invalidCommandOverride": "La sustitución de comando de este agente no es válida. Corrígela en Ajustes.",
+      "invalidArgs": "Los argumentos de inicio de este agente no son válidos. Corrígelos en Ajustes.",
+      "invalidEnv": "El entorno de inicio de este agente no es válido. Corrígelo en Ajustes.",
+      "secureEnvUnavailable": "No se puede enviar de forma segura el entorno de este agente al host remoto.",
+      "commandTooLong": "El comando de inicio es demasiado largo. Acorta los argumentos del agente o el mensaje.",
+      "invalidSnapshot": "Los detalles de inicio guardados de este agente ya no son válidos.",
+      "trustPreflightFailed": "No se pudo confirmar la confianza del espacio de trabajo para este agente. Inténtalo de nuevo.",
+      "spawnFailed": "No se pudo iniciar el agente. Inténtalo de nuevo.",
+      "stateUnknown": "El estado del inicio es desconocido. Revisa la terminal antes de reintentar.",
+      "capacityExceeded": "Hay demasiados inicios de agente pendientes en este host. Vuelve a conectar u olvida los inicios bloqueados y vuelve a intentarlo."
+    },
+    "requestError": {
+      "idempotencyConflict": "Este inicio ya está en curso.",
+      "staleFailure": "Este inicio ya se resolvió. Actualiza e inténtalo de nuevo.",
+      "untrustedReference": "No se pudo verificar el origen de este inicio."
+    },
+    "capacity": {
+      "title": "Recuperar capacidad de inicio",
+      "description": "Estos inicios de agente siguen pendientes en este host. Abre un espacio de trabajo para volver a conectarlo o resolverlo y vuelve a intentar iniciar.",
+      "loadFailed": "No se pudieron cargar los inicios pendientes. Cierra y vuelve a abrir para reintentar.",
+      "loading": "Cargando inicios pendientes…",
+      "empty": "La capacidad de inicio está libre por ahora. No hay inicios pendientes en este host.",
+      "action": {
+        "open": "Abrir",
+        "goToWorkspace": "Ir al espacio de trabajo"
+      },
+      "source": {
+        "interactive": "Espacio de trabajo",
+        "cli": "CLI",
+        "automation": "Automatización",
+        "background": "Segundo plano",
+        "orchestration": "Orquestación",
+        "resume": "Reanudar"
+      },
+      "liveness": {
+        "live": "En ejecución",
+        "absent": "Detenido",
+        "unknown": "Inaccesible"
       }
     }
   }

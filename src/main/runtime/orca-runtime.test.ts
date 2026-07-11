@@ -52,6 +52,7 @@ import {
   OrcaRuntimeService,
   recentTerminalPathCandidatesIncludePath,
   recentTerminalOutputIncludesPath,
+  worktreeCreateRpcLaunchIntent,
   type RuntimeTerminalAgentStatusEvent
 } from './orca-runtime'
 import { HeadlessEmulator } from '../daemon/headless-emulator'
@@ -3991,7 +3992,7 @@ describe('OrcaRuntimeService', () => {
       expect(spawn).toHaveBeenCalledWith(
         expect.objectContaining({
           cwd: '/remote/agent-feature',
-          command: "codex '--dangerously-bypass-approvals-and-sandbox' 'hi'",
+          command: "'codex' '--dangerously-bypass-approvals-and-sandbox' 'hi'",
           worktreeId: result.worktree.id
         })
       )
@@ -4102,7 +4103,7 @@ describe('OrcaRuntimeService', () => {
       expect(spawn).toHaveBeenCalledWith(
         expect.objectContaining({
           cwd: 'C:/remote/agent-feature',
-          command: "codex '--dangerously-bypass-approvals-and-sandbox' 'fix Bob''s branch'"
+          command: "& 'codex' '--dangerously-bypass-approvals-and-sandbox' 'fix Bob''s branch'"
         })
       )
       expect(addWorktree).not.toHaveBeenCalled()
@@ -9222,10 +9223,9 @@ describe('OrcaRuntimeService', () => {
       launchConfig: {
         agentCommand: 'claude --teammate-mode in-process',
         agentArgs: '',
-        agentEnv: {
-          CLAUDE_PROFILE: 'captured',
-          CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1'
-        }
+        // The generated teams flag stays out of the durable snapshot; resume
+        // re-derives it from the captured --teammate-mode command.
+        agentEnv: { CLAUDE_PROFILE: 'captured' }
       },
       launchToken: spawnedEnv.ORCA_AGENT_LAUNCH_TOKEN,
       launchAgent: 'claude',
@@ -9352,18 +9352,18 @@ describe('OrcaRuntimeService', () => {
       expect.objectContaining({
         launchConfig: expect.objectContaining({
           agentCommand: 'claude --teammate-mode auto',
-          agentEnv: expect.objectContaining({
-            CLAUDE_PROFILE: 'captured',
-            CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-            TMUX_PANE: '%1'
-          })
+          // The durable snapshot keeps only custom env; regenerated team
+          // identity and any stale team keys never persist.
+          agentEnv: { CLAUDE_PROFILE: 'captured' }
         }),
         launchAgent: 'claude'
       })
     )
     const revealedLaunchConfig = revealTerminalSession.mock.calls[0]?.[1]?.launchConfig
-    expect(revealedLaunchConfig?.agentEnv.ORCA_AGENT_TEAMS_TEAM_ID).not.toBe('stale-team')
-    expect(revealedLaunchConfig?.agentEnv.ORCA_AGENT_TEAMS_TOKEN).not.toBe('stale-token')
+    expect(revealedLaunchConfig?.agentEnv.ORCA_AGENT_TEAMS_TEAM_ID).toBeUndefined()
+    expect(revealedLaunchConfig?.agentEnv.ORCA_AGENT_TEAMS_TOKEN).toBeUndefined()
+    expect(revealedLaunchConfig?.agentEnv.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBeUndefined()
+    expect(revealedLaunchConfig?.agentEnv.TMUX_PANE).toBeUndefined()
   })
 
   it('does not apply current Agent Teams mode to captured plain Claude resumes', async () => {
@@ -24673,7 +24673,7 @@ describe('OrcaRuntimeService', () => {
     expect(spawn).toHaveBeenCalledWith(
       expect.objectContaining({
         cwd: '/tmp/workspaces/runtime-startup-draft',
-        command: "codex --profile work '--dangerously-bypass-approvals-and-sandbox'",
+        command: "'codex' '--profile' 'work' '--dangerously-bypass-approvals-and-sandbox'",
         worktreeId: result.worktree.id
       })
     )
@@ -24776,11 +24776,198 @@ describe('OrcaRuntimeService', () => {
     expect(spawn).toHaveBeenCalledWith(
       expect.objectContaining({
         cwd: '/tmp/workspaces/runtime-cli-agent-startup',
-        command: "codex '--dangerously-bypass-approvals-and-sandbox' 'hi'",
+        command: "'codex' '--dangerously-bypass-approvals-and-sandbox' 'hi'",
         worktreeId: result.worktree.id
       })
     )
     expect(metaById[result.worktree.id]).toMatchObject({ createdWithAgent: 'codex' })
+  })
+
+  it('host-spawns exactly one agent terminal for a local-git worktree created with agentLaunch', async () => {
+    const metaById: Record<string, WorktreeMeta> = {}
+    const runtimeStore = {
+      ...store,
+      getSettings: () => ({ ...store.getSettings(), agentCmdOverrides: {} }),
+      getAllWorktreeMeta: () => metaById,
+      getWorktreeMeta: (worktreeId: string) => metaById[worktreeId],
+      setWorktreeMeta: (worktreeId: string, meta: Partial<WorktreeMeta>) => {
+        metaById[worktreeId] = { ...(metaById[worktreeId] ?? makeWorktreeMeta()), ...meta }
+        return metaById[worktreeId]
+      }
+    }
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+    const spawn = vi.fn().mockResolvedValue({ id: 'pty-agentlaunch-local' })
+    runtime.setPtyController({
+      spawn,
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    runtime.setNotifier({
+      worktreesChanged: vi.fn(),
+      reposChanged: vi.fn(),
+      activateWorktree: vi.fn(),
+      createTerminal: vi.fn(),
+      revealTerminalSession: vi.fn().mockResolvedValue({ tabId: 'tab-agentlaunch-local' }),
+      splitTerminal: vi.fn(),
+      renameTerminal: vi.fn(),
+      focusTerminal: vi.fn(),
+      closeTerminal: vi.fn(),
+      sleepWorktree: vi.fn(),
+      terminalFitOverrideChanged: vi.fn(),
+      terminalDriverChanged: vi.fn()
+    })
+    runtime.attachWindow(1)
+
+    computeWorktreePathMock.mockReturnValue('/tmp/workspaces/agentlaunch-local')
+    ensurePathWithinWorkspaceMock.mockReturnValue('/tmp/workspaces/agentlaunch-local')
+    vi.mocked(listWorktrees).mockResolvedValue([
+      {
+        path: '/tmp/workspaces/agentlaunch-local',
+        head: 'def',
+        branch: 'agentlaunch-local',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+    // The resolver gates a stock catalog agent on detection; mark codex installed
+    // so the host-atomic launch resolves as available on this local host.
+    detectInstalledAgentsWithShellPathHydrationMock.mockResolvedValue(['codex'])
+
+    const result = await runtime.createManagedWorktree({
+      repoSelector: TEST_REPO_ID,
+      name: 'agentlaunch-local',
+      agentLaunch: { selection: { kind: 'agent', agent: 'codex' }, allowEmptyPromptLaunch: true }
+    })
+
+    // The host resolved and spawned the ONE primary agent terminal itself; the
+    // launched arm is the proof, and no second/blank primary is spawned.
+    expect(spawn).toHaveBeenCalledTimes(1)
+    expect(spawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: '/tmp/workspaces/agentlaunch-local',
+        command: "'codex' '--dangerously-bypass-approvals-and-sandbox'",
+        worktreeId: result.worktree.id
+      })
+    )
+    expect(result.agentLaunchResult?.status).toBe('launched')
+    if (result.agentLaunchResult?.status === 'launched') {
+      expect(result.agentLaunchResult.receipt.requestedAgent).toBe('codex')
+      expect(result.agentLaunchResult.receipt.baseAgent).toBe('codex')
+    }
+    // Pending attribution is cleared once the launch registered.
+    expect(metaById[result.worktree.id]?.pendingAgentLaunch).toBeUndefined()
+  })
+
+  it('host-spawns the agent terminal for a folder workspace created with agentLaunch', async () => {
+    const folderRepo = {
+      id: 'folder-agentlaunch-repo',
+      path: '/workspace/folder-agentlaunch',
+      displayName: 'Folder',
+      badgeColor: 'blue',
+      addedAt: 1,
+      kind: 'folder' as const
+    }
+    const metaById: Record<string, WorktreeMeta> = {}
+    const runtimeStore = {
+      ...store,
+      getSettings: () => ({ ...store.getSettings(), agentCmdOverrides: {} }),
+      getRepos: () => [folderRepo],
+      getRepo: (id: string) => (id === folderRepo.id ? folderRepo : undefined),
+      getAllWorktreeMeta: () => metaById,
+      getWorktreeMeta: (worktreeId: string) => metaById[worktreeId],
+      setWorktreeMeta: (worktreeId: string, meta: Partial<WorktreeMeta>) => {
+        metaById[worktreeId] = { ...(metaById[worktreeId] ?? makeWorktreeMeta()), ...meta }
+        return metaById[worktreeId]
+      }
+    }
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+    const spawn = vi.fn().mockResolvedValue({ id: 'pty-agentlaunch-folder' })
+    runtime.setPtyController({
+      spawn,
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    runtime.setNotifier({
+      worktreesChanged: vi.fn(),
+      reposChanged: vi.fn(),
+      activateWorktree: vi.fn(),
+      createTerminal: vi.fn(),
+      revealTerminalSession: vi.fn().mockResolvedValue({ tabId: 'tab-agentlaunch-folder' }),
+      splitTerminal: vi.fn(),
+      renameTerminal: vi.fn(),
+      focusTerminal: vi.fn(),
+      closeTerminal: vi.fn(),
+      sleepWorktree: vi.fn(),
+      terminalFitOverrideChanged: vi.fn(),
+      terminalDriverChanged: vi.fn()
+    })
+    runtime.attachWindow(1)
+    detectInstalledAgentsWithShellPathHydrationMock.mockResolvedValue(['codex'])
+
+    const result = await runtime.createManagedWorktree({
+      repoSelector: 'id:folder-agentlaunch-repo',
+      name: 'folder-agentlaunch',
+      agentLaunch: { selection: { kind: 'agent', agent: 'codex' }, allowEmptyPromptLaunch: true }
+    })
+
+    expect(addWorktreeMock).not.toHaveBeenCalled()
+    expect(spawn).toHaveBeenCalledTimes(1)
+    expect(spawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: '/workspace/folder-agentlaunch',
+        command: "'codex' '--dangerously-bypass-approvals-and-sandbox'",
+        worktreeId: result.worktree.id
+      })
+    )
+    expect(result.agentLaunchResult?.status).toBe('launched')
+  })
+
+  it('creates no worktree and spawns no PTY when the pre-git agentLaunch fails', async () => {
+    const runtimeStore = {
+      ...store,
+      getSettings: () => ({ ...store.getSettings(), disabledTuiAgents: ['codex' as const] })
+    }
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+    const spawn = vi.fn()
+    runtime.setPtyController({
+      spawn,
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    detectInstalledAgentsWithShellPathHydrationMock.mockResolvedValue(['codex'])
+
+    await expect(
+      runtime.createManagedWorktree({
+        repoSelector: TEST_REPO_ID,
+        name: 'agentlaunch-disabled',
+        agentLaunch: { selection: { kind: 'agent', agent: 'codex' }, allowEmptyPromptLaunch: true }
+      })
+    ).rejects.toThrow('agent_launch_precreate_failed:base_agent_disabled')
+
+    expect(spawn).not.toHaveBeenCalled()
+    expect(addWorktreeMock).not.toHaveBeenCalled()
+  })
+
+  it('threads the fail-fast cli intent for CLI-originated worktree-create launches', () => {
+    // The unix-socket CLI authenticates with no clientKind, so its worktree-create
+    // launch must resolve in the `cli` column — a stale/disabled default fails
+    // closed instead of falling back to a base agent. Paired-web/mobile stay
+    // interactive (their fallback semantics are unchanged).
+    expect(worktreeCreateRpcLaunchIntent(undefined)).toEqual({
+      kind: 'cli',
+      command: 'worktree-create'
+    })
+    expect(worktreeCreateRpcLaunchIntent('runtime')).toEqual({
+      kind: 'interactive',
+      client: 'paired-web'
+    })
+    expect(worktreeCreateRpcLaunchIntent('mobile')).toEqual({
+      kind: 'interactive',
+      client: 'mobile'
+    })
   })
 
   it('sends follow-up prompts for CLI-created stdin-after-start startup agents', async () => {
@@ -24845,7 +25032,7 @@ describe('OrcaRuntimeService', () => {
     expect(spawn).toHaveBeenCalledWith(
       expect.objectContaining({
         cwd: '/tmp/workspaces/runtime-cli-aider-startup',
-        command: "aider '--yes-always'",
+        command: "'aider' '--yes-always'",
         worktreeId: result.worktree.id
       })
     )
@@ -25271,7 +25458,7 @@ describe('OrcaRuntimeService', () => {
     expect(spawn).toHaveBeenCalledWith(
       expect.objectContaining({
         cwd: '/tmp/workspaces/runtime-explicit-draft',
-        command: "codex '--dangerously-bypass-approvals-and-sandbox'",
+        command: "'codex' '--dangerously-bypass-approvals-and-sandbox'",
         worktreeId: result.worktree.id
       })
     )
@@ -25444,7 +25631,7 @@ describe('OrcaRuntimeService', () => {
     expect(spawn).toHaveBeenCalledWith(
       expect.objectContaining({
         cwd: '/remote/mobile-startup-draft',
-        command: `claude '--dangerously-skip-permissions' --prefill '${draftUrl}'`,
+        command: `'claude' '--dangerously-skip-permissions' '--prefill' '${draftUrl}'`,
         connectionId: 'ssh-1',
         worktreeId: result.worktree.id
       })
@@ -25555,7 +25742,7 @@ describe('OrcaRuntimeService', () => {
       expect(spawn).toHaveBeenCalledWith(
         expect.objectContaining({
           cwd: '/remote/mobile-codex-draft',
-          command: "codex '--dangerously-bypass-approvals-and-sandbox'",
+          command: "'codex' '--dangerously-bypass-approvals-and-sandbox'",
           connectionId: 'ssh-1',
           worktreeId: result.worktree.id
         })

@@ -1,5 +1,5 @@
 import type {
-  CreateWorktreeResult,
+  CreatedWorktreeResult,
   WorktreeDefaultTabsLaunch,
   WorktreeSetupLaunch,
   WorktreeStartupLaunch
@@ -50,9 +50,9 @@ export type RuntimeActivateWorktreeEvent = Extract<RuntimeClientEvent, { type: '
 export function toRuntimeActivateWorktreeEvent(
   repoId: string,
   worktreeId: string,
-  setup?: CreateWorktreeResult['setup'],
+  setup?: CreatedWorktreeResult['setup'],
   startup?: WorktreeStartupLaunch,
-  defaultTabs?: CreateWorktreeResult['defaultTabs']
+  defaultTabs?: CreatedWorktreeResult['defaultTabs']
 ): RuntimeActivateWorktreeEvent {
   return {
     type: 'activateWorktree',

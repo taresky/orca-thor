@@ -1345,6 +1345,221 @@ describe('registerPtyHandlers', () => {
       expect(env.NO_PROXY).toBe('localhost,*.internal')
     })
 
+    describe('host-resolved agent launch (agentLaunch)', () => {
+      // Why: when the client opts into `agentLaunch`, the host resolves the
+      // launch and the resolved plan — not any client command — is what spawns.
+      function makeAgentLaunchSpy(): ReturnType<typeof vi.fn> {
+        const spawnSpy = vi.fn(async (options: Record<string, unknown>) => ({
+          id: 'agent-launch-pty',
+          pid: 321,
+          ...options
+        }))
+        setLocalPtyProvider({
+          spawn: spawnSpy,
+          write: vi.fn(),
+          resize: vi.fn(),
+          kill: vi.fn(),
+          shutdown: vi.fn(),
+          onData: vi.fn(() => vi.fn()),
+          onExit: vi.fn(() => vi.fn()),
+          listProcesses: vi.fn(async () => []),
+          getForegroundProcess: vi.fn(async () => null)
+        } as never)
+        return spawnSpy
+      }
+
+      const agentLaunchSettings =
+        (overrides?: Record<string, unknown>) => (): Record<string, unknown> => ({
+          customTuiAgents: [],
+          deletedCustomTuiAgents: [],
+          disabledTuiAgents: [],
+          ...overrides
+        })
+
+      it('resolves host-side, ignores the client command, and spawns one PTY', async () => {
+        const spawnSpy = makeAgentLaunchSpy()
+        handlers.clear()
+        registerPtyHandlers(
+          mainWindow as never,
+          undefined,
+          undefined,
+          agentLaunchSettings() as never
+        )
+        const result = (await handlers.get('pty:spawn')!(null, {
+          cols: 80,
+          rows: 24,
+          // Client command/launchAgent must be dropped in favor of the resolved plan.
+          command: 'evil --client-controlled',
+          launchAgent: 'codex',
+          agentLaunch: { selection: { kind: 'agent', agent: 'claude' }, prompt: 'hi' }
+        })) as {
+          id?: string
+          agentLaunch?: { status: string; receipt?: { launchToken: string; baseAgent: string } }
+        }
+
+        expect(spawnSpy).toHaveBeenCalledTimes(1)
+        const options = spawnSpy.mock.calls.at(-1)![0] as {
+          command?: string
+          commandDelivery?: string
+          launchAgent?: string
+          launchToken?: string
+        }
+        expect(options.command).toContain('claude')
+        expect(options.command).not.toContain('evil')
+        expect(options.commandDelivery).toBe('provider')
+        expect(options.launchAgent).toBe('claude')
+        expect(typeof options.launchToken).toBe('string')
+        expect(result.agentLaunch?.status).toBe('launched')
+        expect(result.agentLaunch?.receipt?.baseAgent).toBe('claude')
+        expect(result.agentLaunch?.receipt?.launchToken).toBe(options.launchToken)
+      })
+
+      it('returns a typed failure and creates no PTY when the base agent is disabled', async () => {
+        const spawnSpy = makeAgentLaunchSpy()
+        handlers.clear()
+        registerPtyHandlers(
+          mainWindow as never,
+          undefined,
+          undefined,
+          agentLaunchSettings({ disabledTuiAgents: ['claude'] }) as never
+        )
+        const result = (await handlers.get('pty:spawn')!(null, {
+          cols: 80,
+          rows: 24,
+          agentLaunch: { selection: { kind: 'agent', agent: 'claude' }, prompt: 'hi' }
+        })) as { id?: string; agentLaunch?: { status: string; failure?: { code: string } } }
+
+        expect(spawnSpy).not.toHaveBeenCalled()
+        expect(result.id).toBeUndefined()
+        expect(result.agentLaunch?.status).toBe('failed')
+        expect(result.agentLaunch?.failure?.code).toBeDefined()
+      })
+
+      it('leaves the legacy command path byte-identical when agentLaunch is absent', async () => {
+        const spawnSpy = makeAgentLaunchSpy()
+        handlers.clear()
+        registerPtyHandlers(
+          mainWindow as never,
+          undefined,
+          undefined,
+          agentLaunchSettings() as never
+        )
+        const result = (await handlers.get('pty:spawn')!(null, {
+          cols: 80,
+          rows: 24,
+          command: 'my-shell-command'
+        })) as { id?: string; agentLaunch?: unknown }
+
+        expect(spawnSpy).toHaveBeenCalledTimes(1)
+        const options = spawnSpy.mock.calls.at(-1)![0] as {
+          command?: string
+          launchToken?: string
+        }
+        expect(options.command).toBe('my-shell-command')
+        expect(options.launchToken).toBeUndefined()
+        expect(result.agentLaunch).toBeUndefined()
+        expect(result.id).toBe('agent-launch-pty')
+      })
+
+      it('injects the admitted receipt token into spawn env and ignores a client token', async () => {
+        makeAgentLaunchSpy()
+        handlers.clear()
+        registerPtyHandlers(
+          mainWindow as never,
+          undefined,
+          undefined,
+          agentLaunchSettings() as never
+        )
+        // A verified pane key (env pane key matches tabId+leafId) is required for
+        // the base-env block to retain ORCA_AGENT_LAUNCH_TOKEN in the spawn env.
+        const leafId = '11111111-1111-4111-8111-111111111111'
+        const paneKey = `tab-1:${leafId}`
+        const result = (await handlers.get('pty:spawn')!(null, {
+          cols: 80,
+          rows: 24,
+          tabId: 'tab-1',
+          leafId,
+          // The client-supplied token must be overwritten by the admitted receipt token.
+          env: { ORCA_PANE_KEY: paneKey, ORCA_AGENT_LAUNCH_TOKEN: 'client-forged-token' },
+          agentLaunch: { selection: { kind: 'agent', agent: 'claude' }, prompt: 'hi' }
+        })) as {
+          env?: Record<string, string>
+          launchConfig?: { agentEnv?: Record<string, string> }
+          agentLaunch?: { status: string; receipt?: { launchToken: string } }
+        }
+
+        const receiptToken = result.agentLaunch?.receipt?.launchToken
+        expect(typeof receiptToken).toBe('string')
+        expect(result.env?.ORCA_AGENT_LAUNCH_TOKEN).toBe(receiptToken)
+        expect(result.env?.ORCA_AGENT_LAUNCH_TOKEN).not.toBe('client-forged-token')
+        // The launch token is an Orca control key injected only into spawn env; it
+        // must never enter the durable agentEnv that the admitted snapshot persists.
+        expect(result.launchConfig?.agentEnv ?? {}).not.toHaveProperty('ORCA_AGENT_LAUNCH_TOKEN')
+      })
+
+      it('returns the resolved followup prompt for stdin-after-start agents only', async () => {
+        makeAgentLaunchSpy()
+        handlers.clear()
+        registerPtyHandlers(
+          mainWindow as never,
+          undefined,
+          undefined,
+          agentLaunchSettings() as never
+        )
+        // aider launches bare and takes its prompt over stdin after readiness, so
+        // the host returns followupPrompt for the renderer's paste writer.
+        const stdinResult = (await handlers.get('pty:spawn')!(null, {
+          cols: 80,
+          rows: 24,
+          agentLaunch: { selection: { kind: 'agent', agent: 'aider' }, prompt: 'do the thing' }
+        })) as { followupPrompt?: string }
+        expect(stdinResult.followupPrompt).toBe('do the thing')
+
+        // claude injects the prompt into argv, so nothing is delivered post-start.
+        const argvResult = (await handlers.get('pty:spawn')!(null, {
+          cols: 80,
+          rows: 24,
+          agentLaunch: { selection: { kind: 'agent', agent: 'claude' }, prompt: 'do the thing' }
+        })) as { followupPrompt?: string }
+        expect(argvResult.followupPrompt).toBeUndefined()
+      })
+
+      it('surfaces a draft prompt only when the agent lacks a native draft affordance', async () => {
+        makeAgentLaunchSpy()
+        handlers.clear()
+        registerPtyHandlers(
+          mainWindow as never,
+          undefined,
+          undefined,
+          agentLaunchSettings() as never
+        )
+        // codex has no draft flag/env, so the host returns the draft for the
+        // renderer to paste unsubmitted.
+        const pasteResult = (await handlers.get('pty:spawn')!(null, {
+          cols: 80,
+          rows: 24,
+          agentLaunch: {
+            selection: { kind: 'agent', agent: 'codex' },
+            prompt: 'draft me',
+            promptDelivery: 'draft'
+          }
+        })) as { draftPrompt?: string }
+        expect(pasteResult.draftPrompt).toBe('draft me')
+
+        // claude --prefill delivers the draft host-side on argv, so nothing paste.
+        const nativeResult = (await handlers.get('pty:spawn')!(null, {
+          cols: 80,
+          rows: 24,
+          agentLaunch: {
+            selection: { kind: 'agent', agent: 'claude' },
+            prompt: 'draft me',
+            promptDelivery: 'draft'
+          }
+        })) as { draftPrompt?: string }
+        expect(nativeResult.draftPrompt).toBeUndefined()
+      })
+    })
+
     describe('daemon-active provider (parity with LocalPtyProvider)', () => {
       // Why: these tests guard the regression the daemon-parity refactor was
       // written to fix — under the daemon, LocalPtyProvider.buildSpawnEnv is
@@ -4333,7 +4548,10 @@ describe('registerPtyHandlers', () => {
       baseEnv: expect.objectContaining({
         CLAUDE_PROFILE: 'captured',
         ORCA_AGENT_TEAMS_TEAM_ID: 'team-stale'
-      })
+      }),
+      // Validated custom env propagates to teammate panes; stale team identity
+      // is stripped before it can reach a child.
+      childEnv: { CLAUDE_PROFILE: 'captured' }
     })
     expect(spawnOptions.env).toMatchObject({
       CLAUDE_PROFILE: 'captured',
@@ -4347,13 +4565,12 @@ describe('registerPtyHandlers', () => {
     expect(spawnOptions.env.PATH.split(delimiter)[0]).toBe('/tmp/fresh-agent-teams')
     expect(spawnOptions.env.TERM_PROGRAM).toBeUndefined()
     expect(spawnOptions.env.ORCA_ATTRIBUTION_SHIM_DIR).toBeUndefined()
-    expect(result.launchConfig?.agentEnv).toMatchObject({
-      CLAUDE_PROFILE: 'captured',
-      CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-      ORCA_AGENT_TEAMS_TEAM_ID: 'team-fresh',
-      ORCA_AGENT_TEAMS_TOKEN: 'fresh-token',
-      TMUX: '/tmp/orca-claude-agent-teams/team-fresh,0,1'
-    })
+    // The durable snapshot keeps only custom env; regenerated team identity and
+    // any stale team keys never persist.
+    expect(result.launchConfig?.agentEnv).toEqual({ CLAUDE_PROFILE: 'captured' })
+    expect(result.launchConfig?.agentEnv.ORCA_AGENT_TEAMS_TEAM_ID).toBeUndefined()
+    expect(result.launchConfig?.agentEnv.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBeUndefined()
+    expect(result.launchConfig?.agentEnv.TMUX).toBeUndefined()
     expect(runtime.registerPreAllocatedHandleForPty).toHaveBeenCalledWith(
       expect.any(String),
       'term_agent_teams'
@@ -4465,7 +4682,9 @@ describe('registerPtyHandlers', () => {
 
     expect(runtime.prepareClaudeAgentTeamsLeaderForHandle).toHaveBeenCalledWith({
       handle: 'term_agent_teams',
-      baseEnv: expect.any(Object)
+      baseEnv: expect.any(Object),
+      // Validated custom agent env (empty here) propagates to teammate panes.
+      childEnv: {}
     })
   })
 

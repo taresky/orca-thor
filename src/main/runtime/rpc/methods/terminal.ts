@@ -1120,14 +1120,16 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
   defineMethod({
     name: 'terminal.create',
     params: TerminalCreateParams,
-    handler: async (params, { runtime }) => ({
-      terminal: await runtime.createTerminal(params.worktree, {
+    handler: async (params, { runtime, clientKind }) => {
+      const baseOpts = {
         command: params.command,
         startupCommandDelivery: params.startupCommandDelivery,
         env: params.env,
         ...(params.launchConfig ? { launchConfig: params.launchConfig } : {}),
         ...(params.launchToken ? { launchToken: params.launchToken } : {}),
         ...(params.launchAgent ? { launchAgent: params.launchAgent } : {}),
+        // Authenticated RPC scope for host-resolved launches; never client JSON.
+        clientKind,
         title: params.title,
         focus: params.focus === true,
         rendererBacked: params.rendererBacked === true,
@@ -1135,8 +1137,20 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
         presentation: params.presentation,
         tabId: params.tabId,
         leafId: params.leafId
-      })
-    })
+      }
+      if (params.agentLaunch) {
+        const result = await runtime.createTerminal(params.worktree, {
+          ...baseOpts,
+          agentLaunch: params.agentLaunch
+        })
+        // A pre-spawn typed failure is an RPC success with no terminal created.
+        if (!('handle' in result)) {
+          return { agentLaunch: result.agentLaunch }
+        }
+        return { terminal: result }
+      }
+      return { terminal: await runtime.createTerminal(params.worktree, baseOpts) }
+    }
   }),
   defineMethod({
     name: 'terminal.split',

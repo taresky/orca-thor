@@ -8,6 +8,7 @@ import {
   settingsOf
 } from './agent-launch-test-catalog'
 import { buildAgentStartupPlanFromResolvedLaunch } from '../../shared/resolved-agent-startup-plan'
+import { STARTUP_COMMAND_TEXT_MAX_CHARS } from '../providers/windows-shell-args'
 import type { ResolvedAgentLaunch } from '../../shared/agent-launch-host-contract'
 
 function resolvedLaunch(
@@ -32,7 +33,9 @@ function resolvedLaunch(
         opencode: '',
         copilot: '',
         autohand: '',
-        kiro: ''
+        kiro: '',
+        claude: '',
+        pi: ''
       }
     })
   )
@@ -127,5 +130,69 @@ describe('buildAgentStartupPlanFromResolvedLaunch', () => {
         allowEmptyPromptLaunch: true
       })?.launchCommand
     ).toBe(`'codex'`)
+  })
+
+  describe('draft prompt delivery', () => {
+    it('appends the native draft flag inline and delivers nothing post-ready', () => {
+      const launch = resolvedLaunch({ agent: 'claude' })
+      const plan = buildAgentStartupPlanFromResolvedLaunch({
+        launch,
+        prompt: 'wire the handler',
+        promptDelivery: 'draft'
+      })
+      expect(plan?.launchCommand).toBe(`'claude' '--prefill' 'wire the handler'`)
+      expect(plan?.draftPrompt).toBeUndefined()
+      expect(plan?.followupPrompt).toBeNull()
+    })
+
+    it('sets the draft env var in spawn env only, never the durable snapshot', () => {
+      const launch = resolvedLaunch({ agent: 'pi' })
+      const plan = buildAgentStartupPlanFromResolvedLaunch({
+        launch,
+        prompt: 'do it',
+        promptDelivery: 'draft'
+      })
+      expect(plan?.launchCommand).toBe(`'pi'; unset ORCA_PI_PREFILL`)
+      expect(plan?.env).toEqual({ ORCA_PI_PREFILL: 'do it' })
+      expect(plan?.launchConfig.agentEnv).not.toHaveProperty('ORCA_PI_PREFILL')
+      expect(plan?.draftPrompt).toBeUndefined()
+    })
+
+    it('returns the draft for post-ready paste when the agent has no native affordance', () => {
+      const launch = resolvedLaunch({ agent: 'codex' })
+      const plan = buildAgentStartupPlanFromResolvedLaunch({
+        launch,
+        prompt: 'draft me',
+        promptDelivery: 'draft'
+      })
+      expect(plan?.launchCommand).toBe(`'codex'`)
+      expect(plan?.draftPrompt).toBe('draft me')
+      expect(plan?.followupPrompt).toBeNull()
+    })
+
+    it('falls back to post-ready paste with the FULL text for an oversized inline draft', () => {
+      const launch = resolvedLaunch({ agent: 'claude' })
+      const bigDraft = 'x'.repeat(STARTUP_COMMAND_TEXT_MAX_CHARS + 100)
+      const plan = buildAgentStartupPlanFromResolvedLaunch({
+        launch,
+        prompt: bigDraft,
+        promptDelivery: 'draft',
+        maxInlineDraftChars: STARTUP_COMMAND_TEXT_MAX_CHARS
+      })
+      expect(plan?.launchCommand).toBe(`'claude'`)
+      expect(plan?.launchCommand).not.toContain('--prefill')
+      expect(plan?.draftPrompt).toBe(bigDraft)
+    })
+
+    it('leaves submit mode unchanged (native draft flag not applied)', () => {
+      const launch = resolvedLaunch({ agent: 'claude' })
+      const submitted = buildAgentStartupPlanFromResolvedLaunch({
+        launch,
+        prompt: 'ship it',
+        promptDelivery: 'submit'
+      })
+      expect(submitted?.launchCommand).toBe(`'claude' 'ship it'`)
+      expect(submitted?.draftPrompt).toBeUndefined()
+    })
   })
 })

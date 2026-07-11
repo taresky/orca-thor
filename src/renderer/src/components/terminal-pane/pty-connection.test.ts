@@ -193,6 +193,7 @@ type StoreState = {
   clearSleepingAgentSession: ReturnType<typeof vi.fn>
   registerAgentLaunchConfig: ReturnType<typeof vi.fn>
   clearAgentLaunchConfig: ReturnType<typeof vi.fn>
+  attachLaunchNotices: ReturnType<typeof vi.fn>
   markWorktreeUnread: ReturnType<typeof vi.fn>
   observeTerminalGitHubPullRequestLink: ReturnType<typeof vi.fn>
   recordTerminalInput: ReturnType<typeof vi.fn>
@@ -808,6 +809,7 @@ describe('connectPanePty', () => {
       }),
       registerAgentLaunchConfig: vi.fn(),
       clearAgentLaunchConfig: vi.fn(),
+      attachLaunchNotices: vi.fn(),
       markWorktreeUnread: vi.fn(),
       observeTerminalGitHubPullRequestLink: vi.fn(),
       recordTerminalInput: vi.fn(),
@@ -4610,6 +4612,100 @@ describe('connectPanePty', () => {
       'pty-codex',
       '\x1b[200~https://github.com/stablyai/orca/issues/42\x1b[201~'
     )
+  })
+
+  it('stamps host-owned launch notices onto the tab when the spawn receipt carries them', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+
+    const notices = [{ code: 'missing_custom_fallback', label: 'My Agent', baseAgent: 'claude' }]
+    const transport = createMockTransport('pty-notice')
+    transport.connect.mockImplementation(async () => ({
+      id: 'pty-notice',
+      agentLaunch: {
+        status: 'launched',
+        receipt: {
+          requestedAgent: 'claude',
+          baseAgent: 'claude',
+          notices,
+          launchToken: 'host-token-1',
+          catalogRevision: 1
+        }
+      }
+    }))
+    transportFactoryQueue.push(transport)
+
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: { 'wt-1': [{ id: 'tab-1', ptyId: null }] },
+      repos: [{ id: 'repo1', connectionId: null }]
+    }
+
+    connectPanePty(
+      createPane(1) as never,
+      createManager(1) as never,
+      createDeps({
+        startup: {
+          command: '',
+          agentLaunch: {
+            selection: { kind: 'agent', agent: 'claude' },
+            allowEmptyPromptLaunch: true
+          }
+        }
+      }) as never
+    )
+    await flushAsyncTicks()
+
+    // The host is the notice owner; the renderer mirrors them onto the tab from
+    // the admission-minted receipt token so the banner renders and dismissal routes.
+    expect(mockStoreState.attachLaunchNotices).toHaveBeenCalledWith({
+      worktreeId: 'wt-1',
+      tabId: 'tab-1',
+      launchToken: 'host-token-1',
+      notices
+    })
+  })
+
+  it('does not stamp launch notices when the spawn receipt carries none', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+
+    const transport = createMockTransport('pty-no-notice')
+    transport.connect.mockImplementation(async () => ({
+      id: 'pty-no-notice',
+      agentLaunch: {
+        status: 'launched',
+        receipt: {
+          requestedAgent: 'claude',
+          baseAgent: 'claude',
+          notices: [],
+          launchToken: 'host-token-2',
+          catalogRevision: 1
+        }
+      }
+    }))
+    transportFactoryQueue.push(transport)
+
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: { 'wt-1': [{ id: 'tab-1', ptyId: null }] },
+      repos: [{ id: 'repo1', connectionId: null }]
+    }
+
+    connectPanePty(
+      createPane(1) as never,
+      createManager(1) as never,
+      createDeps({
+        startup: {
+          command: '',
+          agentLaunch: {
+            selection: { kind: 'agent', agent: 'claude' },
+            allowEmptyPromptLaunch: true
+          }
+        }
+      }) as never
+    )
+    await flushAsyncTicks()
+
+    expect(mockStoreState.attachLaunchNotices).not.toHaveBeenCalled()
   })
 
   it('does not consume startup draft delivery before deferred connect starts', async () => {

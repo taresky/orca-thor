@@ -1423,6 +1423,7 @@ export function useIpcEvents(): void {
           launchConfig,
           launchToken,
           launchAgent,
+          launchNotices,
           title,
           ptyId,
           activate,
@@ -1536,6 +1537,16 @@ export function useIpcEvents(): void {
             if (shouldSurfaceOwner) {
               store.revealWorktreeInSidebar(worktreeId)
               focusTerminalInitiatedTab(tab.id, leafId)
+            }
+            if (launchNotices) {
+              // Mirror the host-owned launch notices onto the revealed tab so the
+              // banner renders; the host stays the owner and drives dismissal.
+              store.attachLaunchNotices({
+                worktreeId,
+                tabId: tab.id,
+                launchToken: launchNotices.launchToken,
+                notices: launchNotices.notices
+              })
             }
             // Why: only stamp the runtime-supplied title on freshly created tabs.
             // Existing tabs may have a user customTitle (set via UI rename) that

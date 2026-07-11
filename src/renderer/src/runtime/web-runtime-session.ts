@@ -13,6 +13,7 @@ import type { TerminalPaneSplitSource } from '../../../shared/feature-education-
 import type { StartupCommandDelivery } from '../../../shared/codex-startup-delivery'
 import type { SleepingAgentLaunchConfig } from '../../../shared/agent-session-resume'
 import type { TerminalPaneLayoutNode, TuiAgent } from '../../../shared/types'
+import type { AgentLaunchNoticeCode } from '../../../shared/agent-launch-contract'
 import type { AppState } from '../store/types'
 import { getRuntimeEnvironmentIdForWorktree } from '../lib/worktree-runtime-owner'
 import { useAppStore } from '../store'
@@ -739,6 +740,51 @@ export function setWebRuntimeTabProps(args: {
     .catch((error) => {
       console.warn(
         '[web-runtime-session] failed to set tab props:',
+        error instanceof Error ? error.message : String(error)
+      )
+    })
+  return true
+}
+
+/** Ask the remote host (owner) to dismiss a launch notice for this terminal. */
+export function dismissWebRuntimeLaunchNotice(args: {
+  worktreeId: string
+  tabId: string
+  launchToken: string
+  code: AgentLaunchNoticeCode
+}): boolean {
+  const environmentId =
+    getRuntimeEnvironmentIdForWorktree(useAppStore.getState(), args.worktreeId) ?? null
+  if (!environmentId || !isWebRuntimeSessionActive(environmentId)) {
+    return false
+  }
+  const state = useAppStore.getState()
+  void import('./web-session-tabs-sync')
+    .then(({ resolveHostSessionTabIdForWebSessionTab }) => {
+      const hostTabId =
+        resolveHostSessionTabIdForWebSessionTab(state, {
+          environmentId,
+          worktreeId: args.worktreeId,
+          tabId: args.tabId
+        }) ?? (isWebTerminalSurfaceTabId(args.tabId) ? toHostSessionTabId(args.tabId) : args.tabId)
+      return window.api.runtimeEnvironments.call({
+        selector: environmentId,
+        method: 'session.tabs.dismissLaunchNotice',
+        params: {
+          worktree: toRuntimeWorktreeSelector(args.worktreeId),
+          tabId: hostTabId,
+          launchToken: args.launchToken,
+          code: args.code
+        },
+        timeoutMs: 15_000
+      })
+    })
+    .then((response) => {
+      unwrapRuntimeRpcResult(response as RuntimeRpcResponse<{ ok: boolean; changed: boolean }>)
+    })
+    .catch((error) => {
+      console.warn(
+        '[web-runtime-session] failed to dismiss launch notice:',
         error instanceof Error ? error.message : String(error)
       )
     })

@@ -17,6 +17,9 @@ import {
 } from 'electron'
 export { getBashShellReadyRcfileContent } from '../providers/local-pty-shell-ready'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
+import { stripEphemeralAgentTeamsEnv } from '../runtime/claude-agent-teams-service'
+import type { AgentLaunchNoticeCode } from '../../shared/agent-launch-contract'
+import { AGENT_LAUNCH_NOTICE_CODES } from '../../shared/agent-launch-notice-schema'
 import type { Store } from '../persistence'
 import type { GlobalSettings, TuiAgent } from '../../shared/types'
 import { terminalOutputBacklogCapChars } from '../../shared/terminal-scrollback-policy'
@@ -36,7 +39,18 @@ import {
 import { recordCrashBreadcrumb } from '../crash-reporting/crash-breadcrumb-store'
 import { isTuiAgent } from '../../shared/tui-agent-config'
 import type { SleepingAgentLaunchConfig } from '../../shared/agent-session-resume'
-import type { AgentLaunchSpawnRequest } from '../../shared/agent-launch-spawn-request'
+import type {
+  AgentLaunchSpawnOutcome,
+  AgentLaunchSpawnRequest
+} from '../../shared/agent-launch-spawn-request'
+import {
+  describeSpawnExecutionHost,
+  deriveAgentLaunchHostState,
+  detectionUnavailable,
+  resolveLocalTargetHomePath
+} from '../agent-launch/agent-launch-host-state'
+import { resolveAgentLaunchSpawn } from '../agent-launch/agent-launch-spawn'
+import { getHostAgentLaunchBoundary } from '../agent-launch/agent-launch-boundary-host'
 import type { ProjectExecutionRuntimeResolution } from '../../shared/project-execution-runtime'
 import {
   isWslShellName,
@@ -1492,6 +1506,7 @@ export function registerPtyHandlers(
   ipcMain.removeHandler('pty:sideEffectSnapshot')
   ipcMain.removeHandler('pty:getRendererDeliveryDebugSnapshot')
   ipcMain.removeHandler('pty:resetRendererDeliveryDebug')
+  ipcMain.removeHandler('pty:dismissLaunchNotice')
   ipcMain.removeHandler('pty:reportRendererDeliveryState')
   ipcMain.removeHandler('pty:writeAccepted')
   ipcMain.removeAllListeners('pty:write')
@@ -3553,6 +3568,32 @@ export function registerPtyHandlers(
     resetPtyRendererDeliveryDebug()
   })
 
+  // Local desktop equivalent of session.tabs.dismissLaunchNotice. The host owns
+  // notice state: it verifies terminal/token/code, removes matching codes,
+  // persists once, and publishes to every connected view. A non-enum code or
+  // foreign token fails closed. The token is never logged.
+  ipcMain.handle(
+    'pty:dismissLaunchNotice',
+    async (
+      _event,
+      args: {
+        worktreeId: string
+        tabId: string
+        launchToken: string
+        code: AgentLaunchNoticeCode
+      }
+    ): Promise<{ ok: boolean; changed: boolean }> => {
+      if (!runtime || !AGENT_LAUNCH_NOTICE_CODES.includes(args.code)) {
+        return { ok: false, changed: false }
+      }
+      return runtime.dismissLaunchNotice(`id:${args.worktreeId}`, {
+        tabId: args.tabId,
+        launchToken: args.launchToken,
+        code: args.code
+      })
+    }
+  )
+
   ipcMain.handle(
     'pty:spawn',
     async (
@@ -3644,8 +3685,100 @@ export function registerPtyHandlers(
         didFallbackToWorkspaceRootCwd && cwd ? ({ kind: 'worktree', cwd } as const) : undefined
       spawnTiming.mark('preflight')
       const provider = getProvider(args.connectionId)
+      // U3: when the client opts into a host-resolved agent launch, the host
+      // resolves it here and IGNORES any client command/launchConfig/launchAgent/
+      // env — the resolved plan is what spawns. A pre-spawn typed failure/
+      // rejection returns the outcome and creates no PTY; a success mutates the
+      // spawn args so the resolved command flows through the identical spawn path
+      // below, delivered by the provider like the runtime CLI launch path. The
+      // launch token is admission-owned and settled after registration (below).
+      let agentLaunchOutcome: AgentLaunchSpawnOutcome | null = null
+      let agentLaunchFollowupPrompt: string | null = null
+      let agentLaunchDraftPrompt: string | null = null
+      let agentLaunchToken: string | null = null
+      let agentLaunchSettled = false
+      const settleAgentLaunch = (settlement: 'registered' | 'failed'): void => {
+        if (agentLaunchToken === null || agentLaunchSettled) {
+          return
+        }
+        agentLaunchSettled = true
+        getHostAgentLaunchBoundary().settleAgentLaunch(agentLaunchToken, settlement)
+      }
+      if (args.agentLaunch && getSettings) {
+        const getLaunchSettings = getSettings
+        const descriptor = describeSpawnExecutionHost({
+          connectionId: args.connectionId,
+          cwd,
+          terminalWindowsShell: getLaunchSettings()?.terminalWindowsShell
+        })
+        const hostState = await deriveAgentLaunchHostState(
+          {
+            getSettings: getLaunchSettings,
+            getCatalogRevision: () => getLaunchSettings()?.agentCatalogRevision ?? 1,
+            // Step 2 wires real on-demand detection + remote home; these honest
+            // unknowns skip the stock-detection gate and fail typed only for
+            // `~`-prefixed values, never a fabricated result.
+            detectStockBaseAgents: detectionUnavailable,
+            resolveTargetHomePath: resolveLocalTargetHomePath
+          },
+          descriptor,
+          { worktreePath: cwd ?? null, repoPath: null }
+        )
+        const resolution = await resolveAgentLaunchSpawn(
+          {
+            getSettings: hostState.getSettings,
+            getCatalogRevision: hostState.getCatalogRevision,
+            boundary: getHostAgentLaunchBoundary()
+          },
+          {
+            request: args.agentLaunch,
+            // pty:spawn is the in-process desktop caller; never mobile/paired.
+            intent: { kind: 'interactive', client: 'desktop' },
+            target: hostState.target,
+            variables: hostState.variables,
+            scope:
+              typeof args.worktreeId === 'string' && args.worktreeId.length > 0
+                ? args.worktreeId
+                : 'local-pty-spawn',
+            principal: { kind: 'local' }
+          }
+        )
+        if (!resolution.ok) {
+          return 'failure' in resolution
+            ? { agentLaunch: { status: 'failed', failure: resolution.failure } }
+            : { agentLaunch: { status: 'rejected', requestError: resolution.requestError } }
+        }
+        agentLaunchToken = resolution.receipt.launchToken
+        agentLaunchOutcome = { status: 'launched', receipt: resolution.receipt }
+        args.command = resolution.plan.launchCommand
+        args.commandDelivery = 'provider'
+        args.launchConfig = resolution.plan.launchConfig
+        // Why: expectedProcess/telemetry lookups are keyed on the built-in base
+        // agent; the requested (possibly custom) identity travels in the receipt.
+        args.launchAgent = resolution.receipt.baseAgent
+        args.launchToken = resolution.receipt.launchToken
+        if (resolution.plan.startupCommandDelivery !== undefined) {
+          args.startupCommandDelivery = resolution.plan.startupCommandDelivery
+        }
+        // Why: the launch token is admission-minted host-side, so the client can no
+        // longer supply it; inject it for hook pane-attribution. The base-env block
+        // strips ORCA_AGENT_LAUNCH_TOKEN when no proven pane key is present.
+        args.env = {
+          ...args.env,
+          ...resolution.plan.env,
+          ORCA_AGENT_LAUNCH_TOKEN: resolution.receipt.launchToken
+        }
+        // Why: stdin-after-start agents launch bare; the host returns the resolved
+        // prompt for the renderer's readiness-gated paste writer to deliver.
+        agentLaunchFollowupPrompt = resolution.plan.followupPrompt
+        // Why: draft launches whose agent has no native flag/env affordance (or an
+        // oversized inline draft) return the text for the renderer to paste
+        // UNSUBMITTED; native-flag/env drafts deliver host-side and set nothing.
+        agentLaunchDraftPrompt = resolution.plan.draftPrompt ?? null
+      }
       const isClaudeLaunch = !args.connectionId && isClaudeLaunchCommand(args.command)
       if (isClaudeLaunch && isClaudeAuthSwitchInProgress()) {
+        settleAgentLaunch('failed')
         throw new Error('A Claude account switch is in progress. Try again after it finishes.')
       }
       const terminalRuntimeOptions =
@@ -3667,9 +3800,11 @@ export function registerPtyHandlers(
         isClaudeLaunch && prepareClaudeAuth ? await prepareClaudeAuth(initialSelectionTarget) : null
       spawnTiming.mark('auth')
       if (isClaudeLaunch && isClaudeAuthSwitchInProgress()) {
+        settleAgentLaunch('failed')
         throw new Error('A Claude account switch is in progress. Try again after it finishes.')
       }
       if (claudeAuth?.stripAuthEnv && hasClaudeAuthEnvConflict(args.env)) {
+        settleAgentLaunch('failed')
         throw new Error(
           'This Claude launch defines explicit Anthropic auth environment variables. Remove those overrides before using a managed Claude account.'
         )
@@ -3782,19 +3917,22 @@ export function registerPtyHandlers(
         // itself must be regenerated for the new leader PTY.
         const prepared = await runtime.prepareClaudeAgentTeamsLeaderForHandle({
           handle: preAllocatedHandle,
-          baseEnv: baseEnv ?? {}
+          baseEnv: baseEnv ?? {},
+          // Validated custom agent env propagates to teammate panes.
+          ...(args.launchConfig
+            ? { childEnv: stripEphemeralAgentTeamsEnv(args.launchConfig.agentEnv) }
+            : {})
         })
         baseEnv = {
           ...baseEnv,
           ...prepared.env
         }
         if (args.launchConfig) {
+          // Why: the regenerated team identity spawns the leader (baseEnv above)
+          // but must never persist; the durable snapshot keeps only custom env.
           effectiveLaunchConfig = {
             ...args.launchConfig,
-            agentEnv: {
-              ...args.launchConfig.agentEnv,
-              ...prepared.env
-            }
+            agentEnv: stripEphemeralAgentTeamsEnv(args.launchConfig.agentEnv)
           }
         }
       }
@@ -3987,6 +4125,9 @@ export function registerPtyHandlers(
         ? paneSpawnReservationsByPaneKey.get(reservationPaneKey)
         : undefined
       if (existingPaneSpawn) {
+        // Why: an in-flight spawn already owns this pane, so this request's
+        // resolved launch is discarded — release its admission reservation.
+        settleAgentLaunch('failed')
         return await existingPaneSpawn.promise
       }
       const paneSpawnReservation = reservationPaneKey ? reservePaneSpawn(reservationPaneKey) : null
@@ -4372,6 +4513,9 @@ export function registerPtyHandlers(
             })
           }
         }
+        // Why: the PTY is registered — move the admission reservation to a
+        // retained handoff so reconciliation can identify the surviving terminal.
+        settleAgentLaunch('registered')
         const response = {
           ...result,
           ...(!result.isReattach && effectiveLaunchConfig
@@ -4379,7 +4523,10 @@ export function registerPtyHandlers(
             : {}),
           // Why: a daemon-retry race can surface isReattach even for a minted
           // session id, and a reattach must never claim its cwd was remapped.
-          ...(startupCwdFallback && !result.isReattach ? { startupCwdFallback } : {})
+          ...(startupCwdFallback && !result.isReattach ? { startupCwdFallback } : {}),
+          ...(agentLaunchOutcome ? { agentLaunch: agentLaunchOutcome } : {}),
+          ...(agentLaunchFollowupPrompt ? { followupPrompt: agentLaunchFollowupPrompt } : {}),
+          ...(agentLaunchDraftPrompt ? { draftPrompt: agentLaunchDraftPrompt } : {})
         }
         return resolvePaneSpawnReservation(reservationPaneKey, paneSpawnReservation, response)
       } catch (err) {
@@ -4389,6 +4536,9 @@ export function registerPtyHandlers(
         // it lingers in paneSpawnReservationsByPaneKey and every future spawn
         // for this pane awaits a promise that never resolves. reject is a
         // no-op once the reservation has already resolved.
+        // Why: a spawn/persist/post-spawn failure releases the launch admission
+        // reservation (no terminal survives to reconcile).
+        settleAgentLaunch('failed')
         rejectPaneSpawnReservation(reservationPaneKey, paneSpawnReservation, err)
         throw err
       }

@@ -3,6 +3,7 @@ import { isBuiltInTuiAgent } from '../../../../shared/tui-agent-config'
 import type { BuiltInTuiAgent } from '../../../../shared/types'
 import { sleepingAgentLaunchConfigSchema } from '../../../../shared/workspace-session-sleeping-agents'
 import { AgentLaunchSpawnRequestSchema } from './agent-launch-spawn-schema'
+import { agentLaunchNoticeCodeSchema } from '../../../../shared/agent-launch-notice-schema'
 import { OptionalBoolean } from '../schemas'
 
 export const WorktreeTabSelector = z.object({
@@ -108,6 +109,16 @@ export const SetTabProps = WorktreeTabSelector.extend({
   isPinned: z.boolean().optional(),
   // undefined = leave unchanged; no "clear" semantic (absence means default 'terminal').
   viewMode: z.enum(['terminal', 'chat']).optional()
+})
+
+export const DismissLaunchNotice = WorktreeTabSelector.extend({
+  tabId: z
+    .unknown()
+    .transform((v) => (typeof v === 'string' ? v : ''))
+    .pipe(z.string().min(1, 'Missing tab id')),
+  launchToken: z.string().min(1).max(128),
+  // A non-enum code fails validation here so dismissal fails closed.
+  code: agentLaunchNoticeCodeSchema
 })
 
 export const CreateTerminalTab = WorktreeTabSelector.extend({

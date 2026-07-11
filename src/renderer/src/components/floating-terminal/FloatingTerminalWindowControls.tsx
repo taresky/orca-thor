@@ -1,20 +1,13 @@
 import { useCallback, useMemo } from 'react'
 import { Maximize2, Minimize2, Minus } from 'lucide-react'
-import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { getAgentCatalog, AgentIcon } from '@/lib/agent-catalog'
 import { focusTerminalTabSurface } from '@/lib/focus-terminal-tab-surface'
-import { CLIENT_PLATFORM } from '@/lib/new-workspace'
-import { buildAgentStartupPlan } from '@/lib/tui-agent-startup'
 import { resolveTelemetryAgentKind } from '@/lib/telemetry-agent-kind'
 import { useAppStore } from '@/store'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
 import { isTuiAgentEnabled, toLegacyAutoPreference } from '../../../../shared/tui-agent-selection'
-import {
-  resolveTuiAgentLaunchArgs,
-  resolveTuiAgentLaunchEnv
-} from '../../../../shared/tui-agent-launch-defaults'
 import { translate } from '@/i18n/i18n'
 import { useOptionalShortcutLabel } from '@/hooks/useShortcutLabel'
 
@@ -68,34 +61,13 @@ export function FloatingTerminalWindowControls({
       return
     }
     const state = useAppStore.getState()
-    const startupPlan = buildAgentStartupPlan({
-      agent: defaultAgent,
-      prompt: '',
-      cmdOverrides: state.settings?.agentCmdOverrides ?? {},
-      agentArgs: resolveTuiAgentLaunchArgs(defaultAgent, state.settings?.agentDefaultArgs),
-      agentEnv: resolveTuiAgentLaunchEnv(defaultAgent, state.settings?.agentDefaultEnv),
-      platform: CLIENT_PLATFORM,
-      allowEmptyPromptLaunch: true
-    })
-    if (!startupPlan) {
-      toast.error(
-        translate(
-          'auto.components.floating.terminal.FloatingTerminalWindowControls.82da3701e7',
-          'Could not build launch command for {{value0}}.',
-          { value0: defaultAgentLabel ?? defaultAgent }
-        )
-      )
-      return
-    }
     const tab = createTab(FLOATING_TERMINAL_WORKTREE_ID, undefined, undefined, { activate: false })
+    // Why: send the host-atomic default selection rather than a client-cached
+    // agent id — the host resolves and mints; a pre-spawn failure surfaces in the
+    // pane's error affordance (no client-side command assembly to fail here).
     state.queueTabStartupCommand(tab.id, {
-      command: startupPlan.launchCommand,
-      ...(startupPlan.env ? { env: startupPlan.env } : {}),
-      launchConfig: startupPlan.launchConfig,
-      launchAgent: defaultAgent,
-      ...(startupPlan.startupCommandDelivery
-        ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
-        : {}),
+      command: '',
+      agentLaunch: { selection: { kind: 'default' }, allowEmptyPromptLaunch: true },
       telemetry: {
         agent_kind: resolveTelemetryAgentKind(defaultAgent),
         launch_source: 'shortcut',
@@ -121,7 +93,7 @@ export function FloatingTerminalWindowControls({
     order.push(tab.id)
     fresh.setTabBarOrder(FLOATING_TERMINAL_WORKTREE_ID, order)
     focusTerminalTabSurface(tab.id)
-  }, [activateTab, createTab, defaultAgent, defaultAgentLabel, setActiveTabForWorktree])
+  }, [activateTab, createTab, defaultAgent, setActiveTabForWorktree])
 
   return (
     <div className="flex items-center gap-1 px-2" data-floating-terminal-no-drag>

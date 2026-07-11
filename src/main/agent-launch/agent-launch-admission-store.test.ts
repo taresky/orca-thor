@@ -111,6 +111,116 @@ describe('AgentLaunchAdmissionStore capacity', () => {
     expect(text).not.toContain('agentEnv')
     expect(text).not.toContain('wt-secret')
   })
+
+  it('capacity rows add base harness + host id, stay principal-scoped and secret-free', () => {
+    const store = new AgentLaunchAdmissionStore()
+    const mine = admitOne(store, { kind: 'remote', id: 'device-1' }, 'wt-42')
+    admitOne(store, { kind: 'remote', id: 'device-2' }, 'wt-secret')
+    expect(mine.ok).toBe(true)
+    const rows = store.capacitySummaryFor({ kind: 'remote', id: 'device-1' })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      intent: 'interactive',
+      scope: 'wt-42',
+      baseHarness: 'codex',
+      executionHostId: 'local'
+    })
+    const text = JSON.stringify(rows)
+    // Snapshot secrets never enter the row; only baseAgent + executionHostId do.
+    expect(text).not.toContain('argv')
+    expect(text).not.toContain('agentEnv')
+    expect(text).not.toContain('displayLabel')
+    expect(text).not.toContain('wt-secret')
+  })
+})
+
+describe('AgentLaunchAdmissionStore reservations', () => {
+  function reserveOne(store: AgentLaunchAdmissionStore, principal: AdmissionPrincipal) {
+    return store.reserve(principal)
+  }
+
+  function admitReservedOne(
+    store: AgentLaunchAdmissionStore,
+    reservationId: string,
+    scope = 'wt-1'
+  ) {
+    return store.admitReserved(reservationId, {
+      intent: 'interactive',
+      scope,
+      fingerprint: 'fp',
+      snapshot: SNAPSHOT,
+      admittedAt: 1
+    })
+  }
+
+  it('reserve holds capacity, and admitReserved converts without double-counting', () => {
+    const store = new AgentLaunchAdmissionStore()
+    const reservation = reserveOne(store, { kind: 'local' })
+    expect(reservation.ok).toBe(true)
+    if (!reservation.ok) {
+      return
+    }
+    // The hold counts toward the principal cap before any commit.
+    expect(store.pendingForPrincipal({ kind: 'local' })).toBe(1)
+    // pendingCount tracks committed records only; the hold is not committed yet.
+    expect(store.pendingCount()).toBe(0)
+    const admitted = admitReservedOne(store, reservation.reservation.reservationId)
+    expect(admitted.ok).toBe(true)
+    // Converting a hold does not re-increment: still exactly one for the principal.
+    expect(store.pendingForPrincipal({ kind: 'local' })).toBe(1)
+    expect(store.pendingCount()).toBe(1)
+  })
+
+  it('held reservations count toward the per-principal cap', () => {
+    const store = new AgentLaunchAdmissionStore()
+    const principal: AdmissionPrincipal = { kind: 'remote', id: 'device-1' }
+    for (let i = 0; i < MAX_PENDING_LAUNCHES_PER_PRINCIPAL; i += 1) {
+      expect(reserveOne(store, principal).ok).toBe(true)
+    }
+    // Both a further reserve and a direct admit are rejected once the holds fill.
+    expect(reserveOne(store, principal).ok).toBe(false)
+    expect(admitOne(store, principal).ok).toBe(false)
+  })
+
+  it('held reservations count toward the collective remote cap', () => {
+    const store = new AgentLaunchAdmissionStore()
+    for (let device = 0; device < 3; device += 1) {
+      for (let i = 0; i < MAX_PENDING_LAUNCHES_PER_PRINCIPAL; i += 1) {
+        expect(reserveOne(store, { kind: 'remote', id: `device-${device}` }).ok).toBe(true)
+      }
+    }
+    expect(reserveOne(store, { kind: 'remote', id: 'device-4' }).ok).toBe(false)
+    // Local capacity is still reserved even while remote holds are maxed.
+    expect(reserveOne(store, { kind: 'local' }).ok).toBe(true)
+  })
+
+  it('releaseReservation frees the held slot and unknown ids are no-ops', () => {
+    const store = new AgentLaunchAdmissionStore()
+    const reservation = reserveOne(store, { kind: 'local' })
+    expect(reservation.ok).toBe(true)
+    if (!reservation.ok) {
+      return
+    }
+    expect(store.releaseReservation(reservation.reservation.reservationId)).toBe(true)
+    expect(store.releaseReservation(reservation.reservation.reservationId)).toBe(false)
+    expect(store.pendingForPrincipal({ kind: 'local' })).toBe(0)
+  })
+
+  it('admitReserved fails closed for a released or unknown reservation', () => {
+    const store = new AgentLaunchAdmissionStore()
+    const reservation = reserveOne(store, { kind: 'local' })
+    expect(reservation.ok).toBe(true)
+    if (!reservation.ok) {
+      return
+    }
+    store.releaseReservation(reservation.reservation.reservationId)
+    const admitted = admitReservedOne(store, reservation.reservation.reservationId)
+    expect(admitted).toMatchObject({
+      ok: false,
+      failure: { code: 'launch_capacity_exceeded', reason: 'capacity' }
+    })
+    expect(admitReservedOne(store, 'never-issued').ok).toBe(false)
+  })
 })
 
 describe('LaunchAdmissionCoordinator', () => {

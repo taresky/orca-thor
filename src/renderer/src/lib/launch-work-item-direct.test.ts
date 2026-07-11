@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppState } from '@/store'
 import type * as TuiAgentSelectionModule from '../../../shared/tui-agent-selection'
-import type * as TuiAgentStartupModule from '@/lib/tui-agent-startup'
 
 const mocks = vi.hoisted(() => ({
   toastError: vi.fn(),
@@ -95,15 +94,6 @@ vi.mock('@/lib/telemetry', () => ({
   tuiAgentToAgentKind: (agent: string) => agent
 }))
 
-vi.mock('@/lib/tui-agent-startup', async () => {
-  const actual = await vi.importActual<typeof TuiAgentStartupModule>('@/lib/tui-agent-startup')
-  return {
-    ...actual,
-    buildAgentDraftLaunchPlan: vi.fn(actual.buildAgentDraftLaunchPlan),
-    buildAgentStartupPlan: vi.fn(actual.buildAgentStartupPlan)
-  }
-})
-
 vi.mock('../../../shared/tui-agent-selection', async () => {
   const actual = await vi.importActual<typeof TuiAgentSelectionModule>(
     '../../../shared/tui-agent-selection'
@@ -116,7 +106,6 @@ vi.mock('../../../shared/tui-agent-selection', async () => {
 
 import { launchWorkItemDirect } from './launch-work-item-direct'
 import { pasteDraftWhenAgentReady } from '@/lib/agent-paste-draft'
-import { buildAgentDraftLaunchPlan, buildAgentStartupPlan } from '@/lib/tui-agent-startup'
 import { pickTuiAgent } from '../../../shared/tui-agent-selection'
 
 const mockApi = {
@@ -126,6 +115,22 @@ const mockApi = {
   agentTrust: {
     markTrusted: vi.fn()
   }
+}
+
+// Reads the identity-only agentLaunch startup payload the flow passed to
+// activation. The host owns command/config/env, so `command` is always empty
+// and the prompt rides `agentLaunch.prompt` with a resolution-owned delivery.
+function startupFromLastActivation(): {
+  command: string
+  launchAgent?: string
+  agentLaunch?: {
+    selection: { kind: string; agent?: string }
+    prompt?: string
+    promptDelivery?: 'submit' | 'draft'
+    allowEmptyPromptLaunch?: boolean
+  }
+} {
+  return mocks.activateAndRevealWorktree.mock.calls.at(-1)?.[1]?.startup
 }
 
 describe('launchWorkItemDirect', () => {
@@ -196,31 +201,6 @@ describe('launchWorkItemDirect', () => {
     // @ts-expect-error -- test shim
     globalThis.window = { api: mockApi }
     mockApi.agentTrust.markTrusted.mockResolvedValue(undefined)
-  })
-
-  it('rejects invalid per-launch CLI arguments before creating a workspace', async () => {
-    const { launchWorkItemDirect } = await import('./launch-work-item-direct')
-
-    await expect(
-      launchWorkItemDirect({
-        repoId: 'repo-1',
-        launchSource: 'task_page',
-        openModalFallback: vi.fn(),
-        agentArgs: '--model "unterminated',
-        item: {
-          type: 'issue',
-          number: 42,
-          title: 'Fix invalid saved launch args',
-          url: 'https://github.com/acme/repo/issues/42'
-        }
-      })
-    ).resolves.toBe(false)
-
-    expect(mocks.createWorktree).not.toHaveBeenCalled()
-    expect(mocks.ensureDetectedAgents).not.toHaveBeenCalled()
-    expect(mocks.toastError).toHaveBeenCalledWith(
-      'CLI arguments are invalid: Unclosed quote in command template.'
-    )
   })
 
   it('passes a resolved PR branch override while using a short PR identity for workspace names', async () => {
@@ -361,7 +341,7 @@ describe('launchWorkItemDirect', () => {
     )
   })
 
-  it('prefills a link-only Linear reference without source context', async () => {
+  it('queues an identity-only draft launch for a link-only Linear reference without source context', async () => {
     mocks.ensureDetectedAgents.mockResolvedValue(['claude'])
     const { launchWorkItemDirect } = await import('./launch-work-item-direct')
 
@@ -392,42 +372,23 @@ describe('launchWorkItemDirect', () => {
       })
     ).resolves.toBe(true)
 
-    const expectedDraft = [
-      'Linked Linear issue: ENG-42',
+    const startup = startupFromLastActivation()
+    // The renderer holds the draft but never assembles a command/args/env — the
+    // host resolves the launch and delivers the prompt on the pty:spawn path.
+    expect(startup.command).toBe('')
+    expect(startup.agentLaunch?.selection).toEqual({ kind: 'agent', agent: 'claude' })
+    expect(startup.agentLaunch?.promptDelivery).toBe('draft')
+    expect(startup.agentLaunch?.prompt).toContain('Linked Linear issue: ENG-42')
+    expect(startup.agentLaunch?.prompt).toContain(
       'https://linear.app/acme/issue/ENG-42/ship-linear-parity'
-    ].join('\n')
-    expect(buildAgentDraftLaunchPlan).toHaveBeenCalledWith({
-      agent: 'claude',
-      draft: `${expectedDraft}\n`,
-      cmdOverrides: {},
-      agentArgs: '--dangerously-skip-permissions',
-      agentEnv: {},
-      platform: 'win32',
-      isRemote: false
-    })
-    expect(buildAgentStartupPlan).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        agent: 'claude',
-        prompt: '',
-        allowEmptyPromptLaunch: true
-      })
     )
-    expect(mocks.activateAndRevealWorktree).toHaveBeenCalledWith(
-      'repo-1::/repo/worktree',
-      expect.objectContaining({
-        startup: expect.objectContaining({
-          command: expect.stringContaining('Linked Linear issue: ENG-42')
-        })
-      })
-    )
-    const startupCommand = mocks.activateAndRevealWorktree.mock.calls[0]?.[1]?.startup?.command
-    expect(startupCommand).toContain('https://linear.app/acme/issue/ENG-42/ship-linear-parity')
-    expect(startupCommand).not.toContain('The distinctive Linear body text is here.')
-    expect(startupCommand).not.toContain('--- BEGIN LINKED WORK ITEM CONTEXT ---')
+    expect(startup.agentLaunch?.prompt).not.toContain('The distinctive Linear body text is here.')
+    expect(startup.agentLaunch?.prompt).not.toContain('--- BEGIN LINKED WORK ITEM CONTEXT ---')
+    // The host owns delivery on the spawn; the renderer does not paste here.
     expect(pasteDraftWhenAgentReady).not.toHaveBeenCalled()
   })
 
-  it('preserves explicit Linear paste content submit-after-ready behavior', async () => {
+  it('maps explicit paste content to a submit delivery in the agentLaunch request', async () => {
     mocks.ensureDetectedAgents.mockResolvedValue(['claude'])
     const { launchWorkItemDirect } = await import('./launch-work-item-direct')
 
@@ -454,26 +415,19 @@ describe('launchWorkItemDirect', () => {
       })
     ).resolves.toBe(true)
 
-    expect(buildAgentDraftLaunchPlan).not.toHaveBeenCalled()
-    expect(pasteDraftWhenAgentReady).toHaveBeenCalledWith(
-      expect.objectContaining({
-        tabId: 'tab-1',
-        content: 'Use this explicit user prompt.',
-        agent: 'claude',
-        submit: true,
-        forcePaste: true,
-        onTimeout: expect.any(Function)
-      })
-    )
-    expect(mocks.seedNativeChatLaunchPrompt).toHaveBeenCalledWith({
-      tabId: 'tab-1',
-      agent: 'claude',
-      text: 'Use this explicit user prompt.',
-      createdAt: expect.any(Number)
+    const startup = startupFromLastActivation()
+    expect(startup.agentLaunch).toEqual({
+      selection: { kind: 'agent', agent: 'claude' },
+      prompt: 'Use this explicit user prompt.',
+      promptDelivery: 'submit'
     })
+    // The host delivers the prompt on the spawn — the renderer neither pastes
+    // nor seeds a native-chat bubble on this path.
+    expect(pasteDraftWhenAgentReady).not.toHaveBeenCalled()
+    expect(mocks.seedNativeChatLaunchPrompt).not.toHaveBeenCalled()
   })
 
-  it('uses remote cursor-agent detection, trust preflight, and paste launch for SSH repos', async () => {
+  it('uses remote cursor-agent detection and trust preflight for SSH repos', async () => {
     mocks.store.repos = [
       {
         id: 'repo-ssh',
@@ -487,14 +441,6 @@ describe('launchWorkItemDirect', () => {
     mocks.store.settings = { defaultTuiAgent: 'cursor' } as AppState['settings']
     mocks.store.ensureRemoteDetectedAgents.mockResolvedValue(['cursor'])
     vi.mocked(pickTuiAgent).mockReturnValueOnce('cursor')
-    vi.mocked(buildAgentDraftLaunchPlan).mockReturnValueOnce(null)
-    vi.mocked(buildAgentStartupPlan).mockReturnValueOnce({
-      agent: 'cursor',
-      launchCommand: 'cursor-agent',
-      expectedProcess: 'cursor-agent',
-      followupPrompt: null,
-      launchConfig: { agentArgs: '', agentEnv: {} }
-    })
     mocks.store.createWorktree.mockResolvedValue({
       worktree: { id: 'wt-ssh', path: '/home/orca/repo-worktrees/issue-77' }
     })
@@ -519,33 +465,12 @@ describe('launchWorkItemDirect', () => {
       workspacePath: '/home/orca/repo-worktrees/issue-77',
       connectionId: 'ssh-1'
     })
-    expect(buildAgentDraftLaunchPlan).toHaveBeenCalledWith({
-      agent: 'cursor',
-      draft: 'https://github.com/acme/repo/issues/77',
-      cmdOverrides: {},
-      agentArgs: '--yolo',
-      agentEnv: {},
-      platform: 'linux',
-      isRemote: true
-    })
-    expect(buildAgentStartupPlan).toHaveBeenCalledWith({
-      agent: 'cursor',
-      prompt: '',
-      cmdOverrides: {},
-      agentArgs: '--yolo',
-      agentEnv: {},
-      platform: 'linux',
-      isRemote: true,
-      allowEmptyPromptLaunch: true
-    })
-    expect(mocks.activateAndRevealWorktree).toHaveBeenCalledWith(
-      'wt-ssh',
-      expect.objectContaining({
-        startup: expect.objectContaining({
-          draftPrompt: 'https://github.com/acme/repo/issues/77'
-        })
-      })
-    )
+    const startup = startupFromLastActivation()
+    expect(startup.command).toBe('')
+    expect(startup.agentLaunch?.selection).toEqual({ kind: 'agent', agent: 'cursor' })
+    expect(startup.agentLaunch?.promptDelivery).toBe('draft')
+    expect(startup.agentLaunch?.prompt).toContain('https://github.com/acme/repo/issues/77')
+    // The host resolves the remote command; the renderer does not paste here.
     expect(pasteDraftWhenAgentReady).not.toHaveBeenCalled()
   })
 
@@ -583,7 +508,7 @@ describe('launchWorkItemDirect', () => {
     )
   })
 
-  it('plans direct SSH workspace agent startup for the remote host platform', async () => {
+  it('queues an identity-only agentLaunch for direct SSH workspace launches', async () => {
     mocks.getConnectionId.mockReturnValue('ssh-1')
     mocks.ensureRemoteDetectedAgents.mockResolvedValue(['pi'])
     mocks.store.repos = [
@@ -614,9 +539,15 @@ describe('launchWorkItemDirect', () => {
     ).resolves.toBe(true)
 
     expect(mocks.activateAndRevealWorktree).toHaveBeenCalled()
-    const activationOptions = mocks.activateAndRevealWorktree.mock.calls.at(-1)?.[1]
-    expect(activationOptions.startup.command).toContain('unset ORCA_PI_PREFILL')
-    expect(activationOptions.startup.command).not.toContain('Remove-Item Env:ORCA_PI_PREFILL')
+    const startup = startupFromLastActivation()
+    // The launch command (including any host-specific env prep like
+    // ORCA_PI_PREFILL) is resolved host-side now, never client-assembled.
+    expect(startup.command).toBe('')
+    expect(startup.agentLaunch).toEqual({
+      selection: { kind: 'agent', agent: 'pi' },
+      prompt: 'Fix the failing checks.',
+      promptDelivery: 'draft'
+    })
   })
 
   it('uses the repo SSH connection when the created worktree is not hydrated yet', async () => {
@@ -655,11 +586,12 @@ describe('launchWorkItemDirect', () => {
 
     expect(mocks.ensureRemoteDetectedAgents).toHaveBeenCalledWith('ssh-1')
     expect(mocks.ensureDetectedAgents).not.toHaveBeenCalled()
-    const activationOptions = mocks.activateAndRevealWorktree.mock.calls.at(-1)?.[1]
-    expect(activationOptions.startup.command).toContain('unset ORCA_PI_PREFILL')
+    const startup = startupFromLastActivation()
+    expect(startup.command).toBe('')
+    expect(startup.agentLaunch?.selection).toEqual({ kind: 'agent', agent: 'pi' })
   })
 
-  it('plans direct local Windows-path launches with POSIX startup for WSL project runtime', async () => {
+  it('queues an identity-only agentLaunch for local Windows-path WSL project launches', async () => {
     mocks.store.repos = [
       {
         id: 'repo-1',
@@ -704,11 +636,13 @@ describe('launchWorkItemDirect', () => {
       })
     ).resolves.toBe(true)
 
-    expect(buildAgentStartupPlan).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agent: 'codex',
-        platform: 'linux'
-      })
-    )
+    // Platform/WSL resolution is host-owned now; the client passes identity only.
+    const startup = startupFromLastActivation()
+    expect(startup.command).toBe('')
+    expect(startup.agentLaunch).toEqual({
+      selection: { kind: 'agent', agent: 'codex' },
+      prompt: 'Fix the failing checks.',
+      promptDelivery: 'submit'
+    })
   })
 })

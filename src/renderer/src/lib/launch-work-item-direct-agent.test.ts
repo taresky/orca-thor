@@ -1,39 +1,66 @@
 import { describe, expect, it, vi } from 'vitest'
 
-vi.mock('sonner', () => ({ toast: { message: vi.fn() } }))
-vi.mock('@/lib/agent-paste-draft', () => ({ pasteDraftWhenAgentReady: vi.fn() }))
 vi.mock('@/lib/telemetry', () => ({
   track: vi.fn(),
   tuiAgentToAgentKind: (agent: string) => agent
 }))
-vi.mock('@/i18n/i18n', () => ({ translate: (_key: string, value: string) => value }))
 
-import { buildDirectWorkItemStartupOpts } from './launch-work-item-direct-agent'
-import type { AgentStartupPlan } from './tui-agent-startup'
+import { buildDirectWorkItemAgentLaunchStartup } from './launch-work-item-direct-agent'
 
-describe('buildDirectWorkItemStartupOpts', () => {
-  it('preserves Codex startup command delivery for linked work-item launches', () => {
-    const plan: AgentStartupPlan = {
+describe('buildDirectWorkItemAgentLaunchStartup', () => {
+  it('builds an identity-only draft launch that never carries a client command or args', () => {
+    const startup = buildDirectWorkItemAgentLaunchStartup({
       agent: 'codex',
-      launchCommand: "codex 'review linked issue'",
-      expectedProcess: 'codex',
-      followupPrompt: null,
-      launchConfig: { agentArgs: '', agentEnv: {} },
-      startupCommandDelivery: 'shell-ready'
-    }
+      draftContent: 'Review this linked issue',
+      promptDelivery: 'draft',
+      launchSource: 'task_page'
+    })
 
-    expect(buildDirectWorkItemStartupOpts('codex', plan, 'task_page')).toEqual({
-      startup: {
-        command: "codex 'review linked issue'",
-        launchAgent: 'codex',
-        launchConfig: { agentArgs: '', agentEnv: {} },
-        startupCommandDelivery: 'shell-ready',
-        telemetry: {
-          agent_kind: 'codex',
-          launch_source: 'task_page',
-          request_kind: 'new'
-        }
+    expect(startup).toEqual({
+      command: '',
+      launchAgent: 'codex',
+      agentLaunch: {
+        selection: { kind: 'agent', agent: 'codex' },
+        prompt: 'Review this linked issue',
+        promptDelivery: 'draft'
+      },
+      telemetry: {
+        agent_kind: 'codex',
+        launch_source: 'task_page',
+        request_kind: 'new'
       }
     })
+  })
+
+  it('maps submit-after-ready to a submit delivery and lets the host own fold-vs-paste', () => {
+    const startup = buildDirectWorkItemAgentLaunchStartup({
+      agent: 'claude',
+      draftContent: 'Fix the failing checks.',
+      promptDelivery: 'submit-after-ready',
+      launchSource: 'task_page'
+    })
+
+    expect(startup.agentLaunch).toEqual({
+      selection: { kind: 'agent', agent: 'claude' },
+      prompt: 'Fix the failing checks.',
+      promptDelivery: 'submit'
+    })
+    expect(startup.command).toBe('')
+    expect(startup).not.toHaveProperty('launchConfig')
+  })
+
+  it('launches bare with allowEmptyPromptLaunch when there is no draft content', () => {
+    const startup = buildDirectWorkItemAgentLaunchStartup({
+      agent: 'codex',
+      draftContent: '   ',
+      promptDelivery: 'draft',
+      launchSource: 'task_page'
+    })
+
+    expect(startup.agentLaunch).toEqual({
+      selection: { kind: 'agent', agent: 'codex' },
+      allowEmptyPromptLaunch: true
+    })
+    expect(startup.agentLaunch).not.toHaveProperty('prompt')
   })
 })

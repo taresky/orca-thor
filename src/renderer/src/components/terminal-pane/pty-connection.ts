@@ -4,6 +4,9 @@ import type { ManagedPaneInternal } from '@/lib/pane-manager/pane-manager-types'
 import type { IBuffer, IDisposable } from '@xterm/xterm'
 import { resolveCursorAgentImeAnchor } from '@/lib/pane-manager/terminal-ime-anchor'
 import { detectAgentStatusFromTitle, agentTypeToIconAgent, isClaudeAgent } from '@/lib/agent-status'
+import { agentLaunchOutcomeErrorMessage } from '@/lib/agent-launch-failure-copy'
+import { pasteDraftWhenAgentReady } from '@/lib/agent-paste-draft'
+import { showAutomationPromptNotSentToast } from '@/lib/agent-background-session-timeout-toast'
 import { resolvePaneTitleDecision } from './terminal-title-evidence'
 import { scheduleRuntimeGraphSync } from '@/runtime/sync-runtime-graph'
 import { useAppStore } from '@/store'
@@ -26,6 +29,7 @@ import { takeCurrentPtyDeliveryAckCredit } from './terminal-pty-ack-gate'
 import { serializeWithAbsoluteCursor } from '../../../../shared/terminal-serialize-absolute-cursor'
 import { isTerminalQueryReply } from '../../../../shared/terminal-query-reply'
 import type { PtyBufferSnapshot, PtyConnectResult } from './pty-transport'
+import type { PtyConnectAgentLaunchFailure } from './pty-transport-types'
 import { createIpcPtyTransport } from './pty-transport'
 import { createRemoteRuntimePtyTransport } from './remote-runtime-pty-transport'
 import { getConnectionId } from '@/lib/connection-context'
@@ -1092,7 +1096,12 @@ export function connectPanePty(
       }
     }
   }
-  const launchToken = paneStartup?.launchConfig
+  // Why: on the host-resolved agentLaunch path the renderer no longer mints a
+  // token — it is undefined until the launched receipt arrives post-spawn, then
+  // reassigned so the status-attribution callbacks and effective-config
+  // registration below use the host's admission-minted token. The legacy/resume
+  // path keeps minting client-side from the stored launchConfig.
+  let launchToken = paneStartup?.launchConfig
     ? (paneStartup.launchToken ?? createBrowserUuid())
     : undefined
   const startupDraftAgent = paneStartup?.launchAgent ?? paneStartup?.initialAgentStatus?.agent
@@ -3169,6 +3178,9 @@ export function connectPanePty(
     ...(paneStartup?.launchConfig ? { launchConfig: paneStartup.launchConfig } : {}),
     ...(launchToken ? { launchToken } : {}),
     ...(paneStartup?.launchAgent ? { launchAgent: paneStartup.launchAgent } : {}),
+    // Host-resolved agentLaunch request; when set the transport sends only this
+    // and the host owns command/config/token assembly (contract B).
+    ...(paneStartup?.agentLaunch ? { agentLaunch: paneStartup.agentLaunch } : {}),
     ...(paneStartup?.telemetry ? { telemetry: paneStartup.telemetry } : {}),
     onPtyExit: onExit,
     onPtySpawn,
@@ -3647,7 +3659,9 @@ export function connectPanePty(
     return cols > 0 && rows > 0 ? { cols, rows } : null
   }
   const shouldSettleStartupGridBeforeConnect = (): boolean =>
-    Boolean(paneStartup?.command) &&
+    // The host-resolved agentLaunch path carries no client command but still
+    // launches a TUI, so settle the grid for it the same as a command launch.
+    Boolean(paneStartup?.command || paneStartup?.agentLaunch) &&
     deps.isVisibleRef.current &&
     !connectionId &&
     runtimeEnvironmentId === null
@@ -4211,6 +4225,29 @@ export function connectPanePty(
 
       const trackedPromise: Promise<string | null> = Promise.resolve(spawnedRaw)
         .then(async (spawnedPtyId) => {
+          if (
+            spawnedPtyId &&
+            typeof spawnedPtyId === 'object' &&
+            !('id' in spawnedPtyId) &&
+            'agentLaunch' in spawnedPtyId
+          ) {
+            // Pre-spawn host-resolved launch failure/rejection: no PTY was
+            // created. Show the localized affordance in the pane and drop any
+            // pending delivery target instead of waiting for a pane that never
+            // spawned.
+            reportError(agentLaunchOutcomeErrorMessage(spawnedPtyId.agentLaunch))
+            if (
+              paneStartup?.launchConfig ||
+              (startupOverride && 'launchConfig' in startupOverride)
+            ) {
+              clearRegisteredStartupLaunchConfig()
+            }
+            const failureGen = await preSignalPromise
+            if (typeof failureGen === 'number') {
+              void window.api.pty.clearPendingPaneSerializer(cacheKey, failureGen).catch(() => {})
+            }
+            return null
+          }
           const resolvedPtyId =
             spawnedPtyId && typeof spawnedPtyId === 'object' && 'id' in spawnedPtyId
               ? spawnedPtyId.id
@@ -4218,10 +4255,56 @@ export function connectPanePty(
                 ? spawnedPtyId
                 : transport.getPtyId()
           if (spawnedPtyId && typeof spawnedPtyId === 'object' && 'id' in spawnedPtyId) {
+            const launchedReceipt =
+              spawnedPtyId.agentLaunch?.status === 'launched'
+                ? spawnedPtyId.agentLaunch.receipt
+                : null
+            if (launchedReceipt) {
+              // The host admission-minted token supersedes the (absent) client
+              // token so status attribution and config registration key off it.
+              launchToken = launchedReceipt.launchToken
+              if (launchedReceipt.notices.length > 0) {
+                // Stamp the host-owned launch notices onto this pane's tab so the
+                // banner renders locally; the host stays the owner and drives
+                // dismissal (mirrors the runtime-reveal path in useIpcEvents).
+                useAppStore.getState().attachLaunchNotices({
+                  worktreeId: deps.worktreeId,
+                  tabId: deps.tabId,
+                  launchToken: launchedReceipt.launchToken,
+                  notices: launchedReceipt.notices
+                })
+              }
+            }
             registerEffectiveLaunchConfig(spawnedPtyId.launchConfig, {
               ...(coldRestoreOverride ? { launchToken: coldRestoreOverride.launchToken } : {}),
-              ...(coldRestoreOverride ? { launchAgent: coldRestoreOverride.agent } : {})
+              ...(launchedReceipt ? { launchToken: launchedReceipt.launchToken } : {}),
+              ...(coldRestoreOverride ? { launchAgent: coldRestoreOverride.agent } : {}),
+              ...(launchedReceipt ? { launchAgent: launchedReceipt.baseAgent } : {})
             })
+            // Why: this is the renderer paste writer for the host-resolved
+            // agentLaunch path. The host returns a prompt ONLY when it could not
+            // fold it into the launch command — followupPrompt submits (stdin-
+            // after-start base agents), draftPrompt pastes unsubmitted (agents
+            // without a native prefill flag). The host owns that fold-vs-paste
+            // decision (correct for custom agents), so the renderer delivers
+            // exactly what it returns. Skip when a legacy caller already owns a
+            // client-set draft paste to avoid double injection.
+            const hostFollowupPrompt = spawnedPtyId.followupPrompt ?? null
+            const hostDraftPrompt = spawnedPtyId.draftPrompt ?? null
+            const hostDeliveredAgent = launchedReceipt?.baseAgent ?? paneStartup?.launchAgent
+            if (!startupDraftPromptNeedsPaste && hostDeliveredAgent) {
+              const hostFollowupSubmit = hostFollowupPrompt !== null
+              const hostDeliveredPrompt = hostFollowupPrompt ?? hostDraftPrompt
+              if (hostDeliveredPrompt) {
+                void pasteDraftWhenAgentReady({
+                  tabId: deps.tabId,
+                  content: hostDeliveredPrompt,
+                  agent: hostDeliveredAgent,
+                  submit: hostFollowupSubmit,
+                  onTimeout: () => showAutomationPromptNotSentToast(hostDeliveredAgent)
+                }).catch(() => {})
+              }
+            }
           }
           if (resolvedPtyId) {
             if (
@@ -6352,7 +6435,10 @@ export function connectPanePty(
     })
 
     const handleReattachResult = (
-      result: PtyConnectResult | string | void,
+      // The reattach path never sends agentLaunch, so a PtyConnectAgentLaunchFailure
+      // cannot occur here; it is admitted only to match the widened connect union
+      // and the `'id' in result` guard below treats it as "no PTY".
+      result: PtyConnectResult | PtyConnectAgentLaunchFailure | string | void,
       staleSessionId?: string | null,
       coldRestoreStartup?: ColdRestoreAgentResumeStartup | null
     ): void => {

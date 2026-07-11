@@ -29,6 +29,16 @@ import type {
   SourceControlAiSettings
 } from './source-control-ai-types'
 import type { StartupCommandDelivery } from './codex-startup-delivery'
+// Type-only import; the cycle with agent-launch-contract (which imports TuiAgent
+// from here) is erased at compile time.
+import type {
+  AgentLaunchFailure,
+  AgentLaunchReceipt,
+  AgentLaunchRequestError,
+  PersistedAgentLaunchFailure,
+  PersistedLaunchNoticeState
+} from './agent-launch-contract'
+import type { AgentLaunchSpawnRequest } from './agent-launch-spawn-request'
 import type { AgentKind, LaunchSource, RequestKind } from './telemetry-events'
 import type { SleepingAgentLaunchConfig, SleepingAgentSessionRecord } from './agent-session-resume'
 import type { ClaudeAgentTeamsMode } from './claude-agent-teams-tmux-compat'
@@ -512,6 +522,13 @@ export type Worktree = {
   diffComments?: DiffComment[]
   mobileDiffReview?: MobileDiffReviewState
   automationProvenance?: AutomationWorkspaceProvenance
+  /** Client-safe mirror of {@link WorktreeMeta.pendingAgentLaunch} for the
+   *  post-create recovery card; carries only anti-race guards and display
+   *  attribution, never the private launch snapshot or token. */
+  pendingAgentLaunch?: WorktreeMeta['pendingAgentLaunch']
+  /** Client-safe mirror of {@link WorktreeMeta.agentLaunchFailure}: the durable
+   *  post-create failure the recovery card renders. Only codes + repair hints. */
+  agentLaunchFailure?: PersistedAgentLaunchFailure
 } & GitWorktreeInfo
 
 export type AutomationWorkspaceProvenance = {
@@ -598,6 +615,20 @@ export type WorktreeMeta = {
   pendingFirstAgentMessageRename?: boolean
   /** See {@link Worktree.firstAgentMessageRenameError}. */
   firstAgentMessageRenameError?: string | null
+  /** In-flight/committed agent launch for a two-stage creation transaction.
+   *  Client-safe: `operationId`/`priorFailureId` are anti-race guards (not
+   *  secrets, they appear in client metadata), `requestedAgent` is display
+   *  attribution. The private launch snapshot and token live only in the host
+   *  operation store and never enter this record. */
+  pendingAgentLaunch?: {
+    operationId: string
+    requestedAgent: TuiAgent
+    priorFailureId?: string
+  }
+  /** Durable failure from a post-create final-resolution or spawn failure. The
+   *  workspace is retained and Retry / Choose agent recover from this record;
+   *  a successful (re)launch clears it. */
+  agentLaunchFailure?: PersistedAgentLaunchFailure
   sparseDirectories?: string[]
   sparseBaseRef?: string
   sparsePresetId?: string
@@ -847,6 +878,10 @@ export type TerminalTab = {
    *  hook status overrides this once the agent does anything. Plain terminals
    *  and manually-started agents omit it. */
   launchAgent?: TuiAgent
+  /** Host-owned agent-launch notices + their dismissal token for this terminal.
+   *  The host is the sole owner; renderer/mobile mirror it and never recreate a
+   *  dismissed notice. Absent when no agent launch produced a notice. */
+  launchNotices?: PersistedLaunchNoticeState
   /** Why: when `setActiveWorktree` bumps generation on all-dead tabs to drive a
    *  TerminalPane remount, the fresh PTY that results is caused by navigation,
    *  not by the user doing work. Without this flag the resulting
@@ -2109,6 +2144,12 @@ export type CreateWorktreeArgs = {
   /** Optional startup command for callers that want the backend to spawn the
    *  first terminal as soon as the worktree is registered. */
   startup?: WorktreeStartupLaunch
+  /** Host-resolved agent launch for a transactional two-stage create. When
+   *  present the host owns resolution and IGNORES createdWithAgent/startup for
+   *  the agent terminal — the same request shape carried by pty:spawn,
+   *  terminal.create, and session.tabs.createTerminal (one launch contract
+   *  across every surface). */
+  agentLaunch?: AgentLaunchSpawnRequest
   /** Correlates `createWorktree:progress` events back to a specific pending
    *  creation in the renderer, so concurrent background creates each drive
    *  their own status surface. Omitted by synchronous callers. */
@@ -2117,7 +2158,10 @@ export type CreateWorktreeArgs = {
   automationProvenanceRequest?: AutomationWorkspaceProvenanceRequest
 }
 
-export type CreateWorktreeResult = {
+export type CreatedWorktreeResult = {
+  // Discriminates the created arm from a pre-create rejection. Optional so the
+  // many producers that build a created result need not set it explicitly.
+  created?: true
   worktree: Worktree & {
     parentWorktreeId?: string | null
     childWorktreeIds?: string[]
@@ -2143,7 +2187,33 @@ export type CreateWorktreeResult = {
     surface?: 'visible' | 'background'
   }
   timing?: WorktreeCreateTiming
+  // Present only when the create requested an agent (two-stage launch). A
+  // post-create resolution/spawn failure is an RPC success carrying the created
+  // worktree plus `status: 'failed'`, never a rejected request that loses the id.
+  agentLaunchResult?:
+    | { status: 'launched'; receipt: AgentLaunchReceipt }
+    | { status: 'failed'; failure: PersistedAgentLaunchFailure }
 }
+
+/** Pre-create agent-launch rejection: validation failed before any git side
+ *  effect, so NO worktree exists. Carried in-band (never a thrown RPC error,
+ *  which serializes lossily and drops the typed hints) so every transport can
+ *  keep the composer open with client-safe recovery hints. */
+export type WorktreeAgentLaunchRejection =
+  // Transient (not persisted): no worktree was created, so there is no owner
+  // record to hold the failure. Mirrors terminal.create's pre-spawn outcome.
+  | { status: 'failed'; failure: AgentLaunchFailure }
+  | { status: 'rejected'; requestError: AgentLaunchRequestError }
+
+export type NotCreatedWorktreeResult = {
+  created: false
+  agentLaunchResult: WorktreeAgentLaunchRejection
+}
+
+/** Result of a worktree create request: either the created worktree (optionally
+ *  carrying a post-create launch result) or a pre-create rejection that created
+ *  nothing. The rejection arm only occurs on the runtime/host launch path. */
+export type CreateWorktreeResult = CreatedWorktreeResult | NotCreatedWorktreeResult
 
 export type PreservedWorktreeBranch = {
   branchName: string

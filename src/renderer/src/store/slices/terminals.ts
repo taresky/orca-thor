@@ -27,6 +27,10 @@ import {
   worktreeWorkspaceKey
 } from '../../../../shared/workspace-scope'
 import { deriveGeneratedTabTitle } from '../../../../shared/agent-tab-title'
+import type {
+  AgentLaunchNotice,
+  AgentLaunchNoticeCode
+} from '../../../../shared/agent-launch-contract'
 import { isDecorativeAgentTitleFrameChange } from '../../../../shared/agent-decorative-title-signature'
 import {
   makePaneKey,
@@ -38,6 +42,7 @@ import { getRepoIdFromWorktreeId, splitWorktreeId } from '../../../../shared/wor
 import { isWslUncPath } from '../../../../shared/wsl-paths'
 import type { ProjectExecutionRuntimeResolution } from '../../../../shared/project-execution-runtime'
 import type { StartupCommandDelivery } from '../../../../shared/codex-startup-delivery'
+import type { AgentLaunchSpawnRequest } from '../../../../shared/agent-launch-spawn-request'
 import { resolveLocalWindowsTerminalShellOverrideForTab } from '../../../../shared/local-windows-terminal-runtime'
 import { WINDOWS_GIT_BASH_SHELL } from '../../../../shared/windows-terminal-shell'
 import type { AgentStartedTelemetry } from '../../lib/worktree-activation'
@@ -483,6 +488,10 @@ export type TerminalSlice = {
     string,
     {
       command: string
+      // Host-owned launch request (identity + prompt); when set the fresh-agent
+      // path sends this and the host resolves the command and mints the token,
+      // superseding command/launchConfig/launchToken/launchAgent below.
+      agentLaunch?: AgentLaunchSpawnRequest
       /** Renderer-delivered startup input for callers that need xterm paste
        *  semantics before the submit Enter. */
       delivery?: 'terminal-paste'
@@ -618,6 +627,23 @@ export type TerminalSlice = {
     opts?: { recordInteraction?: boolean }
   ) => void
   setTabColor: (tabId: string, color: string | null) => void
+  /** Mirror the host-owned launch notices from a spawn receipt onto the tab so
+   *  the banner renders. The host remains the owner; this only reflects the
+   *  receipt the host already produced. No-op when there are no notices. */
+  attachLaunchNotices: (args: {
+    worktreeId: string
+    tabId: string
+    launchToken: string
+    notices: readonly AgentLaunchNotice[]
+  }) => void
+  /** Dismiss a host-owned launch notice. The host is the owner: this asks it to
+   *  remove every matching code, then mirrors the confirmed removal locally. */
+  dismissLaunchNotice: (args: {
+    worktreeId: string
+    tabId: string
+    launchToken: string
+    code: AgentLaunchNoticeCode
+  }) => void
   updateTabPtyId: (tabId: string, ptyId: string) => void
   clearTabPtyId: (tabId: string, ptyId?: string) => void
   shutdownWorktreeTerminals: (
@@ -661,6 +687,10 @@ export type TerminalSlice = {
     tabId: string,
     startup: {
       command: string
+      // Host-owned launch request (identity + prompt); when set the fresh-agent
+      // path sends this and the host resolves the command and mints the token,
+      // superseding command/launchConfig/launchToken/launchAgent below.
+      agentLaunch?: AgentLaunchSpawnRequest
       delivery?: 'terminal-paste'
       startupCommandDelivery?: StartupCommandDelivery
       env?: Record<string, string>
@@ -678,6 +708,7 @@ export type TerminalSlice = {
   consumeTabInitialCwd: (tabId: string) => string | null
   consumeTabStartupCommand: (tabId: string) => {
     command: string
+    agentLaunch?: AgentLaunchSpawnRequest
     delivery?: 'terminal-paste'
     startupCommandDelivery?: StartupCommandDelivery
     env?: Record<string, string>
@@ -1849,6 +1880,52 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
         )
       }
     }
+  },
+
+  attachLaunchNotices: ({ worktreeId, tabId, launchToken, notices }) => {
+    if (notices.length === 0) {
+      return
+    }
+    set((s) => {
+      const tabs = s.tabsByWorktree[worktreeId]
+      if (!tabs) {
+        return {}
+      }
+      const next = tabs.map((t) =>
+        t.id === tabId ? { ...t, launchNotices: { launchToken, notices } } : t
+      )
+      return { tabsByWorktree: { ...s.tabsByWorktree, [worktreeId]: next } }
+    })
+  },
+
+  dismissLaunchNotice: ({ worktreeId, tabId, launchToken, code }) => {
+    // Ask the host (owner) to remove and persist; mirror the confirmed removal
+    // locally so the banner refits the terminal immediately.
+    const runtimeEnvironmentId = getRuntimeEnvironmentIdForWorktree(get(), worktreeId)
+    if (runtimeEnvironmentId) {
+      void import('@/runtime/web-runtime-session').then(({ dismissWebRuntimeLaunchNotice }) =>
+        dismissWebRuntimeLaunchNotice({ worktreeId, tabId, launchToken, code })
+      )
+    } else {
+      void window.api.pty.dismissLaunchNotice({ worktreeId, tabId, launchToken, code })
+    }
+    set((s) => {
+      const tabs = s.tabsByWorktree[worktreeId]
+      if (!tabs) {
+        return {}
+      }
+      const next = tabs.map((t) => {
+        if (t.id !== tabId || t.launchNotices?.launchToken !== launchToken) {
+          return t
+        }
+        const remaining = t.launchNotices.notices.filter((notice) => notice.code !== code)
+        const { launchNotices: _dropped, ...rest } = t
+        return remaining.length > 0
+          ? { ...rest, launchNotices: { launchToken, notices: remaining } }
+          : rest
+      })
+      return { tabsByWorktree: { ...s.tabsByWorktree, [worktreeId]: next } }
+    })
   },
 
   updateTabPtyId: (tabId, ptyId) => {

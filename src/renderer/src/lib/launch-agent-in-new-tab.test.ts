@@ -381,16 +381,21 @@ describe('launchAgentInNewTab', () => {
       prompt: 'fix the spinner'
     })
 
-    expect(mockQueueTabStartupCommand).toHaveBeenCalledWith(
-      'tab-1',
-      expect.objectContaining({
-        command: "command-code --trust '--yolo' 'fix the spinner'",
-        initialAgentStatus: {
-          agent: 'command-code',
-          prompt: 'fix the spinner'
-        }
-      })
-    )
+    const queued = mockQueueTabStartupCommand.mock.calls[0][1]
+    // The prompt folds into the host-resolved launch (argv agent); the request
+    // carries identity + prompt only — never a client command, config, or token.
+    expect(queued.agentLaunch).toEqual({
+      selection: { kind: 'agent', agent: 'command-code' },
+      prompt: 'fix the spinner'
+    })
+    expect(queued.initialAgentStatus).toEqual({
+      agent: 'command-code',
+      prompt: 'fix the spinner'
+    })
+    expect(queued.command).toBeFalsy()
+    expect(queued).not.toHaveProperty('launchConfig')
+    expect(queued).not.toHaveProperty('launchAgent')
+    expect(queued).not.toHaveProperty('launchToken')
   })
 
   it('does not track prompt-sent for argv prompt launches', async () => {
@@ -427,7 +432,8 @@ describe('launchAgentInNewTab', () => {
       worktreeId: 'wt-1',
       prompt: "review Bob's change",
       promptDelivery: 'draft',
-      launchPlatform: 'win32'
+      launchPlatform: 'win32',
+      legacyResumeAssembly: true
     })
 
     expect(mockQueueTabStartupCommand).toHaveBeenCalledWith(
@@ -445,7 +451,8 @@ describe('launchAgentInNewTab', () => {
     launchAgentInNewTab({
       agent: 'claude',
       worktreeId: 'wt-1',
-      launchPlatform: 'win32'
+      launchPlatform: 'win32',
+      legacyResumeAssembly: true
     })
 
     expect(mockQueueTabStartupCommand).toHaveBeenCalledWith(
@@ -463,7 +470,8 @@ describe('launchAgentInNewTab', () => {
     launchAgentInNewTab({
       agent: 'claude',
       worktreeId: 'wt-1',
-      launchPlatform: 'win32'
+      launchPlatform: 'win32',
+      legacyResumeAssembly: true
     })
 
     expect(mockQueueTabStartupCommand).toHaveBeenCalledWith(
@@ -483,7 +491,8 @@ describe('launchAgentInNewTab', () => {
       worktreeId: 'wt-1',
       prompt: 'fix the spinner',
       agentArgs: '--model gpt-5',
-      launchPlatform: 'win32'
+      launchPlatform: 'win32',
+      legacyResumeAssembly: true
     })
 
     expect(mockQueueTabStartupCommand).toHaveBeenCalledWith(
@@ -503,7 +512,8 @@ describe('launchAgentInNewTab', () => {
       worktreeId: 'wt-1',
       prompt: "review Bob's change",
       promptDelivery: 'draft',
-      launchPlatform: 'win32'
+      launchPlatform: 'win32',
+      legacyResumeAssembly: true
     })
 
     expect(mockQueueTabStartupCommand).toHaveBeenCalledWith(
@@ -521,7 +531,8 @@ describe('launchAgentInNewTab', () => {
 
     launchAgentInNewTab({
       agent: 'claude',
-      worktreeId: 'wt-1'
+      worktreeId: 'wt-1',
+      legacyResumeAssembly: true
     })
 
     expect(mockQueueTabStartupCommand).toHaveBeenCalledWith(
@@ -558,7 +569,8 @@ describe('launchAgentInNewTab', () => {
       agent: 'claude',
       worktreeId: 'wt-1',
       prompt: "review Bob's change",
-      promptDelivery: 'draft'
+      promptDelivery: 'draft',
+      legacyResumeAssembly: true
     })
 
     expect(mockQueueTabStartupCommand).toHaveBeenCalledWith(
@@ -578,7 +590,8 @@ describe('launchAgentInNewTab', () => {
       worktreeId: 'wt-1',
       prompt,
       promptDelivery: 'draft',
-      launchPlatform: 'win32'
+      launchPlatform: 'win32',
+      legacyResumeAssembly: true
     })
 
     expect(result).not.toHaveProperty('promptDeliveryResult')
@@ -642,12 +655,16 @@ describe('launchAgentInNewTab', () => {
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(mockQueueTabStartupCommand).toHaveBeenCalledWith(
-      'tab-1',
-      expect.objectContaining({
-        command: "command-code --trust '--yolo'"
-      })
-    )
+    const queued = mockQueueTabStartupCommand.mock.calls[0][1]
+    // submit-after-ready launches bare and pastes the prompt post-ready, so the
+    // request carries allowEmptyPromptLaunch and never a client command/config.
+    expect(queued.agentLaunch).toEqual({
+      selection: { kind: 'agent', agent: 'command-code' },
+      allowEmptyPromptLaunch: true
+    })
+    expect(queued.command).toBeFalsy()
+    expect(queued).not.toHaveProperty('launchConfig')
+    expect(queued).not.toHaveProperty('launchAgent')
     expect(mockPasteDraftWhenAgentReady).toHaveBeenCalledWith(
       expect.objectContaining({
         tabId: 'tab-1',
@@ -788,11 +805,105 @@ describe('launchAgentInNewTab', () => {
       promptDelivery: 'submit-after-ready'
     })
 
-    expect(mockQueueTabStartupCommand).toHaveBeenCalledWith(
-      'tab-1',
-      expect.objectContaining({
-        command: "codex '--model' 'gpt-5.5'"
+    const queued = mockQueueTabStartupCommand.mock.calls[0][1]
+    // The generated prompt is pasted post-ready, so the host-resolved request
+    // launches bare — the prompt never rides the request (nor an argv command).
+    expect(queued.agentLaunch).toEqual({
+      selection: { kind: 'agent', agent: 'codex' },
+      allowEmptyPromptLaunch: true
+    })
+    expect(queued.agentLaunch.prompt).toBeUndefined()
+    expect(queued.command).toBeFalsy()
+  })
+
+  it('routes a bare quick launch through agentLaunch with no client command, config, or token', async () => {
+    const { launchAgentInNewTab } = await import('./launch-agent-in-new-tab')
+
+    launchAgentInNewTab({ agent: 'codex', worktreeId: 'wt-1' })
+
+    const queued = mockQueueTabStartupCommand.mock.calls[0][1]
+    expect(queued.agentLaunch).toEqual({
+      selection: { kind: 'agent', agent: 'codex' },
+      allowEmptyPromptLaunch: true
+    })
+    expect(queued.command).toBeFalsy()
+    expect(queued).not.toHaveProperty('launchConfig')
+    expect(queued).not.toHaveProperty('launchAgent')
+    expect(queued).not.toHaveProperty('launchToken')
+    expect(queued).not.toHaveProperty('env')
+  })
+
+  it('assembles the command client-side only under the legacy fork opt-in', async () => {
+    const { launchAgentInNewTab } = await import('./launch-agent-in-new-tab')
+
+    launchAgentInNewTab({
+      agent: 'codex',
+      worktreeId: 'wt-1',
+      prompt: 'fix the spinner',
+      legacyResumeAssembly: true
+    })
+
+    const queued = mockQueueTabStartupCommand.mock.calls[0][1]
+    expect(queued.command).toContain('codex')
+    expect(queued.launchAgent).toBe('codex')
+    expect(queued).not.toHaveProperty('agentLaunch')
+  })
+
+  it('keys the fold-vs-paste decision on the resolved base agent for a custom id', async () => {
+    // A custom id whose base (aider) is a stdin-after-start followup agent must
+    // take the paste path: launch bare, deliver the prompt post-ready. Without
+    // base-keying, the raw custom id indexes TUI_AGENT_CONFIG as `any`, reads
+    // promptInjectionMode as undefined, and wrongly folds the prompt into argv.
+    const customId = 'custom-agent:aider:11111111-1111-4111-8111-111111111111'
+    store.settings = {
+      agentCmdOverrides: {},
+      agentDefaultArgs: {},
+      agentDefaultEnv: {},
+      activeRuntimeEnvironmentId: null,
+      customTuiAgents: [
+        { id: customId, baseAgent: 'aider', label: 'My Aider', args: '', env: {}, syncEnv: false }
+      ]
+    } as never
+    // The legacy startup-plan builders throw on custom ids (requireBuiltInTuiAgentConfig);
+    // stub them so this test can observe the base-keyed decision alone, which is
+    // all the fix touches — the legacy assembly itself migrates in U5.
+    vi.resetModules()
+    vi.doMock('@/lib/tui-agent-startup', () => ({
+      buildAgentStartupPlan: vi.fn(() => ({
+        agent: customId,
+        launchCommand: 'aider',
+        expectedProcess: 'aider',
+        followupPrompt: null,
+        launchConfig: { agentCommand: 'aider', agentArgs: '', agentEnv: {} }
+      })),
+      buildAgentDraftLaunchPlan: vi.fn(() => null)
+    }))
+    try {
+      const { launchAgentInNewTab } = await import('./launch-agent-in-new-tab')
+
+      launchAgentInNewTab({
+        agent: customId as never,
+        worktreeId: 'wt-1',
+        prompt: 'fix the flaky test'
       })
-    )
+
+      const queued = mockQueueTabStartupCommand.mock.calls[0][1]
+      expect(queued.agentLaunch).toEqual({
+        selection: { kind: 'agent', agent: customId },
+        allowEmptyPromptLaunch: true
+      })
+      expect(queued.agentLaunch.prompt).toBeUndefined()
+      expect(mockPasteDraftWhenAgentReady).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tabId: 'tab-1',
+          content: 'fix the flaky test',
+          agent: customId,
+          submit: false
+        })
+      )
+    } finally {
+      vi.doUnmock('@/lib/tui-agent-startup')
+      vi.resetModules()
+    }
   })
 })

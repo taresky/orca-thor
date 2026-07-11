@@ -263,6 +263,12 @@ export async function startAgentSessionFork(fork: PreparedAgentSessionFork): Pro
     )
     return false
   }
+  // Fork does not request a host agent launch (U5 owns fork identity), so the
+  // pre-create rejection arm cannot occur here; guard defensively to consume the
+  // union without ever spawning a substitute primary.
+  if (created.created === false) {
+    return false
+  }
   const forkWorktreeId = created.worktree.id
 
   if (!fork.agent) {
@@ -285,6 +291,10 @@ export async function startAgentSessionFork(fork: PreparedAgentSessionFork): Pro
     prompt: fork.prompt,
     promptDelivery: 'draft',
     launchSource: 'terminal_context_menu',
+    // Why: fork replays a captured launch via draftPromptFlag native injection,
+    // which the host launch contract cannot express. Keep the legacy client-side
+    // assembly until fork migrates to host snapshot replay (U5).
+    legacyResumeAssembly: true,
     ...(launchPlatform ? { launchPlatform } : {})
   })
   activateAndRevealWorktree(forkWorktreeId, { sidebarRevealBehavior: 'auto' })

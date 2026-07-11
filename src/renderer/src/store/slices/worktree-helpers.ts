@@ -21,6 +21,13 @@ import type {
   WorkspaceKey
 } from '../../../../shared/types'
 import type { WorktreeForceDeleteReason } from '../../../../shared/worktree-removal'
+import type {
+  RetryAgentLaunchAction,
+  WorktreeRetryAgentLaunchResult,
+  ForgetUnknownAgentLaunchResult
+} from '../../../../shared/agent-launch-worktree-recovery'
+import type { PendingAgentLaunchSummary } from '../../../../shared/agent-launch-pending-summary'
+import type { RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
 import type { TerminalGitHubPRLink } from '../../../../shared/terminal-github-pr-link-detector'
 import type {
   PendingWorktreeCreation,
@@ -156,8 +163,37 @@ export type WorktreeSlice = {
     compareBaseRef?: string,
     // Why: reserved for automation-dispatch flows so host-side provenance can
     // be minted securely; regular create callers should omit this.
-    options?: { automationProvenanceRequest?: CreateWorktreeArgs['automationProvenanceRequest'] }
+    options?: {
+      automationProvenanceRequest?: CreateWorktreeArgs['automationProvenanceRequest']
+      /** Host-resolved two-stage agent launch. When present the host owns
+       *  resolution and spawns the primary agent terminal, so callers must
+       *  consume the `CreateWorktreeResult` union (a pre-create rejection is
+       *  `created: false` with the composer kept open, never a thrown error). */
+      agentLaunch?: CreateWorktreeArgs['agentLaunch']
+    }
   ) => Promise<CreateWorktreeResult>
+  /** Retry a settled agent-launch failure on an existing worktree. Mints a fresh
+   *  canonical-lowercase-UUID clientMutationId per invocation; the host owns
+   *  idempotency, the failure-id guard, and recovery-card gating. Returns the
+   *  tri-state result so the recovery card can render blocked/rejected reasons
+   *  (launched/failed reconcile into WorktreeMeta via the change notification). */
+  retryWorktreeAgentLaunch: (args: {
+    worktreeId: string
+    expectedFailureId: string
+    action: RetryAgentLaunchAction
+  }) => Promise<WorktreeRetryAgentLaunchResult>
+  /** Forget a launch stranded in launch_state_unknown. Never kills or spawns;
+   *  releases Orca's local bookkeeping (the host clears the card + capacity). */
+  forgetWorktreeAgentLaunch: (args: {
+    worktreeId: string
+    expectedOperationId: string
+  }) => Promise<ForgetUnknownAgentLaunchResult>
+  /** Fetch the host-redacted pending-launch summary for the capacity-recovery
+   *  sheet. Pass the runtime target the capacity rejection came from; defaults to
+   *  local. The host scopes rows to the authenticated principal and strips secrets. */
+  fetchPendingAgentLaunchSummary: (
+    target?: RuntimeClientTarget
+  ) => Promise<PendingAgentLaunchSummary>
   /** Register an in-flight background creation and make it the active surface. */
   beginPendingWorktreeCreation: (entry: PendingWorktreeCreation) => void
   /** Merge a status patch into an existing pending entry. */

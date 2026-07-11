@@ -62,6 +62,11 @@ import {
   type ExecutionHostId
 } from '../../../shared/execution-host'
 import { toRuntimeWorktreeSelector } from '../runtime/runtime-worktree-selector'
+import type {
+  WorktreeRetryAgentLaunchResult,
+  ForgetUnknownAgentLaunchResult
+} from '../../../shared/agent-launch-worktree-recovery'
+import type { PendingAgentLaunchSummary } from '../../../shared/agent-launch-pending-summary'
 import { normalizeDisabledTuiAgents } from '../../../shared/tui-agent-selection'
 import {
   normalizeTuiAgentArgsRecord,
@@ -1391,7 +1396,8 @@ function createWorktreesApi(): NonNullable<Partial<PreloadApi>['worktrees']> {
         parentWorkspace: args.parentWorkspace,
         workspaceStatus: args.workspaceStatus,
         manualOrder: args.manualOrder,
-        automationProvenanceRequest: args.automationProvenanceRequest
+        automationProvenanceRequest: args.automationProvenanceRequest,
+        ...(args.agentLaunch ? { agentLaunch: args.agentLaunch } : {})
       })
     },
     // Why: the runtime create path emits no two-phase progress, so the web
@@ -1470,6 +1476,21 @@ function createWorktreesApi(): NonNullable<Partial<PreloadApi>['worktrees']> {
     persistSortOrder: async ({ orderedIds }) => {
       await callRuntimeResult('worktree.persistSortOrder', { orderedIds })
     },
+    retryAgentLaunch: async ({ worktreeId, expectedFailureId, clientMutationId, action }) =>
+      callRuntimeResult<WorktreeRetryAgentLaunchResult>('worktree.retryAgentLaunch', {
+        worktree: toRuntimeWorktreeSelector(worktreeId),
+        expectedFailureId,
+        clientMutationId,
+        action
+      }),
+    forgetAgentLaunch: async ({ worktreeId, expectedOperationId, clientMutationId }) =>
+      callRuntimeResult<ForgetUnknownAgentLaunchResult>('worktree.forgetAgentLaunch', {
+        worktree: toRuntimeWorktreeSelector(worktreeId),
+        expectedOperationId,
+        clientMutationId
+      }),
+    pendingAgentLaunchSummary: async () =>
+      callRuntimeResult<PendingAgentLaunchSummary>('worktree.pendingAgentLaunchSummary', {}),
     onChanged: () => noopUnsubscribe,
     onBaseStatus: () => noopUnsubscribe,
     onRemoteBranchConflict: () => noopUnsubscribe
@@ -2726,6 +2747,9 @@ function createPtyApi(): NonNullable<Partial<PreloadApi>['pty']> {
     spawn: () => Promise.reject(new Error('Local PTYs are unavailable in the web client.')),
     write: () => {},
     writeAccepted: () => Promise.resolve(false),
+    // Web panes dismiss via the session.tabs.dismissLaunchNotice runtime RPC;
+    // this local-IPC stub is never the real path, so it fails closed.
+    dismissLaunchNotice: () => Promise.resolve({ ok: false, changed: false }),
     resize: () => {},
     reportGeometry: () => {},
     signal: () => {},

@@ -27,6 +27,15 @@ export type AgentLaunchNotice =
 
 export type AgentLaunchNoticeCode = AgentLaunchNotice['code']
 
+/** Host-owned per-terminal launch-notice state persisted with terminal/session
+ *  metadata. The host is the sole owner: renderer/mobile stores mirror it and
+ *  never independently recreate a dismissed notice. `launchToken` scopes
+ *  dismissal to this terminal and is never logged or sent to telemetry. */
+export type PersistedLaunchNoticeState = {
+  launchToken: string
+  notices: readonly AgentLaunchNotice[]
+}
+
 export type AgentLaunchFailureCode =
   | 'unknown_agent'
   | 'no_agent_selected'

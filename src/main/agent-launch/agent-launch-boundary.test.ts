@@ -63,7 +63,7 @@ function makeLaunch(
     },
     notices: [],
     telemetry: { agentKind: 'claude-code', usedCustomAgent: false },
-    admissionGuard: { fingerprint, basis: 'explicit' },
+    admissionGuard: { fingerprint, stableInputDigest: fingerprint, basis: 'explicit' },
     ...overrides
   }
 }
@@ -130,6 +130,46 @@ describe('AgentLaunchBoundary.executeAgentLaunch', () => {
     const admitted = store.get(result.receipt.launchToken)
     expect(admitted?.snapshot).toBe(original.snapshot)
     expect(result.receipt.catalogRevision).toBe(2)
+  })
+
+  it('never serializes snapshot argv/env, fingerprint, or digest into the launched receipt', async () => {
+    const { boundary } = makeBoundary()
+    const launch = makeLaunch('fp-secret', {
+      admissionGuard: {
+        fingerprint: 'fp-secret',
+        stableInputDigest: 'digest-secret',
+        basis: 'explicit'
+      }
+    })
+
+    const result = await boundary.executeAgentLaunch({
+      scope: 'worktree-secret',
+      principal: LOCAL_PRINCIPAL,
+      resolve: () => okResolution(launch),
+      prompt: '',
+      allowEmptyPromptLaunch: true
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) {
+      return
+    }
+    // The receipt is the ONLY agent-launch payload that crosses to clients, so it
+    // must carry the client-safe identity/notices/token only — never the host-
+    // private snapshot argv/env, the relevant-input fingerprint, or the digest.
+    expect(Object.keys(result.receipt).sort()).toEqual([
+      'baseAgent',
+      'catalogRevision',
+      'launchToken',
+      'notices',
+      'requestedAgent'
+    ])
+    const serialized = JSON.stringify(result.receipt)
+    expect(serialized).not.toContain('secretexe') // snapshot argv executable
+    expect(serialized).not.toContain('topsecret-value') // snapshot agentEnv value
+    expect(serialized).not.toContain('SECRET_ENV') // snapshot agentEnv key
+    expect(serialized).not.toContain('fp-secret') // relevant-input fingerprint
+    expect(serialized).not.toContain('digest-secret') // config-only digest
   })
 
   it('returns the initial failure without admitting', async () => {
@@ -398,5 +438,239 @@ describe('AgentLaunchBoundary.settleAgentLaunch', () => {
     expect(store.get(token)).toBeNull()
     expect(store.pendingForPrincipal(LOCAL_PRINCIPAL)).toBe(0)
     expect(boundary.retainedFor(token)).toBeNull()
+  })
+})
+
+describe('AgentLaunchBoundary.resolveAgentLaunchPlanWithoutAdmission', () => {
+  it('resolves once and builds a plan without an admission token or capacity hold', () => {
+    const { boundary, store } = makeBoundary()
+    const resolve = vi
+      .fn<() => HostStateResolution>()
+      .mockReturnValue(okResolution(makeLaunch('fp-1')))
+
+    const result = boundary.resolveAgentLaunchPlanWithoutAdmission({
+      resolve,
+      prompt: '',
+      allowEmptyPromptLaunch: true
+    })
+
+    // The legacy path resolves exactly once — no coordinator re-resolve — and
+    // never admits: the plan carries no launchToken and no capacity is held.
+    expect(resolve).toHaveBeenCalledTimes(1)
+    expect(result.ok).toBe(true)
+    if (!result.ok) {
+      return
+    }
+    expect(result.plan.launchToken).toBeUndefined()
+    // All capacity is still free: nothing was reserved or admitted.
+    for (let i = 0; i < MAX_PENDING_LAUNCHES_PER_PRINCIPAL; i++) {
+      expect(store.reserve(LOCAL_PRINCIPAL).ok).toBe(true)
+    }
+  })
+
+  it('returns the resolver failure without holding capacity', () => {
+    const { boundary, store } = makeBoundary()
+    const resolve = vi
+      .fn<() => HostStateResolution>()
+      .mockReturnValue(failureResolution({ ok: false, failure: { code: 'base_agent_disabled' } }))
+
+    const result = boundary.resolveAgentLaunchPlanWithoutAdmission({ resolve, prompt: 'hi' })
+
+    expect(resolve).toHaveBeenCalledTimes(1)
+    expect(result).toEqual({ ok: false, failure: { code: 'base_agent_disabled' } })
+    for (let i = 0; i < MAX_PENDING_LAUNCHES_PER_PRINCIPAL; i++) {
+      expect(store.reserve(LOCAL_PRINCIPAL).ok).toBe(true)
+    }
+  })
+
+  it('passes through a request-error resolution', () => {
+    const { boundary } = makeBoundary()
+    const result = boundary.resolveAgentLaunchPlanWithoutAdmission({
+      resolve: () =>
+        failureResolution({ ok: false, requestError: { code: 'stale_agent_launch_failure' } }),
+      prompt: 'hi'
+    })
+    expect(result).toEqual({
+      ok: false,
+      requestError: { code: 'stale_agent_launch_failure' }
+    })
+  })
+})
+
+describe('AgentLaunchBoundary two-stage reserved launch', () => {
+  function digestLaunch(fingerprint: string, stableInputDigest: string): ResolvedAgentLaunch {
+    return makeLaunch(fingerprint, {
+      admissionGuard: { fingerprint, stableInputDigest, basis: 'explicit' }
+    })
+  }
+
+  function prepareHold(
+    boundary: AgentLaunchBoundary,
+    launch: ResolvedAgentLaunch
+  ): { reservationId: string; stableInputDigest: string } {
+    const prepared = boundary.prepareReservedAgentLaunch({
+      principal: LOCAL_PRINCIPAL,
+      resolve: () => okResolution(launch)
+    })
+    if (!prepared.ok) {
+      throw new Error('expected prepare to succeed')
+    }
+    return { reservationId: prepared.reservationId, stableInputDigest: prepared.stableInputDigest }
+  }
+
+  it('prepare pins identity + digest and holds one reservation before git', () => {
+    const { boundary, store } = makeBoundary()
+    const prepared = boundary.prepareReservedAgentLaunch({
+      principal: LOCAL_PRINCIPAL,
+      resolve: () => okResolution(digestLaunch('fp-1', 'stable-A'))
+    })
+    expect(prepared.ok).toBe(true)
+    if (!prepared.ok) {
+      return
+    }
+    expect(prepared.requestedAgent).toBe('claude')
+    expect(prepared.stableInputDigest).toBe('stable-A')
+    // The hold counts toward capacity but is not a committed token yet.
+    expect(store.pendingForPrincipal(LOCAL_PRINCIPAL)).toBe(1)
+    expect(store.pendingCount()).toBe(0)
+  })
+
+  it('prepare takes no reservation when the pin resolve fails', () => {
+    const { boundary, store } = makeBoundary()
+    const prepared = boundary.prepareReservedAgentLaunch({
+      principal: LOCAL_PRINCIPAL,
+      resolve: () => failureResolution({ ok: false, failure: { code: 'no_agent_selected' } })
+    })
+    expect(prepared.ok).toBe(false)
+    expect(store.pendingForPrincipal(LOCAL_PRINCIPAL)).toBe(0)
+  })
+
+  it('prepare rejects launch_capacity_exceeded without leaking a hold', () => {
+    const { boundary, store } = makeBoundary()
+    for (let index = 0; index < MAX_PENDING_LAUNCHES_PER_PRINCIPAL; index += 1) {
+      store.reserve(LOCAL_PRINCIPAL)
+    }
+    const prepared = boundary.prepareReservedAgentLaunch({
+      principal: LOCAL_PRINCIPAL,
+      resolve: () => okResolution(makeLaunch('fp-1'))
+    })
+    expect(prepared.ok).toBe(false)
+    if (prepared.ok) {
+      return
+    }
+    expect('failure' in prepared && prepared.failure.code).toBe('launch_capacity_exceeded')
+    expect(store.pendingForPrincipal(LOCAL_PRINCIPAL)).toBe(MAX_PENDING_LAUNCHES_PER_PRINCIPAL)
+  })
+
+  it('executeReserved converts the hold to exactly one token on success', async () => {
+    const { boundary, store } = makeBoundary()
+    const launch = digestLaunch('fp-1', 'stable-A')
+    const { reservationId, stableInputDigest } = prepareHold(boundary, launch)
+    const result = await boundary.executeReservedAgentLaunch({
+      scope: 'wt-1',
+      principal: LOCAL_PRINCIPAL,
+      resolve: () => okResolution(launch),
+      prompt: 'hi',
+      reservationId,
+      expectedStableInputDigest: stableInputDigest
+    })
+    expect(result.ok).toBe(true)
+    // Converted, not double-counted: one committed record, no dangling hold.
+    expect(store.pendingForPrincipal(LOCAL_PRINCIPAL)).toBe(1)
+    expect(store.pendingCount()).toBe(1)
+    if (result.ok) {
+      expect(store.get(result.receipt.launchToken)?.snapshot).toBe(launch.snapshot)
+    }
+  })
+
+  it('executeReserved releases the hold when the post-create config digest differs', async () => {
+    const { boundary, store } = makeBoundary()
+    const { reservationId } = prepareHold(boundary, digestLaunch('fp-1', 'stable-A'))
+    const resolve = vi.fn(() => okResolution(digestLaunch('fp-2', 'stable-B')))
+    const result = await boundary.executeReservedAgentLaunch({
+      scope: 'wt-1',
+      principal: LOCAL_PRINCIPAL,
+      resolve,
+      prompt: 'hi',
+      reservationId,
+      expectedStableInputDigest: 'stable-A'
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) {
+      return
+    }
+    expect('failure' in result && result.failure.code).toBe('agent_configuration_changed')
+    // Hold released, no capacity leaked; rejected before entering the coordinator.
+    expect(store.pendingForPrincipal(LOCAL_PRINCIPAL)).toBe(0)
+    expect(resolve).toHaveBeenCalledTimes(1)
+  })
+
+  it('executeReserved releases the hold when the post-create resolve fails', async () => {
+    const { boundary, store } = makeBoundary()
+    const { reservationId } = prepareHold(boundary, digestLaunch('fp-1', 'stable-A'))
+    const result = await boundary.executeReservedAgentLaunch({
+      scope: 'wt-1',
+      principal: LOCAL_PRINCIPAL,
+      resolve: () =>
+        failureResolution({
+          ok: false,
+          failure: { code: 'missing_variable', variable: 'worktreePath' }
+        }),
+      prompt: 'hi',
+      reservationId,
+      expectedStableInputDigest: 'stable-A'
+    })
+    expect(result.ok).toBe(false)
+    expect(store.pendingForPrincipal(LOCAL_PRINCIPAL)).toBe(0)
+  })
+
+  it('executeReserved releases the hold on a thrown preflight', async () => {
+    const { boundary, store } = makeBoundary()
+    const launch = digestLaunch('fp-1', 'stable-A')
+    const { reservationId } = prepareHold(boundary, launch)
+    const result = await boundary.executeReservedAgentLaunch({
+      scope: 'wt-1',
+      principal: LOCAL_PRINCIPAL,
+      resolve: () => okResolution(launch),
+      prompt: 'hi',
+      preflight: () => {
+        throw new Error('trust denied')
+      },
+      reservationId,
+      expectedStableInputDigest: 'stable-A'
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) {
+      return
+    }
+    expect('failure' in result && result.failure.code).toBe('trust_preflight_failed')
+    expect(store.pendingForPrincipal(LOCAL_PRINCIPAL)).toBe(0)
+  })
+
+  it('executeReserved releases the hold on an in-coordinator fingerprint mismatch', async () => {
+    const { boundary, store } = makeBoundary()
+    const pinned = digestLaunch('fp-1', 'stable-A')
+    const { reservationId } = prepareHold(boundary, pinned)
+    // Pre-coordinator resolve matches the pin; the in-coordinator re-resolve keeps
+    // the same config digest but a changed fingerprint (a relevant edit committed).
+    const resolve = vi
+      .fn<() => HostStateResolution>()
+      .mockReturnValueOnce(okResolution(pinned))
+      .mockReturnValueOnce(okResolution(digestLaunch('fp-9', 'stable-A')))
+    const result = await boundary.executeReservedAgentLaunch({
+      scope: 'wt-1',
+      principal: LOCAL_PRINCIPAL,
+      resolve,
+      prompt: 'hi',
+      reservationId,
+      expectedStableInputDigest: 'stable-A'
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) {
+      return
+    }
+    expect('failure' in result && result.failure.code).toBe('agent_configuration_changed')
+    expect(store.pendingForPrincipal(LOCAL_PRINCIPAL)).toBe(0)
+    expect(resolve).toHaveBeenCalledTimes(2)
   })
 })

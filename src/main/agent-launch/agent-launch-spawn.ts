@@ -23,8 +23,13 @@ import type {
 } from '../../shared/agent-launch-host-contract'
 import type { AgentLaunchSpawnRequest } from '../../shared/agent-launch-spawn-request'
 import { normalizeCatalogFromSettings } from './agent-catalog-projections'
+import { STARTUP_COMMAND_TEXT_MAX_CHARS } from '../providers/windows-shell-args'
 import { resolveAgentLaunch, type ResolveAgentLaunchOutcome } from './resolve-agent-launch'
-import type { AgentLaunchBoundary, HostStateResolution } from './agent-launch-boundary'
+import type {
+  AgentLaunchBoundary,
+  HostStateResolution,
+  ResolveAgentLaunchPlanResult
+} from './agent-launch-boundary'
 import type { AdmissionPrincipal } from './agent-launch-admission-store'
 
 export type AgentLaunchSpawnTarget = {
@@ -76,16 +81,19 @@ function referenceFor(request: AgentLaunchSpawnRequest): AgentReferenceAuthority
   return { kind: 'live-selection' }
 }
 
-/** Resolve a client agentLaunch request into a startup plan + receipt, or a
- *  typed failure/request-error. Creates no PTY: the caller owns spawning. */
-export async function resolveAgentLaunchSpawn(
+/** Build the boundary's `resolve` closure from the surface deps + input. Each
+ *  call re-reads live settings and the normalized catalog and runs the total
+ *  resolver over the fixed request; it does no async I/O, so the boundary can
+ *  re-invoke it inside the admission coordinator. Shared by the single-shot
+ *  spawn path and U4's two-stage worktree transaction so both surfaces produce
+ *  one canonical serialization/fingerprint. */
+export function buildHostStateResolve(
   deps: AgentLaunchSpawnDeps,
   input: AgentLaunchSpawnInput
-): Promise<AgentLaunchSpawnResolution> {
+): () => HostStateResolution {
   const resolveFn = deps.resolve ?? resolveAgentLaunch
   const reference = referenceFor(input.request)
-
-  const resolve = (): HostStateResolution => {
+  return (): HostStateResolution => {
     const settings = deps.getSettings()
     const catalog = normalizeCatalogFromSettings(settings)
     const outcome: ResolveAgentLaunchOutcome = resolveFn(
@@ -110,6 +118,39 @@ export async function resolveAgentLaunchSpawn(
     )
     return { outcome, catalogRevision: deps.getCatalogRevision() }
   }
+}
+
+/** Resolve a legacy renderer-spawned startup request into a plan WITHOUT taking
+ *  an admission token. Reuses the exact host-state resolve closure the admitted
+ *  path builds, so the two share one serialization/fingerprint, but stops before
+ *  admission because this path registers no terminal receipt (no settle seam) and
+ *  a held token would leak capacity. One-release compatibility shim; removed with
+ *  the startupAgent/startupDraft fields. */
+export function resolveAgentLaunchStartupPlanWithoutAdmission(
+  deps: AgentLaunchSpawnDeps,
+  input: AgentLaunchSpawnInput
+): ResolveAgentLaunchPlanResult {
+  const resolve = buildHostStateResolve(deps, input)
+  return deps.boundary.resolveAgentLaunchPlanWithoutAdmission({
+    resolve,
+    prompt: input.request.prompt ?? '',
+    ...(input.request.allowEmptyPromptLaunch !== undefined
+      ? { allowEmptyPromptLaunch: input.request.allowEmptyPromptLaunch }
+      : {}),
+    ...(input.request.promptDelivery !== undefined
+      ? { promptDelivery: input.request.promptDelivery }
+      : {}),
+    maxInlineDraftChars: STARTUP_COMMAND_TEXT_MAX_CHARS
+  })
+}
+
+/** Resolve a client agentLaunch request into a startup plan + receipt, or a
+ *  typed failure/request-error. Creates no PTY: the caller owns spawning. */
+export async function resolveAgentLaunchSpawn(
+  deps: AgentLaunchSpawnDeps,
+  input: AgentLaunchSpawnInput
+): Promise<AgentLaunchSpawnResolution> {
+  const resolve = buildHostStateResolve(deps, input)
 
   return deps.boundary.executeAgentLaunch({
     scope: input.scope,
@@ -119,6 +160,12 @@ export async function resolveAgentLaunchSpawn(
     ...(input.request.allowEmptyPromptLaunch !== undefined
       ? { allowEmptyPromptLaunch: input.request.allowEmptyPromptLaunch }
       : {}),
+    ...(input.request.promptDelivery !== undefined
+      ? { promptDelivery: input.request.promptDelivery }
+      : {}),
+    // The shared plan builder is main-free, so the provider size ceiling is
+    // threaded here rather than imported there.
+    maxInlineDraftChars: STARTUP_COMMAND_TEXT_MAX_CHARS,
     ...(deps.preflight ? { preflight: deps.preflight } : {}),
     ...(deps.prepareEnv ? { prepareEnv: deps.prepareEnv } : {})
   })

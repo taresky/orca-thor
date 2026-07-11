@@ -33,5 +33,6 @@ export const AgentLaunchSpawnRequestSchema: z.ZodType<AgentLaunchSpawnRequest> =
   selection: AgentLaunchSelection,
   prompt: z.string().max(100_000).optional(),
   allowEmptyPromptLaunch: z.boolean().optional(),
+  promptDelivery: z.enum(['submit', 'draft']).optional(),
   sourceRecord: AgentLaunchSourceRecord.optional()
 })

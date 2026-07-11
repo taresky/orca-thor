@@ -108,4 +108,22 @@ export function registerBuiltInOwnerScanners(
       }
     }
   })
+  index.register({
+    owner: 'workspace',
+    scan: () => {
+      try {
+        // A two-stage creation records the pinned requested identity on both the
+        // in-flight pending launch and the durable post-create failure, so a
+        // tombstone stays retained until neither still points at the custom id.
+        const references: unknown[] = []
+        for (const meta of Object.values(store.getAllWorktreeMeta())) {
+          references.push(meta.pendingAgentLaunch?.requestedAgent)
+          references.push(meta.agentLaunchFailure?.requestedAgent)
+        }
+        return { ok: true, referenceCounts: countReferencedCustomIds(references) }
+      } catch {
+        return { ok: false }
+      }
+    }
+  })
 }

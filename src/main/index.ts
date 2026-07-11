@@ -157,6 +157,7 @@ import { AutomationService } from './automations/service'
 import { createHeadlessAutomationOutputSnapshotBuffer } from './automations/headless-dispatch'
 import { buildHeadlessAutomationWorktreeCreateArgs } from './automations/headless-workspace-create'
 import { AgentAwakeService } from './agent-awake-service'
+import { initHostAgentLaunchOperationStorePersistence } from './agent-launch/agent-launch-operation-store-persistence'
 import { registerSystemResumeBroadcast } from './system-resume-broadcast'
 import {
   getCrashBreadcrumbSnapshot,
@@ -1675,6 +1676,11 @@ app.whenReady().then(async () => {
   const activeOrcaProfile = ensureActiveOrcaProfile()
   store = new Store({ dataFile: activeOrcaProfile.dataFile })
   logStartupMilestone('store-loaded')
+  // Rehydrate the host-private launch-operation ledger + pending snapshots and
+  // attach the durable sink now that the user data dir is stable, so a launch
+  // that outlives a crash stays reconcilable by token. Runs before any launch
+  // surface (IPC/runtime) can mutate the store.
+  initHostAgentLaunchOperationStorePersistence(app.getPath('userData'))
   // Why: must run before ClaudeRuntimeAuthService's constructor sync — a Claude
   // CLI that survived the restart inside the daemon still holds the current
   // single-use refresh token, and an unguarded early refresh would rotate it

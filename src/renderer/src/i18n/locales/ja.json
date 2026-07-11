@@ -12855,6 +12855,28 @@
         "searchLabels": "ラベルをフィルター…",
         "searchAssignee": "担当者をフィルター…",
         "back": "戻る"
+      },
+      "AgentLaunchNotices": {
+        "disabledFallback": "{{value0}} は無効です。カスタム実行ファイル、カスタム引数、カスタムエージェント環境なしで標準の {{value1}} を起動しました。",
+        "missingFallback": "{{value0}} は削除されました。カスタム実行ファイル、カスタム引数、カスタムエージェント環境なしで標準の {{value1}} を起動しました。",
+        "envWithheld": "この起動では {{value0}} のすべての環境値は使用されませんでした。ペア起動の環境はデスクトップホストで管理してください。",
+        "snapshotChanged": "このセッションの開始時にキャプチャされた設定で再開しました。",
+        "dismiss": "閉じる"
+      },
+      "AgentLaunchRecoveryCard": {
+        "title": "このワークスペースのエージェントを開始できませんでした。",
+        "retry": "再試行",
+        "retryCurrentSettings": "現在の設定で再試行",
+        "launchCurrentSettings": "現在の設定で起動",
+        "chooseAgent": "エージェントを選択",
+        "editAgentSettings": "エージェント設定を編集",
+        "repairOnHost": "デスクトップホストで修復",
+        "reconnectSecurely": "安全に再接続",
+        "reconnect": "再接続",
+        "recoverCapacity": "起動容量を回復…",
+        "openTerminal": "ターミナルを開く",
+        "forgetLaunch": "起動を破棄…",
+        "manageAgents": "エージェントを管理"
       }
     },
     "i18n": {
@@ -12962,6 +12984,59 @@
           "gitlabMergeRequestNumber": "MR #{{value0}}",
           "githubPullRequestNumber": "PR #{{value0}}"
         }
+      }
+    }
+  },
+  "agentLaunch": {
+    "failure": {
+      "unknownAgent": "そのエージェントは存在しなくなりました。別のエージェントを選んでもう一度お試しください。",
+      "noAgentSelected": "起動する前にエージェントを選択してください。",
+      "needsRepair": "このエージェントの設定が未完了です。設定で構成を完了してから、もう一度お試しください。",
+      "customDisabled": "このエージェントは無効になっています。起動するには設定で有効にしてください。",
+      "configurationChangedPostCreate": "このワークスペースの作成中にエージェント設定が変更されました。現在の設定で起動するには再試行するか、別のエージェントを選択してください。",
+      "configurationChangedPreSpawn": "起動前にエージェント設定が変更されました。現在の設定で再試行するか、別のエージェントを選択してください。",
+      "baseDisabled": "ベースのエージェントが無効になっています。起動するには設定で有効にしてください。",
+      "baseUnavailable": "ベースのエージェントはこのホストで利用できません。",
+      "missingVariable": "この起動のワークスペースパスを解決できませんでした。",
+      "missingTargetHome": "ターゲットホストのホームディレクトリを解決できませんでした。",
+      "invalidCommandOverride": "このエージェントのコマンドの上書きが無効です。設定で修正してください。",
+      "invalidArgs": "このエージェントの起動引数が無効です。設定で修正してください。",
+      "invalidEnv": "このエージェントの起動環境が無効です。設定で修正してください。",
+      "secureEnvUnavailable": "このエージェントの環境をリモートホストに安全に送信できません。",
+      "commandTooLong": "起動コマンドが長すぎて実行できません。エージェントの引数またはプロンプトを短くしてください。",
+      "invalidSnapshot": "このエージェントの保存された起動情報は無効になりました。",
+      "trustPreflightFailed": "このエージェントのワークスペースの信頼を確認できませんでした。もう一度お試しください。",
+      "spawnFailed": "エージェントを起動できませんでした。もう一度お試しください。",
+      "stateUnknown": "起動の状態が不明です。再試行する前にターミナルを確認してください。",
+      "capacityExceeded": "このホストで保留中のエージェント起動が多すぎます。取り残された起動を再接続するか解除してから、もう一度お試しください。"
+    },
+    "requestError": {
+      "idempotencyConflict": "この起動はすでに進行中です。",
+      "staleFailure": "この起動はすでに解決済みです。更新してもう一度お試しください。",
+      "untrustedReference": "この起動元を確認できませんでした。"
+    },
+    "capacity": {
+      "title": "起動キャパシティの回復",
+      "description": "これらのエージェント起動はこのホストで保留中です。ワークスペースを開いて再接続または解決してから、もう一度起動してください。",
+      "loadFailed": "保留中の起動を読み込めませんでした。閉じてから開き直して再試行してください。",
+      "loading": "保留中の起動を読み込んでいます…",
+      "empty": "起動キャパシティは現在空いています。このホストで保留中の起動はありません。",
+      "action": {
+        "open": "開く",
+        "goToWorkspace": "ワークスペースへ移動"
+      },
+      "source": {
+        "interactive": "ワークスペース",
+        "cli": "CLI",
+        "automation": "自動化",
+        "background": "バックグラウンド",
+        "orchestration": "オーケストレーション",
+        "resume": "再開"
+      },
+      "liveness": {
+        "live": "実行中",
+        "absent": "停止中",
+        "unknown": "到達不能"
       }
     }
   }

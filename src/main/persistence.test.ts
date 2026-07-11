@@ -23,6 +23,7 @@ import type {
   Repo,
   TerminalPaneLayoutNode,
   TerminalTab,
+  TuiAgent,
   WorktreeLineage,
   WorkspaceLineage,
   WorkspaceSessionState
@@ -335,6 +336,39 @@ describe('Store', () => {
   it('returns empty repos when no data file exists', async () => {
     const store = await createStore()
     expect(store.getRepos()).toEqual([])
+  }, 15_000)
+
+  it('round-trips pendingAgentLaunch and agentLaunchFailure through save and reload', async () => {
+    const store = await createStore()
+    const worktreeId = 'r1::/wt'
+    const failure = {
+      version: 1 as const,
+      code: 'spawn_failed' as const,
+      requestedAgent: 'custom-agent:codex:fedcba98-7654-4321-8fed-cba987654321' as TuiAgent,
+      failureId: 'failure-xyz',
+      intent: 'interactive' as const,
+      occurredAt: 42
+    }
+    store.setWorktreeMeta(worktreeId, {
+      pendingAgentLaunch: {
+        operationId: 'op-abc',
+        requestedAgent: 'claude',
+        priorFailureId: 'prior-1'
+      },
+      agentLaunchFailure: failure
+    })
+    store.flush()
+
+    const reloaded = await createStore()
+    const meta = reloaded.getWorktreeMeta(worktreeId)
+    expect(meta?.pendingAgentLaunch).toEqual({
+      operationId: 'op-abc',
+      requestedAgent: 'claude',
+      priorFailureId: 'prior-1'
+    })
+    // The durable failure survives intact; the private launch snapshot/token are
+    // never on this record, so nothing host-private crosses the disk boundary here.
+    expect(meta?.agentLaunchFailure).toEqual(failure)
   }, 15_000)
 
   it('loads state from an explicit profile data file path', async () => {

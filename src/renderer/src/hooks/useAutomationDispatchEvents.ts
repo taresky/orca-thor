@@ -214,8 +214,12 @@ export function useAutomationDispatchEvents(): void {
                     }
                   )
               : null
-          const worktree = createResult
-            ? createResult.worktree
+          // Automation dispatch does not request a host agent launch (U6 owns
+          // automation records), so the pre-create rejection arm is unreachable;
+          // narrow defensively to the created arm before reading worktree/setup.
+          const createdResult = createResult && createResult.created !== false ? createResult : null
+          const worktree = createdResult
+            ? createdResult.worktree
             : automation.workspaceId
               ? automationWorktree
               : null
@@ -235,11 +239,11 @@ export function useAutomationDispatchEvents(): void {
           }
           dispatchWorkspaceId = worktree.id
           dispatchWorkspaceDisplayName = worktree.displayName
-          if (createResult?.setup || createResult?.defaultTabs) {
+          if (createdResult?.setup || createdResult?.defaultTabs) {
             void launchWorktreeBackgroundTerminals({
               worktreeId: worktree.id,
-              setup: createResult.setup,
-              defaultTabs: createResult.defaultTabs
+              setup: createdResult.setup,
+              defaultTabs: createdResult.defaultTabs
             }).catch((error) => {
               // Why: setup/defaultTabs match normal worktree creation: they are
               // best-effort terminal work and must not block the automation agent.

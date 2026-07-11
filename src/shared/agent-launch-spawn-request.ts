@@ -7,6 +7,11 @@
 // from its authenticated context; this shape never carries either.
 
 import type { TuiAgent } from './types'
+import type {
+  AgentLaunchFailure,
+  AgentLaunchReceipt,
+  AgentLaunchRequestError
+} from './agent-launch-contract'
 
 /** Requested agent identity, or the host's stored default. A custom id is only
  *  admitted on THIS field, never the legacy launchAgent field. */
@@ -34,5 +39,18 @@ export type AgentLaunchSpawnRequest = {
   prompt?: string
   /** Launch a bare TUI when the prompt is empty (e.g. tab.newAgent). */
   allowEmptyPromptLaunch?: boolean
+  /** 'draft' lands the prompt UNSUBMITTED in the agent's input (native flag/env,
+   *  or host-returned draftPrompt for post-ready paste); default 'submit'. */
+  promptDelivery?: 'submit' | 'draft'
   sourceRecord?: AgentLaunchSourceRecord
 }
+
+/** Client-safe result of a host-resolved agent launch, returned alongside a
+ *  spawn/terminal-create result. 'launched' carries only the receipt (never
+ *  argv/env/snapshot); a pre-spawn 'failed'/'rejected' means NO PTY/terminal was
+ *  created and — for RPC surfaces — is a successful response, not an error
+ *  envelope, mirroring worktree.create so old-client semantics stay intact. */
+export type AgentLaunchSpawnOutcome =
+  | { status: 'launched'; receipt: AgentLaunchReceipt }
+  | { status: 'failed'; failure: AgentLaunchFailure }
+  | { status: 'rejected'; requestError: AgentLaunchRequestError }

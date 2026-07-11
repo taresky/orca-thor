@@ -6,6 +6,10 @@ import { electronAPI } from '@electron-toolkit/preload'
 import { preloadE2EConfig } from './e2e-config'
 import { glApi } from './gitlab'
 import type { AppIdentity } from '../shared/app-identity'
+import type {
+  AgentLaunchNoticeCode,
+  PersistedLaunchNoticeState
+} from '../shared/agent-launch-contract'
 import type { CliInstallStatus } from '../shared/cli-install-types'
 import type { AgentHookInstallStatus } from '../shared/agent-hook-types'
 import type { TerminalPaneSplitSource } from '../shared/feature-education-telemetry'
@@ -705,6 +709,12 @@ const api = {
 
     persistSortOrder: (args) => ipcRenderer.invoke('worktrees:persistSortOrder', args),
 
+    retryAgentLaunch: (args) => ipcRenderer.invoke('worktrees:retryAgentLaunch', args),
+
+    forgetAgentLaunch: (args) => ipcRenderer.invoke('worktrees:forgetAgentLaunch', args),
+
+    pendingAgentLaunchSummary: () => ipcRenderer.invoke('worktrees:pendingAgentLaunchSummary'),
+
     onChanged: (
       callback: (data: {
         repoId: string
@@ -843,6 +853,15 @@ const api = {
     },
     writeAccepted: (id: string, data: string): Promise<boolean> =>
       ipcRenderer.invoke('pty:writeAccepted', { id, data }),
+
+    /** Ask the host (owner) to dismiss a launch notice for this terminal. */
+    dismissLaunchNotice: (args: {
+      worktreeId: string
+      tabId: string
+      launchToken: string
+      code: AgentLaunchNoticeCode
+    }): Promise<{ ok: boolean; changed: boolean }> =>
+      ipcRenderer.invoke('pty:dismissLaunchNotice', args),
 
     resize: (id: string, cols: number, rows: number): void => {
       ipcRenderer.send('pty:resize', { id, cols, rows })
@@ -3432,6 +3451,7 @@ const api = {
         launchConfig?: SleepingAgentLaunchConfig
         launchToken?: string
         launchAgent?: TuiAgent
+        launchNotices?: PersistedLaunchNoticeState
         title?: string
         ptyId?: string
         activate?: boolean
@@ -3454,6 +3474,7 @@ const api = {
           launchConfig?: SleepingAgentLaunchConfig
           launchToken?: string
           launchAgent?: TuiAgent
+          launchNotices?: PersistedLaunchNoticeState
           title?: string
           ptyId?: string
           activate?: boolean

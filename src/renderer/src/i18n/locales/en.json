@@ -12855,6 +12855,28 @@
         "searchLabels": "Filter labels…",
         "searchAssignee": "Filter assignee…",
         "back": "Back"
+      },
+      "AgentLaunchNotices": {
+        "disabledFallback": "{{value0}} is disabled. Started stock {{value1}} with no custom executable, custom arguments, or custom agent environment.",
+        "missingFallback": "{{value0}} was deleted. Started stock {{value1}} with no custom executable, custom arguments, or custom agent environment.",
+        "envWithheld": "This launch did not use all of {{value0}}'s environment values. Manage paired-launch env on the desktop host.",
+        "snapshotChanged": "Resumed with the settings captured when this session started.",
+        "dismiss": "Dismiss"
+      },
+      "AgentLaunchRecoveryCard": {
+        "title": "This workspace's agent didn't start.",
+        "retry": "Retry",
+        "retryCurrentSettings": "Retry with current settings",
+        "launchCurrentSettings": "Launch with current settings",
+        "chooseAgent": "Choose agent",
+        "editAgentSettings": "Edit agent settings",
+        "repairOnHost": "Repair on desktop host",
+        "reconnectSecurely": "Reconnect securely",
+        "reconnect": "Reconnect",
+        "recoverCapacity": "Recover launch capacity…",
+        "openTerminal": "Open terminal",
+        "forgetLaunch": "Forget launch…",
+        "manageAgents": "Manage agents"
       }
     },
     "i18n": {
@@ -12962,6 +12984,59 @@
           "gitlabMergeRequestNumber": "MR #{{value0}}",
           "githubPullRequestNumber": "PR #{{value0}}"
         }
+      }
+    }
+  },
+  "agentLaunch": {
+    "failure": {
+      "unknownAgent": "That agent no longer exists. Pick another agent and try again.",
+      "noAgentSelected": "Select an agent before launching.",
+      "needsRepair": "This agent's setup is incomplete. Finish configuring it in Settings, then try again.",
+      "customDisabled": "This agent is turned off. Enable it in Settings to launch it.",
+      "configurationChangedPostCreate": "Agent settings changed while this workspace was being created. Retry to launch with the current settings, or choose another agent.",
+      "configurationChangedPreSpawn": "Agent settings changed before launch. Retry with the current settings, or choose another agent.",
+      "baseDisabled": "The underlying agent is turned off. Enable it in Settings to launch.",
+      "baseUnavailable": "The underlying agent isn't available on this host.",
+      "missingVariable": "Couldn't resolve the workspace path for this launch.",
+      "missingTargetHome": "Couldn't resolve the home directory on the target host.",
+      "invalidCommandOverride": "This agent's command override is invalid. Fix it in Settings.",
+      "invalidArgs": "This agent's launch arguments are invalid. Fix them in Settings.",
+      "invalidEnv": "This agent's launch environment is invalid. Fix it in Settings.",
+      "secureEnvUnavailable": "Can't securely send this agent's environment to the remote host.",
+      "commandTooLong": "The launch command is too long to run. Shorten the agent arguments or prompt.",
+      "invalidSnapshot": "This agent's saved launch details are no longer valid.",
+      "trustPreflightFailed": "Couldn't confirm workspace trust for this agent. Try again.",
+      "spawnFailed": "The agent couldn't be started. Try again.",
+      "stateUnknown": "The launch status is unknown. Check the terminal before retrying.",
+      "capacityExceeded": "Too many agent launches are still pending on this host. Reconnect or forget stranded launches, then try again."
+    },
+    "requestError": {
+      "idempotencyConflict": "This launch is already in progress.",
+      "staleFailure": "This launch was already resolved. Refresh and try again.",
+      "untrustedReference": "This launch source couldn't be verified."
+    },
+    "capacity": {
+      "title": "Recover launch capacity",
+      "description": "These agent launches are still pending on this host. Open a workspace to reconnect or settle it, then try launching again.",
+      "loadFailed": "Couldn't load pending launches. Close and reopen to try again.",
+      "loading": "Loading pending launches…",
+      "empty": "Launch capacity is currently clear. No launches are pending on this host.",
+      "action": {
+        "open": "Open",
+        "goToWorkspace": "Go to workspace"
+      },
+      "source": {
+        "interactive": "Workspace",
+        "cli": "CLI",
+        "automation": "Automation",
+        "background": "Background",
+        "orchestration": "Orchestration",
+        "resume": "Resume"
+      },
+      "liveness": {
+        "live": "Running",
+        "absent": "Not running",
+        "unknown": "Unreachable"
       }
     }
   }

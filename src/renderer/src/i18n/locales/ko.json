@@ -12855,6 +12855,28 @@
         "searchLabels": "레이블 필터…",
         "searchAssignee": "담당자 필터…",
         "back": "뒤로"
+      },
+      "AgentLaunchNotices": {
+        "disabledFallback": "{{value0}}이(가) 비활성화되어 있습니다. 사용자 지정 실행 파일, 사용자 지정 인수 또는 사용자 지정 에이전트 환경 없이 기본 {{value1}}을(를) 시작했습니다.",
+        "missingFallback": "{{value0}}이(가) 삭제되었습니다. 사용자 지정 실행 파일, 사용자 지정 인수 또는 사용자 지정 에이전트 환경 없이 기본 {{value1}}을(를) 시작했습니다.",
+        "envWithheld": "이 실행은 {{value0}}의 모든 환경 값을 사용하지 않았습니다. 페어링된 실행 환경은 데스크톱 호스트에서 관리하세요.",
+        "snapshotChanged": "이 세션이 시작될 때 캡처된 설정으로 다시 시작했습니다.",
+        "dismiss": "닫기"
+      },
+      "AgentLaunchRecoveryCard": {
+        "title": "이 워크스페이스의 에이전트를 시작하지 못했습니다.",
+        "retry": "다시 시도",
+        "retryCurrentSettings": "현재 설정으로 다시 시도",
+        "launchCurrentSettings": "현재 설정으로 시작",
+        "chooseAgent": "에이전트 선택",
+        "editAgentSettings": "에이전트 설정 편집",
+        "repairOnHost": "데스크톱 호스트에서 복구",
+        "reconnectSecurely": "안전하게 다시 연결",
+        "reconnect": "다시 연결",
+        "recoverCapacity": "실행 용량 복구…",
+        "openTerminal": "터미널 열기",
+        "forgetLaunch": "실행 지우기…",
+        "manageAgents": "에이전트 관리"
       }
     },
     "i18n": {
@@ -12962,6 +12984,59 @@
           "gitlabMergeRequestNumber": "MR #{{value0}}",
           "githubPullRequestNumber": "PR #{{value0}}"
         }
+      }
+    }
+  },
+  "agentLaunch": {
+    "failure": {
+      "unknownAgent": "해당 에이전트가 더 이상 존재하지 않습니다. 다른 에이전트를 선택한 후 다시 시도하세요.",
+      "noAgentSelected": "실행하기 전에 에이전트를 선택하세요.",
+      "needsRepair": "이 에이전트의 설정이 완료되지 않았습니다. 설정에서 구성을 마친 후 다시 시도하세요.",
+      "customDisabled": "이 에이전트가 꺼져 있습니다. 실행하려면 설정에서 켜세요.",
+      "configurationChangedPostCreate": "이 워크스페이스를 만드는 동안 에이전트 설정이 변경되었습니다. 현재 설정으로 실행하려면 다시 시도하거나 다른 에이전트를 선택하세요.",
+      "configurationChangedPreSpawn": "실행 전에 에이전트 설정이 변경되었습니다. 현재 설정으로 다시 시도하거나 다른 에이전트를 선택하세요.",
+      "baseDisabled": "기본 에이전트가 꺼져 있습니다. 실행하려면 설정에서 켜세요.",
+      "baseUnavailable": "기본 에이전트를 이 호스트에서 사용할 수 없습니다.",
+      "missingVariable": "이 실행의 작업 공간 경로를 확인할 수 없습니다.",
+      "missingTargetHome": "대상 호스트의 홈 디렉터리를 확인할 수 없습니다.",
+      "invalidCommandOverride": "이 에이전트의 명령 재정의가 잘못되었습니다. 설정에서 수정하세요.",
+      "invalidArgs": "이 에이전트의 실행 인수가 잘못되었습니다. 설정에서 수정하세요.",
+      "invalidEnv": "이 에이전트의 실행 환경이 잘못되었습니다. 설정에서 수정하세요.",
+      "secureEnvUnavailable": "이 에이전트의 환경을 원격 호스트에 안전하게 보낼 수 없습니다.",
+      "commandTooLong": "실행 명령이 너무 길어 실행할 수 없습니다. 에이전트 인수나 프롬프트를 줄이세요.",
+      "invalidSnapshot": "이 에이전트의 저장된 실행 정보가 더 이상 유효하지 않습니다.",
+      "trustPreflightFailed": "이 에이전트의 작업 공간 신뢰를 확인할 수 없습니다. 다시 시도하세요.",
+      "spawnFailed": "에이전트를 시작할 수 없습니다. 다시 시도하세요.",
+      "stateUnknown": "실행 상태를 알 수 없습니다. 다시 시도하기 전에 터미널을 확인하세요.",
+      "capacityExceeded": "이 호스트에서 대기 중인 에이전트 실행이 너무 많습니다. 중단된 실행을 다시 연결하거나 삭제한 후 다시 시도하세요."
+    },
+    "requestError": {
+      "idempotencyConflict": "이 실행이 이미 진행 중입니다.",
+      "staleFailure": "이 실행은 이미 처리되었습니다. 새로 고친 후 다시 시도하세요.",
+      "untrustedReference": "이 실행 소스를 확인할 수 없습니다."
+    },
+    "capacity": {
+      "title": "실행 용량 복구",
+      "description": "이 에이전트 실행은 이 호스트에서 아직 대기 중입니다. 워크스페이스를 열어 다시 연결하거나 해결한 후 다시 실행해 보세요.",
+      "loadFailed": "대기 중인 실행을 불러오지 못했습니다. 닫았다가 다시 열어 재시도하세요.",
+      "loading": "대기 중인 실행을 불러오는 중…",
+      "empty": "실행 용량이 현재 비어 있습니다. 이 호스트에 대기 중인 실행이 없습니다.",
+      "action": {
+        "open": "열기",
+        "goToWorkspace": "워크스페이스로 이동"
+      },
+      "source": {
+        "interactive": "워크스페이스",
+        "cli": "CLI",
+        "automation": "자동화",
+        "background": "백그라운드",
+        "orchestration": "오케스트레이션",
+        "resume": "재개"
+      },
+      "liveness": {
+        "live": "실행 중",
+        "absent": "중지됨",
+        "unknown": "접근 불가"
       }
     }
   }

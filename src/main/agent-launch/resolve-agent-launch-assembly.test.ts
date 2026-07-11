@@ -458,3 +458,33 @@ describe('snapshot immutability', () => {
     ])
   })
 })
+
+describe('two-stage stable-input digest', () => {
+  function resolveWithWorktree(worktreePath: string): ResolveAgentLaunchOutcome {
+    return resolveAgentLaunch(
+      requestOf({
+        selection: { kind: 'agent', agent: 'claude' },
+        variables: { repoPath: '/repo', worktreePath }
+      }),
+      catalogOf({}),
+      settingsOf()
+    )
+  }
+
+  it('stays identical across worktree paths while the admission fingerprint changes', () => {
+    const first = resolveWithWorktree('/wt-a')
+    const second = resolveWithWorktree('/wt-b')
+    if (!first.ok || !second.ok) {
+      throw new Error('expected both launches to resolve')
+    }
+    // The path-inclusive admission guard differs because a variable value changed.
+    expect(first.launch.admissionGuard.fingerprint).not.toBe(
+      second.launch.admissionGuard.fingerprint
+    )
+    // The config-only digest is stable, so pre-create pinning (path unknown) and
+    // post-create resolution (authoritative path) recheck cleanly.
+    expect(first.launch.admissionGuard.stableInputDigest).toBe(
+      second.launch.admissionGuard.stableInputDigest
+    )
+  })
+})

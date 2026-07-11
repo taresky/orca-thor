@@ -12855,6 +12855,28 @@
         "searchLabels": "筛选标签…",
         "searchAssignee": "筛选负责人…",
         "back": "返回"
+      },
+      "AgentLaunchNotices": {
+        "disabledFallback": "{{value0}} 已禁用。已启动标准 {{value1}}，未使用自定义可执行文件、自定义参数或自定义代理环境。",
+        "missingFallback": "{{value0}} 已删除。已启动标准 {{value1}}，未使用自定义可执行文件、自定义参数或自定义代理环境。",
+        "envWithheld": "此次启动未使用 {{value0}} 的全部环境值。请在桌面主机上管理配对启动环境。",
+        "snapshotChanged": "已使用此会话启动时捕获的设置恢复。",
+        "dismiss": "关闭"
+      },
+      "AgentLaunchRecoveryCard": {
+        "title": "此工作区的代理未能启动。",
+        "retry": "重试",
+        "retryCurrentSettings": "使用当前设置重试",
+        "launchCurrentSettings": "使用当前设置启动",
+        "chooseAgent": "选择代理",
+        "editAgentSettings": "编辑代理设置",
+        "repairOnHost": "在桌面主机上修复",
+        "reconnectSecurely": "安全重新连接",
+        "reconnect": "重新连接",
+        "recoverCapacity": "恢复启动容量…",
+        "openTerminal": "打开终端",
+        "forgetLaunch": "忘记启动…",
+        "manageAgents": "管理代理"
       }
     },
     "i18n": {
@@ -12962,6 +12984,59 @@
           "gitlabMergeRequestNumber": "MR #{{value0}}",
           "githubPullRequestNumber": "PR #{{value0}}"
         }
+      }
+    }
+  },
+  "agentLaunch": {
+    "failure": {
+      "unknownAgent": "该智能体已不存在。请选择其他智能体后重试。",
+      "noAgentSelected": "启动前请选择一个智能体。",
+      "needsRepair": "该智能体的设置尚未完成。请在设置中完成配置后重试。",
+      "customDisabled": "该智能体已关闭。请在设置中启用后再启动。",
+      "configurationChangedPostCreate": "创建此工作区期间智能体设置已更改。重试以使用当前设置启动，或选择其他智能体。",
+      "configurationChangedPreSpawn": "启动前智能体设置已更改。使用当前设置重试，或选择其他智能体。",
+      "baseDisabled": "基础智能体已关闭。请在设置中启用后再启动。",
+      "baseUnavailable": "此主机上无法使用基础智能体。",
+      "missingVariable": "无法解析此次启动的工作区路径。",
+      "missingTargetHome": "无法解析目标主机上的主目录。",
+      "invalidCommandOverride": "该智能体的命令覆盖无效。请在设置中修正。",
+      "invalidArgs": "该智能体的启动参数无效。请在设置中修正。",
+      "invalidEnv": "该智能体的启动环境无效。请在设置中修正。",
+      "secureEnvUnavailable": "无法安全地将该智能体的环境发送到远程主机。",
+      "commandTooLong": "启动命令过长，无法运行。请缩短智能体参数或提示词。",
+      "invalidSnapshot": "该智能体保存的启动信息已失效。",
+      "trustPreflightFailed": "无法确认该智能体的工作区信任。请重试。",
+      "spawnFailed": "无法启动该智能体。请重试。",
+      "stateUnknown": "启动状态未知。请在重试前检查终端。",
+      "capacityExceeded": "此主机上待处理的智能体启动过多。请重新连接或忘记搁置的启动，然后重试。"
+    },
+    "requestError": {
+      "idempotencyConflict": "此次启动已在进行中。",
+      "staleFailure": "此次启动已处理。请刷新后重试。",
+      "untrustedReference": "无法验证此次启动的来源。"
+    },
+    "capacity": {
+      "title": "恢复启动容量",
+      "description": "这些代理启动在此主机上仍处于待处理状态。打开工作区以重新连接或解决它，然后重试启动。",
+      "loadFailed": "无法加载待处理的启动。请关闭后重新打开以重试。",
+      "loading": "正在加载待处理的启动…",
+      "empty": "启动容量当前空闲。此主机上没有待处理的启动。",
+      "action": {
+        "open": "打开",
+        "goToWorkspace": "前往工作区"
+      },
+      "source": {
+        "interactive": "工作区",
+        "cli": "CLI",
+        "automation": "自动化",
+        "background": "后台",
+        "orchestration": "编排",
+        "resume": "恢复"
+      },
+      "liveness": {
+        "live": "运行中",
+        "absent": "未运行",
+        "unknown": "无法访问"
       }
     }
   }

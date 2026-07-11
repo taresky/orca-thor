@@ -65,6 +65,10 @@ vi.mock('@/lib/new-workspace', () => ({
   ensureAgentStartupInTerminal: vi.fn()
 }))
 
+vi.mock('@/lib/telemetry', () => ({
+  track: vi.fn()
+}))
+
 vi.mock('sonner', () => ({
   toast: {
     error: vi.fn()
@@ -81,6 +85,7 @@ import {
   ensureWorktreeHasInitialTerminal
 } from '@/lib/worktree-activation'
 import { queueNewWorkspaceTerminalFocus } from '@/lib/new-workspace-terminal-focus'
+import { track } from '@/lib/telemetry'
 import {
   beginBackgroundWorktreePreparation,
   continueBackgroundWorktreeCreation,
@@ -108,8 +113,6 @@ function makeRequest(overrides: Partial<WorktreeCreationRequest> = {}): Worktree
     agent: null,
     pendingFirstAgentMessageRename: false,
     note: '',
-    startupPlan: null,
-    quickPrompt: '',
     quickTelemetry: null,
     ...overrides
   }
@@ -496,7 +499,7 @@ describe('staged background worktree creation', () => {
       undefined,
       undefined,
       undefined,
-      { activateCreatedTabs: false }
+      { activateCreatedTabs: false, hostSpawnedPrimary: false }
     )
     expect(queueNewWorkspaceTerminalFocus).not.toHaveBeenCalled()
     expect(store.removePendingWorktreeCreation).toHaveBeenCalledWith('creation-1', {
@@ -534,7 +537,7 @@ describe('staged background worktree creation', () => {
         undefined,
         { command: 'gh issue view 42' },
         undefined,
-        { activateCreatedTabs: false }
+        { activateCreatedTabs: false, hostSpawnedPrimary: false }
       )
     )
   })
@@ -568,6 +571,46 @@ describe('staged background worktree creation', () => {
     expect(ensureWorktreeHasInitialTerminal).not.toHaveBeenCalled()
   })
 
+  // Why: an agent create is a host-atomic launch. The renderer must thread the
+  // identity-only `agentLaunch` to createWorktree, suppress its own primary spawn
+  // (host owns it, I9), and emit agent_started off the launched receipt because
+  // the host create-spawn threads no telemetry.
+  it('threads agentLaunch, suppresses the client primary, and emits telemetry on launch', async () => {
+    store.activeView = 'terminal'
+    store.activePendingCreationId = 'creation-1'
+    const agentLaunch = {
+      selection: { kind: 'agent' as const, agent: 'codex' as const },
+      prompt: 'do the thing',
+      allowEmptyPromptLaunch: true
+    }
+    const quickTelemetry = {
+      agent_kind: 'codex' as const,
+      launch_source: 'new_workspace_composer' as const,
+      request_kind: 'new' as const
+    }
+    store.createWorktree.mockResolvedValueOnce({
+      worktree: { id: 'wt-1', repoId: 'repo-1', path: '/repo/wt-1' },
+      startupTerminal: { spawned: true },
+      agentLaunchResult: { status: 'launched', receipt: { operationId: 'op-1' } }
+    })
+    vi.mocked(activateAndRevealWorktree).mockReturnValueOnce({ primaryTabId: null })
+
+    continueBackgroundWorktreeCreation(
+      'creation-1',
+      makeRequest({ agent: 'codex', agentLaunch, quickTelemetry })
+    )
+
+    await vi.waitFor(() => expect(activateAndRevealWorktree).toHaveBeenCalled())
+    // agentLaunch rides the createWorktree options bag (26th positional arg).
+    const createArgs = store.createWorktree.mock.calls[0] as unknown[]
+    expect(createArgs[25]).toEqual({ agentLaunch })
+    expect(activateAndRevealWorktree).toHaveBeenCalledWith(
+      'wt-1',
+      expect.objectContaining({ hostSpawnedPrimary: true })
+    )
+    expect(vi.mocked(track)).toHaveBeenCalledWith('agent_started', quickTelemetry)
+  })
+
   it('toasts a staged create error after the user leaves the creation surface', async () => {
     store.activeView = 'tasks'
     store.createWorktree.mockRejectedValueOnce(new Error('create failed'))
@@ -597,7 +640,7 @@ describe('worktree creation flow agent trust preflight', () => {
     )
     const createFlow = sourceBetween(
       FLOW_SOURCE,
-      'const backendSpawned = result.startupTerminal?.spawned === true',
+      'const hostOwnedLaunch = Boolean(preparedRequest.agentLaunch)',
       '// `createWorktree` already inserted the real worktree row'
     )
 

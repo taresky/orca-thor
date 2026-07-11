@@ -59,7 +59,7 @@ function makeLaunch(): ResolvedAgentLaunch {
     },
     notices: [],
     telemetry: { agentKind: 'claude-code', usedCustomAgent: false },
-    admissionGuard: { fingerprint: 'fp-1', basis: 'explicit' }
+    admissionGuard: { fingerprint: 'fp-1', stableInputDigest: 'sfp-1', basis: 'explicit' }
   }
 }
 

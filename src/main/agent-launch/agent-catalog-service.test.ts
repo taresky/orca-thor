@@ -4,7 +4,8 @@ import type {
   CustomTuiAgentId,
   GlobalSettings,
   Repo,
-  TerminalAgentQuickCommand
+  TerminalAgentQuickCommand,
+  WorktreeMeta
 } from '../../shared/types'
 import type { Automation } from '../../shared/automations-types'
 import type { Store } from '../persistence'
@@ -33,7 +34,9 @@ type StoreStubState = {
   settings: GlobalSettings
   repos: Repo[]
   automations: Automation[]
+  worktreeMeta?: Record<string, WorktreeMeta>
   failAutomationScan?: boolean
+  failWorktreeScan?: boolean
 }
 
 function makeStoreStub(state: StoreStubState): Store {
@@ -49,6 +52,12 @@ function makeStoreStub(state: StoreStubState): Store {
         throw new Error('store unavailable')
       }
       return state.automations
+    },
+    getAllWorktreeMeta: () => {
+      if (state.failWorktreeScan) {
+        throw new Error('store unavailable')
+      }
+      return state.worktreeMeta ?? {}
     }
   }
   return stub as unknown as Store
@@ -173,6 +182,42 @@ describe('tombstone reference GC across owners', () => {
     expect(summary).toContainEqual({ owner: 'commit-message', count: 2 })
     expect(summary).toContainEqual({ owner: 'source-control-recipe', count: 2 })
     expect(summary).toContainEqual({ owner: 'automation', count: 1 })
+  })
+
+  it('counts workspace pending-launch and durable-failure references and prunes after the last clears', () => {
+    const { service, state } = serviceWith({
+      settings: baseSettings({ deletedCustomTuiAgents: [tombstoneFor(deadId)] }),
+      worktreeMeta: {
+        'wt-1': {
+          pendingAgentLaunch: { operationId: 'op-1', requestedAgent: deadId }
+        } as unknown as WorktreeMeta,
+        'wt-2': {
+          agentLaunchFailure: {
+            version: 1,
+            code: 'spawn_failed',
+            requestedAgent: deadId,
+            failureId: 'f-1',
+            intent: 'interactive',
+            occurredAt: 1
+          }
+        } as unknown as WorktreeMeta
+      }
+    })
+    // pendingAgentLaunch.requestedAgent + agentLaunchFailure.requestedAgent = 2.
+    expect(service.tombstoneReferenceIndex.countReferences(deadId)).toBe(2)
+    expect(service.getReferenceSummaries(deadId)).toContainEqual({ owner: 'workspace', count: 2 })
+
+    // Last reference cleared -> the tombstone can prune.
+    state.worktreeMeta = {}
+    expect(service.tombstoneReferenceIndex.countReferences(deadId)).toBe(0)
+  })
+
+  it('retains the tombstone when the workspace store is unavailable', () => {
+    const { service } = serviceWith({
+      settings: baseSettings({ deletedCustomTuiAgents: [tombstoneFor(deadId)] }),
+      failWorktreeScan: true
+    })
+    expect(service.tombstoneReferenceIndex.countReferences(deadId)).toBe('unknown')
   })
 
   it('treats an unavailable owner store as unknown and retains the tombstone', () => {
