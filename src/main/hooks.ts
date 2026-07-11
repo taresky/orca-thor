@@ -7,7 +7,7 @@ import { getRuntimePathBasename } from '../shared/cross-platform-path'
 import { resolveHookCommandSourcePolicy } from '../shared/hook-command-source-policy'
 import { shouldWaitForSetupBeforeAgentStartup } from '../shared/setup-agent-startup-policy'
 import { parseOrcaYaml } from '../shared/orca-yaml'
-import { gitExecFileSync, promptGuardGitEnv } from './git/runner'
+import { gitExecFileSync, promptGuardShellEnv } from './git/runner'
 import { isWslPath, parseWslPath, toWindowsWslPath, toLinuxPath } from './wsl'
 import type {
   HookCommandSourcePolicy,
@@ -660,7 +660,7 @@ export function runHook(
         // "Connect to GitHub" OAuth window on Windows and loop when the network
         // can't complete it (issue #7652). The guard keeps the credential
         // helper, so cached auth still works; only the interactive prompt dies.
-        env: promptGuardGitEnv({
+        env: promptGuardShellEnv({
           ...process.env,
           ...getSetupEnvVars(repo, cwd)
         })

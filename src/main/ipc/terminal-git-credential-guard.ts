@@ -1,4 +1,4 @@
-import { promptGuardGitEnv } from '../git/runner'
+import { promptGuardShellEnv } from '../git/runner'
 import { recognizeAgentProcessFromCommandLine } from '../../shared/agent-process-recognition'
 
 /**
@@ -32,7 +32,9 @@ export function applyTerminalGitCredentialPromptGuard(
   if (!isAgentTerminal && (!opts.suppressUserTerminalPrompt || platform !== 'win32')) {
     return
   }
-  for (const [key, value] of Object.entries(promptGuardGitEnv(env, platform))) {
+  // Why: the shell variant — a terminal env is the user's whole environment,
+  // so the git-runner locale pins (issue #7808) must not leak into it.
+  for (const [key, value] of Object.entries(promptGuardShellEnv(env, platform))) {
     if (typeof value === 'string') {
       env[key] = value
     }

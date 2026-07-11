@@ -50,6 +50,19 @@ describe('applyTerminalGitCredentialPromptGuard', () => {
     expect(wslenvKeys).not.toContain('SSH_ASKPASS')
   })
 
+  it('never rewrites the terminal locale — the git-runner locale pins must not leak into a shell', () => {
+    const env: Record<string, string> = { PATH: '/usr/bin', LC_ALL: 'ja_JP.UTF-8' }
+    applyTerminalGitCredentialPromptGuard(env, {
+      launchCommand: 'claude',
+      suppressUserTerminalPrompt: true,
+      platform: 'win32'
+    })
+    expect(isGuarded(env)).toBe(true)
+    expect(env.LC_ALL).toBe('ja_JP.UTF-8')
+    expect(env.LANG).toBeUndefined()
+    expect(env.LANGUAGE).toBeUndefined()
+  })
+
   it('leaves a user terminal untouched on non-Windows hosts — no popup exists there, only working tty prompts', () => {
     for (const platform of ['darwin', 'linux'] as const) {
       const env: Record<string, string> = { PATH: '/usr/bin' }

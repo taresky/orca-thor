@@ -9,6 +9,7 @@ import {
   nonInteractiveGitEnv,
   parseRetryAfterMs,
   promptGuardGitEnv,
+  promptGuardShellEnv,
   redirectPortedHostnameToEnv,
   untranslatedGitOutputEnv
 } from './runner'
@@ -258,6 +259,19 @@ describe('guard-env WSLENV forwarding (#7652)', () => {
       'win32'
     )
     expect((callerSet.WSLENV ?? '').split(':')).not.toContain('GIT_SSH_COMMAND')
+  })
+})
+
+describe('promptGuardShellEnv keeps the shell locale (#7652 x #7808)', () => {
+  it('guards without pinning the locale — a terminal env is the whole shell, not just git', () => {
+    const env = promptGuardShellEnv({ PATH: '/usr/bin', LC_ALL: 'ja_JP.UTF-8' }, 'win32')
+    expect(env.GIT_TERMINAL_PROMPT).toBe('0')
+    expect(env.GCM_INTERACTIVE).toBe('never')
+    expect((env.WSLENV ?? '').split(':')).toContain('GIT_TERMINAL_PROMPT')
+    // The user's locale survives; no pins appear where none existed.
+    expect(env.LC_ALL).toBe('ja_JP.UTF-8')
+    expect(env.LANG).toBeUndefined()
+    expect(env.LANGUAGE).toBeUndefined()
   })
 })
 

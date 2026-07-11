@@ -625,6 +625,28 @@ export function promptGuardGitEnv(
 }
 
 /**
+ * Credential-prompt guard for a general-purpose shell environment (terminal
+ * PTYs, hook scripts): everything promptGuardGitEnv does EXCEPT the issue-7808
+ * locale pins. Those exist so Orca can parse stderr of git it spawns itself;
+ * forcing LC_ALL/LANG/LANGUAGE onto a user's shell would change the locale of
+ * every child process, not just git's.
+ */
+export function promptGuardShellEnv(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform
+): NodeJS.ProcessEnv {
+  const next = promptGuardGitEnv(env, platform)
+  for (const key of Object.keys(UNTRANSLATED_GIT_OUTPUT_ENV)) {
+    if (env[key] === undefined) {
+      delete next[key]
+    } else {
+      next[key] = env[key]
+    }
+  }
+  return next
+}
+
+/**
  * Force git to be non-interactive so it fails fast instead of blocking forever
  * on a prompt. Without this, a git read-path call (status, worktree list, …)
  * that hits an auth/credential prompt or an SSH host-key confirmation hangs on
@@ -632,8 +654,10 @@ export function promptGuardGitEnv(
  * stuck calls pile up and the runtime stops answering all clients (issue #5308).
  *
  * - GIT_TERMINAL_PROMPT=0: git refuses to prompt for credentials and errors out.
- * - GIT_ASKPASS / SSH_ASKPASS='': disable any GUI/askpass credential helper that
- *   would otherwise pop a prompt and block.
+ * - GIT_ASKPASS / SSH_ASKPASS: emptied when unset so no GUI/askpass helper can
+ *   pop a prompt and block. A caller-provided askpass is preserved on purpose —
+ *   custom askpass setups commonly *serve* credentials non-interactively, and
+ *   blanking them would break those fetches.
  * - GIT_SSH_COMMAND BatchMode=yes: SSH fails instead of waiting on an
  *   interactive password/host-key prompt. BatchMode does NOT change host trust
  *   (an unknown host still errors, it just won't hang). Only added when the
