@@ -8,6 +8,7 @@ import { XTERM_ENGINE_CSS, XTERM_ENGINE_JS } from './terminal-webview-engine.gen
 import { TERMINAL_REFLOW_JS } from './terminal-webview-reflow-injected'
 import { TERMINAL_TAP_DISPATCH_JS } from './terminal-webview-tap-dispatch-injected'
 import { TERMINAL_WEBVIEW_THEME_JS } from './terminal-webview-theme-injected'
+import { TERMINAL_QUERY_REPLY_JS } from './terminal-webview-query-reply-injected'
 import { URL_TAP_WEBVIEW_JS } from './terminal-webview-url-tap'
 import { TERMINAL_WEBGL_RECOVERY_JS } from './terminal-webview-webgl-recovery-injected'
 
@@ -215,7 +216,7 @@ window.onerror = function(msg) {
   var CLAUDE_STATUS_DOT_PATTERN = new RegExp(CLAUDE_STATUS_DOT + '[' + TEXT_PRESENTATION_SELECTOR + EMOJI_PRESENTATION_SELECTOR + ']*', 'g');
   var statusDotPendingSelector = false;
   var PRIVATE_MODE_SCAN_TAIL_LIMIT = 4096;
-  var term = null;
+  var term = null; ${TERMINAL_QUERY_REPLY_JS}
   var scrollIndicator = document.getElementById('scroll-indicator');
   var scrollThumb = document.getElementById('scroll-thumb');
   var scrollIndicatorHideTimer = null;
@@ -599,6 +600,10 @@ ${TERMINAL_WEBVIEW_THEME_JS}
     writeQueue.push(normalizeStatusDotPresentation(data));
   }
 
+  function enqueueWriteBoundary(callback) {
+    writeQueue.push(callback);
+  }
+
   function nextQueuedWrite() {
     if (writeQueueHead >= writeQueue.length) {
       resetWriteQueue();
@@ -644,6 +649,7 @@ ${TERMINAL_WEBVIEW_THEME_JS}
     if (!ready || !term || writesDraining || gen !== terminalGeneration) return;
     var next = nextQueuedWrite();
     if (typeof next !== 'string') {
+      if (typeof next === 'function') return next(), pumpWrites(gen);
       var callbacks = afterDrainCallbacks;
       afterDrainCallbacks = [];
       for (var i = 0; i < callbacks.length; i++) callbacks[i]();
@@ -675,6 +681,9 @@ ${TERMINAL_WEBGL_RECOVERY_JS}
     var scrollAnchorRows = prevB ? Math.max(0, (prevB.baseY || 0) - (prevB.viewportY || 0)) : -1;
     terminalGeneration++;
     var gen = terminalGeneration;
+    // Why: snapshot replay can contain old queries whose replies must never
+    // re-enter the live PTY. Each replacement terminal earns authority anew.
+    resetTerminalDataReplyAuthority();
     cancelWebglContextRecovery();
     webglAddon = null;
     ready = false;
@@ -731,7 +740,9 @@ ${TERMINAL_WEBGL_RECOVERY_JS}
       fontWeight: '300',
       fontWeightBold: '500',
       scrollback: 5000,
-      disableStdin: true,
+      // Why: xterm suppresses parser-generated query replies when disableStdin
+      // is true. Native accepts only validated reply grammars from onData.
+      disableStdin: false,
       cursorBlink: false,
       cursorStyle: 'bar',
       cursorInactiveStyle: 'none',
@@ -749,6 +760,7 @@ ${TERMINAL_WEBGL_RECOVERY_JS}
     resetEvictionCounter();
     cancelSelect();
     attachTermObservers();
+    attachTerminalQueryReplyBridge(term, gen);
 
     requestAnimationFrame(function() {
       if (gen !== terminalGeneration) return;

@@ -6476,6 +6476,21 @@ export class OrcaRuntimeService {
     return (this.mobileSubscribers.get(ptyId)?.size ?? 0) > 0
   }
 
+  isMobileTerminalQueryReplyAuthority(ptyId: string, clientId: string): boolean {
+    // Why: a passive phone watching desktop-sized output must not race the
+    // desktop xterm. Mobile becomes reply authority only with the mobile floor.
+    if (this.getDriver(ptyId).kind !== 'mobile') {
+      return false
+    }
+    const subscribers = this.mobileSubscribers.get(ptyId)
+    if (!subscribers) {
+      return false
+    }
+    // Why: Map insertion order elects one stable responder without a per-query
+    // scan; deleting the winner promotes the earliest surviving subscriber.
+    return subscribers.keys().next().value === clientId
+  }
+
   subscribeToFitOverrideChanges(
     ptyId: string,
     listener: (event: { mode: 'mobile-fit' | 'desktop-fit'; cols: number; rows: number }) => void

@@ -96,6 +96,17 @@ ingestion and an async write; the decision must not be re-read at reply time):
    stream (CLI `terminal.read`, automation observers) do not suppress — they
    also do not answer; that bounded no-reply case matches today's behavior.
 
+Mobile streams preserve that singularity across snapshot startup and multiple
+views. The mobile WebView suppresses `onData` during snapshot replay, then
+enables replies at an explicit live-output boundary. If a live query arrived
+while the initial snapshot was being built and its output sequence is covered
+by that snapshot, runtime RPC re-emits only the bounded query sequence after
+the snapshot; ordinary covered output stays deduplicated. `terminal.send`
+accepts the resulting `inputKind: query-reply` only from the earliest active
+mobile subscriber while mobile owns the terminal driver. Peer phones are
+rejected, the next subscriber is promoted on unsubscribe, and desktop parser
+and capability handlers stay silent until desktop retakes the driver.
+
 Everything the emulator emits outside a forwarding window is discarded, which
 also swallows unsolicited core emissions (e.g. native 997 color-scheme pushes
 triggered by option mutations).
@@ -237,7 +248,8 @@ any spawn-window drops).
    the documented ConPTY DA1 variant and the view-attribute parser handlers
    the headless core cannot serve.
 6. Remote views keep view authority; main yields whenever a remote view
-   subscriber is attached.
+   subscriber is attached. When multiple desktop/mobile views coexist, the
+   terminal driver and server-side mobile election keep one reply writer.
 
 **Contract amendment** — `terminal-model-view-contract.md` invariant 6 is
 replaced by:

@@ -112,6 +112,7 @@ import {
 import { dismissTerminalKeyboard } from '../../../../src/terminal/terminal-keyboard-dismiss'
 import type { TerminalLiveInputSender } from '../../../../src/terminal/terminal-live-input-sender'
 import { isTerminalSendRpcAccepted } from '../../../../src/terminal/terminal-send-rpc-response'
+import { sendMobileTerminalQueryReply } from '../../../../src/terminal/mobile-terminal-query-reply'
 import { useTerminalLiveInputCommit } from '../../../../src/terminal/use-terminal-live-input-commit'
 import {
   getTerminalCommandKeyboardType,
@@ -3531,6 +3532,17 @@ export default function SessionScreen() {
     [allowTerminalGestureInput, client, connState, enqueueTerminalGestureInput]
   )
 
+  const handleTerminalQueryReply = useCallback((handle: string, bytes: string) => {
+    void sendMobileTerminalQueryReply({
+      bytes,
+      client: clientRef.current,
+      clientId: deviceTokenRef.current,
+      connected: connStateRef.current === 'connected',
+      handle,
+      subscribedTerminals: terminalUnsubsRef.current
+    })
+  }, [])
+
   async function handleClearTerminal(target: Terminal) {
     if (!client) {
       return
@@ -4800,6 +4812,7 @@ export default function SessionScreen() {
                     onKeyboardAvoidanceMetrics={handleKeyboardAvoidanceMetrics}
                     onHaptic={handleHaptic}
                     onTerminalInput={handleTerminalInput}
+                    onTerminalQueryReply={handleTerminalQueryReply}
                     onTerminalTap={handleTerminalTap}
                     onFileTap={handleFileTap}
                     onOpenUrl={handleTerminalOpenUrl}

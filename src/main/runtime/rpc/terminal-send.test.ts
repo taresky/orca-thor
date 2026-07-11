@@ -169,6 +169,148 @@ describe('terminal send RPC', () => {
     expect(runtime.mobileTookFloor).toHaveBeenCalledWith('pty-1', 'mobile-1')
   })
 
+  it('writes a validated terminal query reply without taking the mobile floor', async () => {
+    const runtime = stubRuntime({
+      resolveLiveLeafForHandle: vi.fn().mockReturnValue({ ptyId: 'pty-1' }),
+      getDriver: vi.fn().mockReturnValue({ kind: 'desktop' }),
+      sendTerminal: vi.fn().mockResolvedValue({
+        handle: 'terminal-1',
+        accepted: true,
+        bytesWritten: 6
+      }),
+      isMobileTerminalQueryReplyAuthority: vi.fn().mockReturnValue(true),
+      mobileTookFloor: vi.fn()
+    })
+    const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+
+    const response = await dispatcher.dispatch(
+      makeRequest('terminal.send', {
+        terminal: 'terminal-1',
+        text: '\x1b[3;4R',
+        enter: false,
+        inputKind: 'query-reply',
+        client: { id: 'mobile-1', type: 'mobile' }
+      })
+    )
+
+    expect(response.ok).toBe(true)
+    expect(runtime.sendTerminal).toHaveBeenCalledWith(
+      'terminal-1',
+      { text: '\x1b[3;4R', enter: false, interrupt: false },
+      { beforeWrite: undefined }
+    )
+    expect(runtime.mobileTookFloor).not.toHaveBeenCalled()
+  })
+
+  it('accepts a query reply from only the elected mobile subscriber', async () => {
+    const runtime = stubRuntime({
+      resolveLiveLeafForHandle: vi.fn().mockReturnValue({ ptyId: 'pty-1' }),
+      getDriver: vi.fn().mockReturnValue({ kind: 'desktop' }),
+      isMobileTerminalQueryReplyAuthority: vi.fn(
+        (_ptyId: string, clientId: string) => clientId === 'mobile-1'
+      ),
+      sendTerminal: vi.fn().mockResolvedValue({
+        handle: 'terminal-1',
+        accepted: true,
+        bytesWritten: 6
+      }),
+      mobileTookFloor: vi.fn()
+    })
+    const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+
+    const makeReply = (clientId: string) =>
+      dispatcher.dispatch(
+        makeRequest('terminal.send', {
+          terminal: 'terminal-1',
+          text: '\x1b[3;4R',
+          inputKind: 'query-reply',
+          client: { id: clientId, type: 'mobile' }
+        })
+      )
+    const [winner, peer] = await Promise.all([makeReply('mobile-1'), makeReply('mobile-2')])
+
+    expect(winner).toMatchObject({ ok: true, result: { send: { accepted: true } } })
+    expect(peer).toMatchObject({ ok: true, result: { send: { accepted: false } } })
+    expect(runtime.sendTerminal).toHaveBeenCalledTimes(1)
+    expect(runtime.mobileTookFloor).not.toHaveBeenCalled()
+  })
+
+  it('rejects ordinary input that claims to be a terminal query reply', async () => {
+    const runtime = stubRuntime({
+      resolveLiveLeafForHandle: vi.fn(),
+      sendTerminal: vi.fn(),
+      mobileTookFloor: vi.fn()
+    })
+    const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+
+    const response = await dispatcher.dispatch(
+      makeRequest('terminal.send', {
+        terminal: 'terminal-1',
+        text: 'a',
+        inputKind: 'query-reply',
+        client: { id: 'mobile-1', type: 'mobile' }
+      })
+    )
+
+    expect(response).toMatchObject({ ok: false, error: { code: 'invalid_argument' } })
+    expect(runtime.resolveLiveLeafForHandle).not.toHaveBeenCalled()
+    expect(runtime.sendTerminal).not.toHaveBeenCalled()
+    expect(runtime.mobileTookFloor).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['enter', { enter: true }],
+    ['interrupt', { interrupt: true }],
+    ['agent guard', { requireAgentStatus: 'sendable' }]
+  ])('rejects a terminal query reply combined with %s semantics', async (_case, extra) => {
+    const runtime = stubRuntime({
+      resolveLiveLeafForHandle: vi.fn(),
+      sendTerminal: vi.fn()
+    })
+    const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+
+    const response = await dispatcher.dispatch(
+      makeRequest('terminal.send', {
+        terminal: 'terminal-1',
+        text: '\x1b[3;4R',
+        inputKind: 'query-reply',
+        client: { id: 'mobile-1', type: 'mobile' },
+        ...extra
+      })
+    )
+
+    expect(response).toMatchObject({ ok: false, error: { code: 'invalid_argument' } })
+    expect(runtime.resolveLiveLeafForHandle).not.toHaveBeenCalled()
+    expect(runtime.sendTerminal).not.toHaveBeenCalled()
+  })
+
+  it('rejects query replies that spoof a different authenticated mobile client', async () => {
+    const replies: string[] = []
+    const runtime = stubRuntime({
+      resolveLiveLeafForHandle: vi.fn(),
+      sendTerminal: vi.fn()
+    })
+    const dispatcher = new RpcDispatcher({ runtime, methods: TERMINAL_METHODS })
+
+    await dispatcher.dispatchStreaming(
+      makeRequest('terminal.send', {
+        terminal: 'terminal-1',
+        text: '\x1b[3;4R',
+        inputKind: 'query-reply',
+        client: { id: 'spoofed-mobile', type: 'mobile' }
+      }),
+      (reply) => replies.push(reply),
+      { clientId: 'authenticated-mobile' }
+    )
+
+    expect(JSON.parse(replies[0]!)).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_argument' }
+    })
+    expect(runtime.resolveLiveLeafForHandle).not.toHaveBeenCalled()
+    expect(runtime.sendTerminal).not.toHaveBeenCalled()
+  })
+
   it('rejects oversized terminal send text before runtime dispatch', async () => {
     const secret = 'terminal-send-secret'
     const runtime = stubRuntime({
