@@ -72,6 +72,7 @@ import {
   isOrphanCompatiblePreflightError,
   isOrphanedWorktreeError
 } from './worktree-logic'
+import { dedupeWorktreesByPath } from './worktree-path-comparison'
 import { joinWorktreeRelativePath } from '../runtime/runtime-relative-paths'
 import {
   createLocalWorktree,
@@ -206,19 +207,6 @@ async function closeLocalWatcherForRemoval(worktreePath: string): Promise<void> 
   await closeLocalWatcherForWorktreePath(worktreePath).catch((err) => {
     console.warn(`[filesystem-watcher] failed to close ${worktreePath}:`, err)
   })
-}
-
-function dedupeGitWorktreesByPath(gitWorktrees: GitWorktreeInfo[]): GitWorktreeInfo[] {
-  const uniqueGitWorktrees: GitWorktreeInfo[] = []
-  for (const gitWorktree of gitWorktrees) {
-    if (
-      uniqueGitWorktrees.some((existing) => areWorktreePathsEqual(existing.path, gitWorktree.path))
-    ) {
-      continue
-    }
-    uniqueGitWorktrees.push(gitWorktree)
-  }
-  return uniqueGitWorktrees
 }
 
 function getProjectHostSetupMetaUpdates(
@@ -718,7 +706,7 @@ function buildDetectedGitWorktrees(
   const settings = store.getSettings()
   const knownOrcaLayouts = buildKnownOrcaWorkspaceLayouts(settings, repo)
   const isLegacyRepoForVisibility = isLegacyRepoForExternalWorktreeVisibility(repo)
-  return dedupeGitWorktreesByPath(gitWorktrees).map((gitWorktree) => {
+  return dedupeWorktreesByPath(gitWorktrees).map((gitWorktree) => {
     const worktreeId = `${repo.id}::${gitWorktree.path}`
     let meta = store.getWorktreeMeta(worktreeId)
     const worktree = mergeWorktree(repo.id, gitWorktree, meta, repo.displayName)
