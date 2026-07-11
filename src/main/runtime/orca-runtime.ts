@@ -600,7 +600,6 @@ import type {
 } from '../../shared/github-project-types'
 import {
   getBaseRefDefault,
-  getDefaultBaseRef,
   getDefaultRemote,
   getBranchConflictKind,
   isGitRepo,
@@ -611,6 +610,7 @@ import {
   parseAndFilterSearchRefDetails,
   parseRemoteCount,
   resolveDefaultBaseRefViaExec,
+  resolveDefaultBaseRefWithLocalGit,
   buildSearchBaseRefsArgv,
   isForEachRefExcludeUnsupportedError,
   mergeBaseRefSearchResultGroups,
@@ -6495,6 +6495,31 @@ export class OrcaRuntimeService {
       return true
     }
     return (this.mobileSubscribers.get(ptyId)?.size ?? 0) > 0
+  }
+
+  isMobileTerminalQueryReplyAuthority(ptyId: string, clientId: string): boolean {
+    // Why: a passive phone watching desktop-sized output must not race the
+    // desktop xterm. Mobile becomes reply authority only with the mobile floor.
+    if (this.getDriver(ptyId).kind !== 'mobile') {
+      return false
+    }
+    const subscribers = this.mobileSubscribers.get(ptyId)
+    if (!subscribers) {
+      return false
+    }
+    // Why: soft-leave resubscribe preserves the original subscription time but
+    // reinserts the record. Elect fitted responders from that stable age, not
+    // mutable Map order or passive desktop-mode watchers.
+    let earliest: { clientId: string; subscribedAt: number } | null = null
+    for (const subscriber of subscribers.values()) {
+      if (!subscriber.wasResizedToPhone) {
+        continue
+      }
+      if (earliest === null || subscriber.subscribedAt < earliest.subscribedAt) {
+        earliest = subscriber
+      }
+    }
+    return earliest?.clientId === clientId
   }
 
   subscribeToFitOverrideChanges(
@@ -14670,8 +14695,8 @@ export class OrcaRuntimeService {
       repoWorktreeBaseRef: repo.worktreeBaseRef,
       resolveDefaultBaseRef: () =>
         hasLocalWorktreeGitOptions
-          ? resolveDefaultBaseRefViaExec((argv) => gitExecFileAsync(argv, localGitExecOptions))
-          : Promise.resolve(getDefaultBaseRef(repo.path)),
+          ? resolveDefaultBaseRefWithLocalGit(localGitExecOptions)
+          : getBaseRefDefault(repo.path),
       isBaseUsable: async (baseBranchCandidate) => {
         const remoteTrackingBase = await this.resolveRemoteTrackingBase(
           repo.path,
@@ -14702,10 +14727,8 @@ export class OrcaRuntimeService {
       }
     })
     if (!baseBranch) {
-      // Why: getDefaultBaseRef returns null when no suitable ref exists.
-      // Don't fabricate 'origin/main' — passing it to addWorktree would
-      // produce an opaque git failure. Surface a clear error so the CLI
-      // caller can pick an explicit --base ref.
+      // Why: a null default means no suitable ref exists; fail clearly instead
+      // of handing Git a fabricated origin/main ref.
       throw new Error(
         'Could not resolve a default base ref for this repo. Pass an explicit --base and try again.'
       )

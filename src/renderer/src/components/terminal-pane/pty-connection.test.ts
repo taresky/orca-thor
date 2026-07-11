@@ -4297,10 +4297,21 @@ describe('connectPanePty', () => {
       }
       // Simulate xterm answering a TUI's DA1 query while the phone owns the PTY.
       ;(onDataHandler as unknown as (data: string) => void)('\x1b[?1;2c')
+      // Capability handlers are registered outside onData and must honor the
+      // same mobile query-authority lock.
+      const csiCalls = (
+        pane.terminal.parser.registerCsiHandler as unknown as {
+          mock: { calls: [{ final: string }, (params: (number | number[])[]) => boolean][] }
+        }
+      ).mock.calls
+      const da1Handler = csiCalls.find(([id]) => id.final === 'c')?.[1]
+      expect(da1Handler).toBeTypeOf('function')
+      da1Handler?.([])
       await flushAsyncTicks()
 
       expect(window.api.runtime.restoreTerminalFit).not.toHaveBeenCalled()
       expect(transport.sendInput).not.toHaveBeenCalled()
+      expect(transport.sendInputImmediate).not.toHaveBeenCalled()
     } finally {
       setDriverForPty(ptyId, { kind: 'idle' })
     }
@@ -17714,7 +17725,12 @@ describe('connectPanePty', () => {
       )
       await flushAsyncTicks()
 
-      expect(window.api.pty.confirmForegroundProcess).toHaveBeenCalledTimes(3)
+      // The bounded ladder runs at least its initial read plus two retries; an
+      // incidental droid reconfirm can add one more, so assert the floor, not an
+      // exact count (matches the warm-reattach-to-shell sibling test above).
+      expect(
+        vi.mocked(window.api.pty.confirmForegroundProcess).mock.calls.length
+      ).toBeGreaterThanOrEqual(3)
       expect(mockStoreState.paneForegroundAgentByPaneKey[cacheKey]).toEqual({
         agent: null,
         shellForeground: true

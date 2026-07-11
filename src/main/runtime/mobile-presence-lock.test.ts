@@ -243,6 +243,50 @@ describe('mobile presence lock — multi-mobile semantics', () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
+  it('elects one query responder and promotes the survivor on unsubscribe', async () => {
+    const { runtime } = createRuntime()
+    await runtime.handleMobileSubscribe('pty-1', 'phone-A', { cols: 45, rows: 20 })
+    await runtime.handleMobileSubscribe('pty-1', 'phone-B', { cols: 38, rows: 18 })
+
+    expect(runtime.isMobileTerminalQueryReplyAuthority('pty-1', 'phone-A')).toBe(true)
+    expect(runtime.isMobileTerminalQueryReplyAuthority('pty-1', 'phone-B')).toBe(false)
+
+    runtime.handleMobileUnsubscribe('pty-1', 'phone-A')
+    expect(runtime.isMobileTerminalQueryReplyAuthority('pty-1', 'phone-B')).toBe(true)
+
+    await runtime.reclaimTerminalForDesktop('pty-1')
+    expect(runtime.isMobileTerminalQueryReplyAuthority('pty-1', 'phone-B')).toBe(false)
+  })
+
+  it('keeps the earliest subscriber authoritative after a soft-leave resubscribe', async () => {
+    const { runtime } = createRuntime()
+    await runtime.handleMobileSubscribe('pty-1', 'phone-A', { cols: 45, rows: 20 })
+    runtime.handleMobileUnsubscribe('pty-1', 'phone-A')
+
+    await vi.advanceTimersByTimeAsync(10)
+    await runtime.handleMobileSubscribe('pty-1', 'phone-B', { cols: 38, rows: 18 })
+    await runtime.handleMobileSubscribe('pty-1', 'phone-A', { cols: 45, rows: 20 })
+
+    expect(runtime.isMobileTerminalQueryReplyAuthority('pty-1', 'phone-A')).toBe(true)
+    expect(runtime.isMobileTerminalQueryReplyAuthority('pty-1', 'phone-B')).toBe(false)
+  })
+
+  it('excludes an older passive desktop-mode subscriber from reply authority', async () => {
+    const { runtime } = createRuntime()
+    runtime.setMobileDisplayMode('pty-1', 'desktop')
+    await runtime.handleMobileSubscribe('pty-1', 'phone-A', { cols: 45, rows: 20 })
+    await vi.advanceTimersByTimeAsync(10)
+    await runtime.handleMobileSubscribe('pty-1', 'phone-B', { cols: 38, rows: 18 })
+
+    await vi.advanceTimersByTimeAsync(10)
+    runtime.markMobileActor('pty-1', 'phone-B')
+    runtime.setMobileDisplayMode('pty-1', 'auto')
+    await runtime.applyMobileDisplayMode('pty-1')
+
+    expect(runtime.isMobileTerminalQueryReplyAuthority('pty-1', 'phone-A')).toBe(false)
+    expect(runtime.isMobileTerminalQueryReplyAuthority('pty-1', 'phone-B')).toBe(true)
+  })
+
   it('most-recent actor wins active phone-fit dims (B subscribes after A)', async () => {
     const { runtime, ptySizes } = createRuntime()
     await runtime.handleMobileSubscribe('pty-1', 'phone-A', { cols: 45, rows: 20 })

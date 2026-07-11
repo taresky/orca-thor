@@ -9849,6 +9849,9 @@
               }
             }
           },
+          "fileExplorerOperationOwner": {
+            "unresolved": "无法确定哪个主机拥有此工作区。请检查连接后重试。"
+          },
           "useFileDeletion": {
             "72691dfebc": "无法 {{value0}}“{{value1}}”。",
             "96affe1302": "“{{value0}}”已移至 {{value1}}",
@@ -9857,7 +9860,8 @@
             "a76c74f105": "destructive",
             "92276aceb7": "删除",
             "7fb9435c86": "这会永久删除远程主机上的目录及其内容。此操作无法撤销。",
-            "23e98f192f": "这会永久删除远程主机上的文件。此操作无法撤销。"
+            "23e98f192f": "这会永久删除远程主机上的文件。此操作无法撤销。",
+            "8b8ee9d22f": "无法确定哪个主机拥有此文件。请检查工作区连接后重试。"
           },
           "useFileExplorerHandlers": {
             "32cd9fd991": "无法打开符号链接目标"
@@ -11905,6 +11909,21 @@
             "ead6fc0510": "没有捕获到自动崩溃报告。你仍然可以发送详情，并在可用时包含最近的诊断日志。",
             "b082f27490": "附加最近的诊断日志",
             "e59f0b9427": "随报告发送经过删减且有大小限制的日志包。"
+          },
+          "submit": {
+            "notice": {
+              "unknownError": "The crash report request failed before it returned a reason.",
+              "ticketUploaded": "Diagnostic ticket {{value0}} was uploaded but not linked.",
+              "uncheckDiagnostics": "Uncheck \"Attach recent diagnostic logs\" and try again, or copy the details.",
+              "checkConnection": "Check your connection and try again, or copy the details.",
+              "notSent": "Crash report wasn't sent",
+              "copyDetails": "Copy Details",
+              "sentWithoutDiagnostics": "Crash report sent without diagnostic logs",
+              "diagnosticsReason": "Diagnostic logs were not attached: {{value0}}"
+            }
+          },
+          "copy": {
+            "copyFailed": "无法复制崩溃报告详细信息。"
           }
         }
       },

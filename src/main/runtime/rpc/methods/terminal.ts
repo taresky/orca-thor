@@ -26,6 +26,13 @@ import {
 } from '../../../../shared/terminal-input'
 import { measureClipboardTextByteLength } from '../../../../shared/clipboard-text'
 import { isTuiAgent } from '../../../../shared/tui-agent-config'
+import { isTerminalQueryReply } from '../../../../shared/terminal-query-reply'
+import {
+  EMPTY_TERMINAL_REPLY_QUERY_SCAN_STATE,
+  scanTerminalReplyQuerySequences,
+  type TerminalReplyQuerySequence,
+  type TerminalReplyQueryScanState
+} from '../../../../shared/terminal-reply-query-scan'
 import {
   MOBILE_SNAPSHOT_BYTE_BUDGET,
   MOBILE_SUBSCRIBE_SCROLLBACK_ROWS
@@ -42,6 +49,7 @@ const TERMINAL_MULTIPLEX_ACK_TOTAL_HIGH_WATER_BYTES = 2 * 1024 * 1024
 // Why: pending output is held for later binary frames, so cap the encoded
 // payload bytes rather than UTF-16 code units.
 const TERMINAL_MULTIPLEX_PENDING_MAX_BYTES = 256 * 1024
+const TERMINAL_QUERY_REPLAY_MAX_CHARS = 16 * 1024
 let nextTerminalStreamId = 1
 
 type SnapshotFrameOptions = {
@@ -378,6 +386,29 @@ function getOutputAfterSnapshotSeq(
     return chunk.data
   }
   return chunk.data.slice(snapshotSeq - chunkStartSeq)
+}
+
+function stripSnapshotBoundaryQuerySuffixes(
+  data: string,
+  dataStartSeq: number,
+  snapshotSeq: number,
+  queries: TerminalReplyQuerySequence[]
+): string {
+  let output = ''
+  let offset = 0
+  for (const query of queries) {
+    if (query.startSeq >= snapshotSeq || query.endSeq <= snapshotSeq) {
+      continue
+    }
+    const removeStart = Math.max(0, query.startSeq - dataStartSeq)
+    const removeEnd = Math.min(data.length, query.endSeq - dataStartSeq)
+    if (removeEnd <= offset || removeStart >= data.length) {
+      continue
+    }
+    output += data.slice(offset, removeStart)
+    offset = removeEnd
+  }
+  return output + data.slice(offset)
 }
 
 function appendAckPendingOutput(
@@ -731,6 +762,9 @@ const TerminalSend = TerminalHandle.extend({
   enter: z.unknown().optional(),
   interrupt: z.unknown().optional(),
   requireAgentStatus: z.enum(['sendable']).optional(),
+  // Why: terminal-generated replies are valid input bytes but are not a user
+  // action that should transfer the shared terminal floor.
+  inputKind: z.enum(['query-reply']).optional(),
   // Why: identifies the caller for the driver state machine. Optional for
   // backward compatibility with older mobile clients (server falls back to
   // the most recent mobile actor when absent). New mobile builds populate
@@ -1025,13 +1059,40 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
   defineMethod({
     name: 'terminal.send',
     params: TerminalSend,
-    handler: async (params, { runtime }) => {
+    handler: async (params, { runtime, clientId }) => {
       await assertTerminalSendTextWithinLimit(params.text)
+      const queryReplyClientId = clientId ?? params.client?.id
+      if (
+        params.inputKind === 'query-reply' &&
+        (!params.text ||
+          !isTerminalQueryReply(params.text) ||
+          params.enter === true ||
+          params.interrupt === true ||
+          params.requireAgentStatus !== undefined ||
+          params.client?.type !== 'mobile' ||
+          !queryReplyClientId ||
+          (clientId !== undefined && params.client.id !== clientId))
+      ) {
+        throw new InvalidArgumentError('Invalid terminal query reply')
+      }
       // Why: guarded resolution — a stale handle must fail with
       // terminal_handle_stale (clients recover by re-deriving the handle)
       // instead of evaluating driver/lock state against the wrong PTY (#7718).
       const leaf = runtime.resolveLiveLeafForHandle(params.terminal)
       const driver = leaf?.ptyId ? runtime.getDriver(leaf.ptyId) : null
+      if (
+        params.inputKind === 'query-reply' &&
+        leaf?.ptyId &&
+        !runtime.isMobileTerminalQueryReplyAuthority(leaf.ptyId, queryReplyClientId!)
+      ) {
+        return {
+          send: {
+            handle: params.terminal,
+            accepted: false,
+            bytesWritten: 0
+          }
+        }
+      }
       if (leaf?.ptyId && isTerminalInputLockedForClient(runtime, leaf.ptyId, params.client)) {
         return {
           send: {
@@ -1166,7 +1227,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
       // the most recent actor. Clientless sends are old mobile builds, so use
       // the current mobile driver as their compatibility identity.
       const mobileFloorClientId = resolveMobileFloorClientId(driver, params.client)
-      if (leaf?.ptyId && mobileFloorClientId) {
+      if (params.inputKind !== 'query-reply' && leaf?.ptyId && mobileFloorClientId) {
         await runtime.mobileTookFloor(leaf.ptyId, mobileFloorClientId)
       }
       return { send: result }
@@ -2426,6 +2487,10 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
       let desktopClaimTail: Promise<boolean> = Promise.resolve(true)
       let pendingOutputBytes = 0
       let pendingOutputOverflowed = false
+      let pendingQueryScanState: TerminalReplyQueryScanState = EMPTY_TERMINAL_REPLY_QUERY_SCAN_STATE
+      const pendingQuerySequences: TerminalReplyQuerySequence[] = []
+      let pendingQueryChars = 0
+      let pendingQueryOverflowed = false
       let unsubscribeData = (): void => {}
       let unsubscribeResize = (): void => {}
       let unsubscribeFit = (): void => {}
@@ -2600,6 +2665,57 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
               .catch(() => false)
           }
         }) ?? (() => {})
+      const unsubscribeStreamData = runtime.subscribeToTerminalData(ptyId, (data, meta) => {
+        if (closed) {
+          return
+        }
+        if (buffering) {
+          const rawLength = meta?.rawLength
+          if (
+            typeof meta?.seq === 'number' &&
+            typeof rawLength === 'number' &&
+            rawLength === data.length
+          ) {
+            const scan = scanTerminalReplyQuerySequences(
+              data,
+              meta.seq - rawLength,
+              pendingQueryScanState
+            )
+            pendingQueryScanState = scan.state
+            for (const query of scan.queries) {
+              if (pendingQueryChars + query.data.length > TERMINAL_QUERY_REPLAY_MAX_CHARS) {
+                pendingQueryOverflowed = true
+                break
+              }
+              pendingQuerySequences.push(query)
+              pendingQueryChars += query.data.length
+            }
+          } else {
+            pendingQueryScanState = EMPTY_TERMINAL_REPLY_QUERY_SCAN_STATE
+          }
+          const remainingBudget = Math.max(
+            1,
+            TERMINAL_MULTIPLEX_PENDING_MAX_BYTES - pendingOutputBytes
+          )
+          const measurement = measureTerminalStreamByteLength(data, {
+            stopAfterBytes: remainingBudget
+          })
+          pendingOutput.push({ data, bytes: measurement.byteLength, meta })
+          pendingOutputBytes += measurement.byteLength
+          const trimmed = trimPendingOutputToBudget(pendingOutput, pendingOutputBytes)
+          pendingOutputBytes = trimmed.bytes
+          pendingOutputOverflowed ||= trimmed.overflowed
+          return
+        }
+        outputBatcher?.push(data, meta)
+      })
+      // Why: live bytes must be captured before mobile fit awaits. Registering
+      // mobile presence first would suppress main while no view held the query.
+      const releaseViewSubscriber = runtime.registerRemoteTerminalViewSubscriber(ptyId)
+      unsubscribeData = () => {
+        releaseViewSubscriber()
+        unsubscribeStreamData()
+      }
       // Server-side auto-fit: resize PTY to phone dims before serializing scrollback
       try {
         if (isMobile && clientId) {
@@ -2609,59 +2725,6 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           // only an explicit activity/claim frame may suppress the host.
           registeredRemoteDesktopDriver = true
           pendingRemoteDesktopViewport = params.viewport
-        }
-        if (closed) {
-          return
-        }
-
-        const unsubscribeStreamData = runtime.subscribeToTerminalData(ptyId, (data, meta) => {
-          if (closed) {
-            return
-          }
-          if (buffering) {
-            const remainingBudget = Math.max(
-              1,
-              TERMINAL_MULTIPLEX_PENDING_MAX_BYTES - pendingOutputBytes
-            )
-            const measurement = measureTerminalStreamByteLength(data, {
-              stopAfterBytes: remainingBudget
-            })
-            pendingOutput.push({ data, bytes: measurement.byteLength, meta })
-            pendingOutputBytes += measurement.byteLength
-            const trimmed = trimPendingOutputToBudget(pendingOutput, pendingOutputBytes)
-            pendingOutputBytes = trimmed.bytes
-            pendingOutputOverflowed ||= trimmed.overflowed
-            return
-          }
-          outputBatcher?.push(data, meta)
-        })
-        // Why: binary subscribe streams feed remote xterm views (mobile and
-        // binary-capable desktop clients) that answer queries with view
-        // authority; the main model responder yields while attached.
-        const releaseViewSubscriber = runtime.registerRemoteTerminalViewSubscriber(ptyId)
-        unsubscribeData = () => {
-          releaseViewSubscriber()
-          unsubscribeStreamData()
-        }
-
-        if (
-          clientId &&
-          params.client &&
-          registeredRemoteDesktopDriver &&
-          pendingRemoteDesktopViewport
-        ) {
-          const viewport = pendingRemoteDesktopViewport
-          pendingRemoteDesktopViewport = null
-          await updateViewportForClient(
-            runtime,
-            ptyId,
-            remoteDesktopSubscriptionKey,
-            params.client,
-            viewport,
-            'desktop',
-            'register',
-            !supportsDesktopViewportClaims
-          )
         }
         if (closed) {
           return
@@ -2697,7 +2760,11 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
         // See docs/mobile-terminal-layout-state-machine.md.
         const layoutSeq = runtime.getLayout(ptyId)?.seq
         const snapshotFrameSeq = serialized?.seq ?? layoutSeq
-        const snapshotOutputSeq = serialized?.seq
+        // Why: recovery snapshots advance output coverage past the initial
+        // snapshot seq; query replay and boundary trims must track the seq
+        // that actually covered the buffered chunks or a query absorbed by a
+        // recovery snapshot gets zero replies.
+        let snapshotOutputSeq = serialized?.seq
         emit({
           type: 'subscribed',
           streamId,
@@ -2784,12 +2851,43 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           const trimmed = trimPendingOutputCoveredBySnapshot(pendingOutput, recovery.seq)
           pendingOutput = trimmed.chunks
           pendingOutputBytes = trimmed.bytes
+          snapshotOutputSeq = recovery.seq
         }
         buffering = false
         const bufferedOutput = pendingOutput.splice(0)
+        const queryReplayData = pendingQueryOverflowed
+          ? ''
+          : pendingQuerySequences
+              .filter(
+                (query) =>
+                  initialOutputOverflowed ||
+                  (typeof snapshotOutputSeq === 'number' && query.startSeq < snapshotOutputSeq)
+              )
+              .map((query) => query.data)
+              .join('')
+        if (queryReplayData) {
+          // Why: serialized snapshots omit control queries, yet their output seq
+          // can trim the live chunk. Replay only the query after snapshot so the
+          // mobile xterm answers once while ordinary output stays deduplicated.
+          outputBatcher.push(queryReplayData)
+        }
         if (!initialOutputOverflowed) {
           for (const item of bufferedOutput) {
-            const uncoveredData = getOutputAfterSnapshotSeq(item, snapshotOutputSeq)
+            let uncoveredData = getOutputAfterSnapshotSeq(item, snapshotOutputSeq)
+            if (
+              uncoveredData &&
+              uncoveredData !== item.data &&
+              typeof snapshotOutputSeq === 'number' &&
+              typeof item.meta?.seq === 'number' &&
+              typeof item.meta.rawLength === 'number'
+            ) {
+              uncoveredData = stripSnapshotBoundaryQuerySuffixes(
+                uncoveredData,
+                snapshotOutputSeq,
+                snapshotOutputSeq,
+                pendingQuerySequences
+              )
+            }
             if (uncoveredData) {
               outputBatcher.push(uncoveredData, item.meta)
             }

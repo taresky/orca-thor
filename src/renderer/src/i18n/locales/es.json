@@ -9849,6 +9849,9 @@
               }
             }
           },
+          "fileExplorerOperationOwner": {
+            "unresolved": "No se pudo determinar qué host posee este espacio de trabajo. Comprueba la conexión e inténtalo de nuevo."
+          },
           "useFileDeletion": {
             "72691dfebc": "No se pudo {{value0}} '{{value1}}'.",
             "96affe1302": "'{{value0}}' se movió a {{value1}}",
@@ -9857,7 +9860,8 @@
             "a76c74f105": "destructivo",
             "92276aceb7": "Eliminar",
             "7fb9435c86": "Esto elimina permanentemente el directorio y su contenido en el host remoto. Esto no se puede deshacer.",
-            "23e98f192f": "Esto elimina permanentemente el archivo en el host remoto. Esto no se puede deshacer."
+            "23e98f192f": "Esto elimina permanentemente el archivo en el host remoto. Esto no se puede deshacer.",
+            "8b8ee9d22f": "No se pudo determinar qué host posee este archivo. Comprueba la conexión del espacio de trabajo e inténtalo de nuevo."
           },
           "useFileExplorerHandlers": {
             "32cd9fd991": "No se puede abrir el destino del enlace simbólico"
@@ -11905,6 +11909,21 @@
             "ead6fc0510": "No se capturó ningún informe de fallo automático. Aun así puedes enviar detalles e incluir logs de diagnóstico recientes cuando estén disponibles.",
             "b082f27490": "Adjuntar logs de diagnóstico recientes",
             "e59f0b9427": "Envía un paquete limitado de logs redactados junto con el informe."
+          },
+          "submit": {
+            "notice": {
+              "unknownError": "The crash report request failed before it returned a reason.",
+              "ticketUploaded": "Diagnostic ticket {{value0}} was uploaded but not linked.",
+              "uncheckDiagnostics": "Uncheck \"Attach recent diagnostic logs\" and try again, or copy the details.",
+              "checkConnection": "Check your connection and try again, or copy the details.",
+              "notSent": "Crash report wasn't sent",
+              "copyDetails": "Copy Details",
+              "sentWithoutDiagnostics": "Crash report sent without diagnostic logs",
+              "diagnosticsReason": "Diagnostic logs were not attached: {{value0}}"
+            }
+          },
+          "copy": {
+            "copyFailed": "No se pudieron copiar los detalles del informe de fallo."
           }
         }
       },
