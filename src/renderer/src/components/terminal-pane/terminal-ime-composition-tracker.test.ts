@@ -11,7 +11,10 @@ type TrackerHarness = {
   tracker: TerminalImeCompositionTracker
   element: HTMLElement
   advance: (ms: number) => void
-  composition: (type: 'compositionstart' | 'compositionupdate' | 'compositionend', data: string) => void
+  composition: (
+    type: 'compositionstart' | 'compositionupdate' | 'compositionend',
+    data: string
+  ) => void
   input: (inputType: string) => void
   blur: () => void
 }
@@ -138,6 +141,20 @@ describe('installTerminalImeCompositionTracker', () => {
       harness.advance(TERMINAL_IME_CANDIDATE_GUARD_POST_COMPOSITION_MS)
       expect(harness.tracker.isCandidateKeyGuardActive()).toBe(true)
       harness.advance(1)
+      expect(harness.tracker.isCandidateKeyGuardActive()).toBe(false)
+    })
+
+    it('does not arm the post-composition window when the committing selector was consumed during composition', () => {
+      // Regression: committing Chinese via a Space/digit candidate key (already
+      // suppressed during the live composition) armed the post-compositionend
+      // window, which then swallowed the user's very next genuine Space/digit
+      // typed within 250ms (e.g. "2024" -> "024", or a separator space lost).
+      const harness = installTracker()
+      harness.composition('compositionstart', '')
+      harness.composition('compositionupdate', '')
+      // The candidate selector was suppressed while the composition was live.
+      harness.tracker.noteCandidateSelectionDuringComposition()
+      harness.composition('compositionend', '你好')
       expect(harness.tracker.isCandidateKeyGuardActive()).toBe(false)
     })
 

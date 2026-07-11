@@ -881,11 +881,12 @@ export function useTerminalPaneLifecycle({
         imeNativeTextForwarderDisposablesRef.current.set(pane.id, imeNativeTextForwarder)
         pane.terminal.attachCustomKeyEventHandler((e) => {
           const now = Date.now()
-          const pendingCandidateReleaseGuardActive = shouldApplyTerminalImePendingCandidateKeyRelease(
-            e,
-            pendingTerminalImeCandidateKeyReleases,
-            now
-          )
+          const pendingCandidateReleaseGuardActive =
+            shouldApplyTerminalImePendingCandidateKeyRelease(
+              e,
+              pendingTerminalImeCandidateKeyReleases,
+              now
+            )
           const imeKeyboardOptions = {
             compositionActive: imeCompositionTracker.isActive(),
             candidateKeyGuardActive:
@@ -908,6 +909,13 @@ export function useTerminalPaneLifecycle({
                 e,
                 now
               )
+              if (imeKeyboardOptions.compositionActive) {
+                // Why: the committing Space/digit was consumed during the live
+                // composition, so the post-compositionend window must not also
+                // arm and swallow the user's next genuine Space/digit typed
+                // within 250ms.
+                imeCompositionTracker.noteCandidateSelectionDuringComposition()
+              }
             }
             return false
           }

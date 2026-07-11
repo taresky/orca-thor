@@ -6,6 +6,11 @@ export type TerminalImeCompositionTracker = IDisposable & {
    *  IME-owned: during a live composition, and briefly after compositionend to
    *  absorb the committing key's trailing press/release. */
   isCandidateKeyGuardActive: () => boolean
+  /** Called by the key handler when a candidate-selection key (Space/digit) is
+   *  suppressed while a composition is still live. The committing selector has
+   *  then already been consumed, so the post-compositionend window must not arm
+   *  and swallow the user's next genuine Space/digit typed within 250ms. */
+  noteCandidateSelectionDuringComposition: () => void
 }
 
 // Why: suppressed candidate keys are preventDefault-ed and fire no input
@@ -26,6 +31,14 @@ export function installTerminalImeCompositionTracker(
   let lastCompositionEventAt: number | null = null
   let compositionEndedAt: number | null = null
   let sawEmptyCompositionUpdate = false
+  // Why: when the committing Space/digit is consumed during the live
+  // composition, no trailing selector arrives after compositionend, so arming
+  // the post-composition window would only swallow the user's next real key.
+  let candidateSelectionDuringComposition = false
+
+  const noteCandidateSelectionDuringComposition = (): void => {
+    candidateSelectionDuringComposition = true
+  }
 
   const isActiveAt = (at: number): boolean =>
     active &&
@@ -47,6 +60,7 @@ export function installTerminalImeCompositionTracker(
     return {
       isActive: () => active,
       isCandidateKeyGuardActive,
+      noteCandidateSelectionDuringComposition,
       dispose: () => undefined
     }
   }
@@ -56,6 +70,7 @@ export function installTerminalImeCompositionTracker(
     lastCompositionEventAt = now()
     compositionEndedAt = null
     sawEmptyCompositionUpdate = false
+    candidateSelectionDuringComposition = false
   }
   const updateComposition = (event: Event): void => {
     lastCompositionEventAt = now()
@@ -75,8 +90,13 @@ export function installTerminalImeCompositionTracker(
     active = false
     // Why: only Sogou/fcitx-style empty updates prove a trailing plain
     // Space/digit is likely IME-owned; broad post-end guards drop real typing.
-    compositionEndedAt = sawEmptyCompositionUpdate ? now() : null
+    // If the committing selector was already consumed during the composition,
+    // no trailing selector follows, so arming the window would only swallow
+    // the user's next genuine Space/digit.
+    compositionEndedAt =
+      sawEmptyCompositionUpdate && !candidateSelectionDuringComposition ? now() : null
     sawEmptyCompositionUpdate = false
+    candidateSelectionDuringComposition = false
   }
   const handleInput = (event: Event): void => {
     if (event instanceof InputEvent && event.inputType === 'insertCompositionText') {
@@ -87,12 +107,14 @@ export function installTerminalImeCompositionTracker(
     // the post-end window would swallow a legitimate Space/digit.
     compositionEndedAt = null
     sawEmptyCompositionUpdate = false
+    candidateSelectionDuringComposition = false
   }
   const markInactive = (): void => {
     active = false
     lastCompositionEventAt = null
     compositionEndedAt = null
     sawEmptyCompositionUpdate = false
+    candidateSelectionDuringComposition = false
   }
 
   terminalElement.addEventListener('compositionstart', markActive, true)
@@ -104,6 +126,7 @@ export function installTerminalImeCompositionTracker(
   return {
     isActive: () => isActiveAt(now()),
     isCandidateKeyGuardActive,
+    noteCandidateSelectionDuringComposition,
     dispose: () => {
       terminalElement.removeEventListener('compositionstart', markActive, true)
       terminalElement.removeEventListener('compositionupdate', updateComposition, true)
