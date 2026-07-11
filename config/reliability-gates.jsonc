@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-10",
+  "updatedAt": "2026-07-11",
   "policy": {
     "maturityLevels": [
       "experimental",
@@ -3211,6 +3211,116 @@
         "Buffer-clean, pixels-stale variants are otherwise invisible to every buffer oracle in the manifest."
       ],
       "demotionRule": "Drop from the golden suite back to nightly diagnostic if diff thresholds cannot be kept stable across CI runners."
+    },
+    {
+      "id": "terminal-session.pre-handler-pty-ordering",
+      "title": "Pre-handler PTY data and exits stay bounded, ordered, and generation-safe",
+      "maturity": "experimental",
+      "protection": "partial",
+      "owner": "terminal-runtime",
+      "layer": "renderer-unit",
+      "surfaces": [
+        "PTY startup",
+        "background terminal launch",
+        "handler registration",
+        "failed shutdown recovery"
+      ],
+      "platforms": [
+        "macos",
+        "linux",
+        "windows"
+      ],
+      "providers": [
+        "local",
+        "daemon",
+        "ssh",
+        "wsl"
+      ],
+      "coveredPlatforms": [
+        "macos"
+      ],
+      "coveredProviders": [
+        "local",
+        "daemon"
+      ],
+      "coverageNotes": "Deterministic macOS renderer tests cover the shared IPC transport used by local, daemon, SSH, and WSL PTYs, including explicit daemon reattach. SSH and WSL have path-equivalent unit coverage but no live provider run. Remote-runtime/mobile use a different host-owned stream and are unaffected.",
+      "motivatingLinks": [
+        "https://github.com/stablyai/orca/pull/7695"
+      ],
+      "invariant": "Before a PTY handler mounts, retained data, exit, and warning identities remain capped; data drains before exit; a fresh provider-reused PTY id cannot consume an older lifecycle's events; explicit reattach keeps its current backlog; and failed shutdown restore drains detached data before later live output.",
+      "oracle": "Drive more than 64 exit-before-handler identities, warning-producing data churn, duplicate/reused ids, fresh-spawn and explicit-reattach ordering, handler registration at cap, and failed-shutdown restoration; assert bounded eviction, exact latest-code delivery once, fresh-generation filtering, data-before-exit order, and detached-before-live output.",
+      "commands": [
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-pre-handler-buffer.test.ts src/renderer/src/components/terminal-pane/pty-transport.test.ts src/renderer/src/components/terminal-pane/pty-dispatcher-pi-routing.test.ts src/renderer/src/lib/launch-agent-background-session.test.ts src/renderer/src/lib/launch-worktree-background-terminals.test.ts"
+      ],
+      "testFiles": [
+        "src/renderer/src/components/terminal-pane/pty-pre-handler-buffer.test.ts",
+        "src/renderer/src/components/terminal-pane/pty-transport.test.ts",
+        "src/renderer/src/components/terminal-pane/pty-dispatcher-pi-routing.test.ts",
+        "src/renderer/src/lib/launch-agent-background-session.test.ts",
+        "src/renderer/src/lib/launch-worktree-background-terminals.test.ts"
+      ],
+      "assertionRefs": [
+        {
+          "file": "src/renderer/src/components/terminal-pane/pty-pre-handler-buffer.test.ts",
+          "assertions": [
+            "65 exit-before-handler identities evict the oldest and retain the newest",
+            "a reused PTY id refreshes recency, delivers only its latest exit once, and filters older-lifecycle data and exits by cursor",
+            "warning identities are released with exact data-map eviction so warning state cannot grow independently"
+          ]
+        },
+        {
+          "file": "src/renderer/src/components/terminal-pane/pty-dispatcher-pi-routing.test.ts",
+          "assertions": [
+            "pre-handler data drains before its exit",
+            "fresh PTY-id reuse filters old lifecycle events while explicit daemon reattach preserves pre-connect backlog",
+            "a registered exit handler remains authoritative while 65 orphan exits churn through the bounded buffer"
+          ]
+        },
+        {
+          "file": "src/renderer/src/components/terminal-pane/pty-transport.test.ts",
+          "assertions": [
+            "failed intentional shutdown restoration drains data received while detached before later live data"
+          ]
+        }
+      ],
+      "evidenceRuns": [
+        {
+          "date": "2026-07-11",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-pre-handler-buffer.test.ts src/renderer/src/components/terminal-pane/pty-transport.test.ts src/renderer/src/components/terminal-pane/pty-dispatcher-pi-routing.test.ts src/renderer/src/lib/launch-agent-background-session.test.ts src/renderer/src/lib/launch-worktree-background-terminals.test.ts",
+          "result": "passed",
+          "durationSeconds": 1,
+          "summary": "5 test files passed, 112 tests passed on main@20ebe858af plus the #7695 candidate. The current-main repro retained the 65th oldest exit (received code 0 instead of eviction); the bounded candidate evicts it and preserves all ordering/reuse cases."
+        }
+      ],
+      "runtimeBudget": {
+        "p95Seconds": 10,
+        "scope": "renderer unit and contract tests"
+      },
+      "flakeHistory": {
+        "status": "unknown",
+        "evidence": "New deterministic gate; needs soak history before promotion."
+      },
+      "redGreenEvidence": {
+        "status": "partial",
+        "evidence": "On current main the 65-identity repro fails because the oldest exit remains retained. The candidate passes the same oracle plus ordering, reuse, warning, and failed-restore cases. Needs saved CI history before blocking promotion."
+      },
+      "performanceBudget": {
+        "required": true,
+        "evidence": "Only the rare no-handler path adds one monotonic-number increment and constant-size Map operations. Data and exits each retain at most 64 PTY identities; warning identities are a subset of retained data identities. No polling, timers, provider listing, IPC/RPC, subprocesses, renderer fanout, or scans were added."
+      },
+      "promotionCriteria": [
+        "Soak for at least 100 consecutive passes or 14 days on required CI platforms.",
+        "Add live SSH and WSL fast-exit coverage or provider-contract equivalents.",
+        "Capture a saved intentional-break artifact for cursor filtering and failed-shutdown ordering."
+      ],
+      "knownGaps": [
+        "Under extreme churn beyond 64 undrained exits, the oldest exit is deliberately dropped; this matches the established pre-handler data budget and can leave only the newest 64 diagnostics.",
+        "SSH and WSL share the tested IPC path but lack live provider evidence.",
+        "Remote-runtime/mobile streams are host-owned and do not use this renderer pre-handler buffer."
+      ],
+      "demotionRule": "Demote or quarantine if ordering flakes, a live provider consumes an older lifecycle event, or the added cursor/bookkeeping appears in normal registered-handler throughput profiles."
     },
     {
       "id": "pty-delivery.renderer-lifecycle-accounting-reset",

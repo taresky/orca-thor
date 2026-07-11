@@ -16,10 +16,12 @@ import { clampUtf8Tail, type EagerBufferChunk } from './pty-eager-buffer-clamp'
 import {
   bufferPreHandlerPtyData,
   bufferPreHandlerPtyExit,
+  capturePreHandlerPtyEventCursor,
   clearPreHandlerPtyState,
   drainPreHandlerPtyData,
   drainPreHandlerPtyExit
 } from './pty-pre-handler-buffer'
+export { capturePreHandlerPtyEventCursor }
 import {
   clearReceivedPtyCharTotal,
   isPtyPushDeliveryBlackholed,
@@ -105,6 +107,10 @@ export function restorePtyDataHandlersAfterFailedShutdown(
   for (const snapshot of snapshots) {
     if (snapshot.dataHandler) {
       ptyDataHandlers.set(snapshot.ptyId, snapshot.dataHandler)
+      // Why: a kill failure can restore this handler after main already sent
+      // a final data burst into the pre-handler buffer. Replay it before later
+      // live data so failure recovery neither leaks nor reorders output.
+      drainPreHandlerPtyData(snapshot.ptyId, snapshot.dataHandler)
     }
     if (snapshot.replayHandler) {
       ptyReplayHandlers.set(snapshot.ptyId, snapshot.replayHandler)
@@ -304,9 +310,15 @@ export function getEagerPtyBufferHandle(ptyId: string): EagerPtyHandle | undefin
 // runs a long-lived command (e.g. tail -f) in a worktree the user never opens.
 const EAGER_BUFFER_MAX_BYTES = TERMINAL_SCROLLBACK_SESSION_BUFFER_BYTE_LIMIT
 
+export function captureEagerPtyBufferRegistration(): typeof registerEagerPtyBuffer {
+  const afterCursor = capturePreHandlerPtyEventCursor()
+  return (ptyId, onExit) => registerEagerPtyBuffer(ptyId, onExit, afterCursor)
+}
+
 export function registerEagerPtyBuffer(
   ptyId: string,
-  onExit: (ptyId: string, code: number) => void
+  onExit: (ptyId: string, code: number) => void,
+  afterCursor?: number
 ): EagerPtyHandle {
   ensurePtyDispatcher()
   // Why: a head index instead of Array.shift() — shift() is O(n), making
@@ -378,13 +390,13 @@ export function registerEagerPtyBuffer(
   }
 
   eagerPtyHandles.set(ptyId, handle)
-  drainPreHandlerPtyData(ptyId, dataHandler)
+  drainPreHandlerPtyData(ptyId, dataHandler, afterCursor)
   // Why: launcher callbacks often capture the returned handle so they can
   // flush output on exit. Defer a pre-handler exit by one microtask so the
   // caller receives that handle before onExit fires.
   queueMicrotask(() => {
     if (ptyExitHandlers.get(ptyId) === exitHandler) {
-      drainPreHandlerPtyExit(ptyId, exitHandler)
+      drainPreHandlerPtyExit(ptyId, exitHandler, afterCursor)
     } else {
       clearPreHandlerPtyState(ptyId)
     }

@@ -336,4 +336,95 @@ describe('dispatcher → transport → onTitleChange for Pi spinner', () => {
 
     expect(events).toEqual(['data:last line\r\n', 'exit:3'])
   })
+
+  it('filters an older lifecycle when a fresh spawn reuses a PTY id', async () => {
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const { ensurePtyDispatcher } = await import('./pty-dispatcher')
+    const events: string[] = []
+    let resolveSpawn: (value: { id: string }) => void = () => {}
+
+    ensurePtyDispatcher()
+    dispatcherCallback?.({ id: 'pty-reused', data: 'old-data' })
+    exitDispatcherCallback?.({ id: 'pty-reused', code: 1 })
+    ;(window.api.pty.spawn as ReturnType<typeof vi.fn>).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveSpawn = resolve
+      })
+    )
+
+    const transport = createIpcPtyTransport()
+    const connectPromise = transport.connect({
+      url: '',
+      callbacks: {
+        onData: (data) => events.push(`data:${data}`),
+        onExit: (code) => events.push(`exit:${code}`)
+      }
+    })
+    dispatcherCallback?.({ id: 'pty-reused', data: 'new-data' })
+    exitDispatcherCallback?.({ id: 'pty-reused', code: 2 })
+    resolveSpawn({ id: 'pty-reused' })
+    await connectPromise
+
+    expect(events).toEqual(['data:new-data', 'exit:2'])
+  })
+
+  it('preserves pre-connect backlog for an explicit daemon reattach', async () => {
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const { ensurePtyDispatcher } = await import('./pty-dispatcher')
+    const events: string[] = []
+
+    ensurePtyDispatcher()
+    dispatcherCallback?.({ id: 'pty-reattach', data: 'reattach-data' })
+    exitDispatcherCallback?.({ id: 'pty-reattach', code: 4 })
+    ;(window.api.pty.spawn as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      id: 'pty-reattach',
+      isReattach: true
+    })
+
+    const transport = createIpcPtyTransport()
+    await transport.connect({
+      url: '',
+      sessionId: 'pty-reattach',
+      callbacks: {
+        onData: (data) => events.push(`data:${data}`),
+        onExit: (code) => events.push(`exit:${code}`)
+      }
+    })
+
+    expect(events).toEqual(['data:reattach-data', 'exit:4'])
+  })
+
+  it('never evicts a registered exit handler while orphan exits churn at the cap', async () => {
+    const { ensurePtyDispatcher, registerEagerPtyBuffer } = await import('./pty-dispatcher')
+    const registeredExit = vi.fn()
+
+    ensurePtyDispatcher()
+    registerEagerPtyBuffer('pty-registered', registeredExit)
+    for (let index = 0; index < 65; index += 1) {
+      exitDispatcherCallback?.({ id: `pty-orphan-${index}`, code: index })
+    }
+    exitDispatcherCallback?.({ id: 'pty-registered', code: 9 })
+
+    expect(registeredExit).toHaveBeenCalledOnce()
+    expect(registeredExit).toHaveBeenCalledWith('pty-registered', 9)
+  })
+
+  it('filters old lifecycle events for delayed background eager-buffer registration', async () => {
+    const { captureEagerPtyBufferRegistration, ensurePtyDispatcher } =
+      await import('./pty-dispatcher')
+    const eagerExit = vi.fn()
+
+    ensurePtyDispatcher()
+    dispatcherCallback?.({ id: 'pty-background-reused', data: 'old-background-data' })
+    exitDispatcherCallback?.({ id: 'pty-background-reused', code: 1 })
+    const registerEagerPtyBuffer = captureEagerPtyBufferRegistration()
+    dispatcherCallback?.({ id: 'pty-background-reused', data: 'new-background-data' })
+    exitDispatcherCallback?.({ id: 'pty-background-reused', code: 2 })
+
+    const handle = registerEagerPtyBuffer('pty-background-reused', eagerExit)
+    expect(handle.flush()).toBe('new-background-data')
+    await Promise.resolve()
+    expect(eagerExit).toHaveBeenCalledOnce()
+    expect(eagerExit).toHaveBeenCalledWith('pty-background-reused', 2)
+  })
 })

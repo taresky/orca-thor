@@ -100,7 +100,7 @@ vi.mock('@/lib/agent-launch-platform', () => ({
 }))
 
 vi.mock('@/components/terminal-pane/pty-dispatcher', () => ({
-  registerEagerPtyBuffer: mockRegisterEagerPtyBuffer,
+  captureEagerPtyBufferRegistration: () => mockRegisterEagerPtyBuffer,
   subscribeToPtyExit: mockSubscribeToPtyExit
 }))
 

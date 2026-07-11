@@ -1,7 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  PRE_HANDLER_PTY_MAX_PTYS,
   bufferPreHandlerPtyData,
   bufferPreHandlerPtyExit,
+  capturePreHandlerPtyEventCursor,
   clearPreHandlerPtyState,
   drainPreHandlerPtyData,
   drainPreHandlerPtyExit
@@ -9,13 +11,25 @@ import {
 
 const RESCAN_PTY_ID = 'pty-pre-handler-rescan'
 const TRIM_PTY_ID = 'pty-pre-handler-trim'
-const EXIT_PTY_IDS = Array.from({ length: 65 }, (_, index) => `pty-pre-handler-exit-${index}`)
+const REUSED_PTY_ID = 'pty-pre-handler-reused'
+const EXIT_PTY_IDS = Array.from(
+  { length: PRE_HANDLER_PTY_MAX_PTYS + 1 },
+  (_, index) => `pty-pre-handler-exit-${index}`
+)
+const WARN_PTY_IDS = Array.from(
+  { length: PRE_HANDLER_PTY_MAX_PTYS + 1 },
+  (_, index) => `pty-pre-handler-warn-${index}`
+)
 
 describe('pre-handler PTY buffer', () => {
   afterEach(() => {
     clearPreHandlerPtyState(RESCAN_PTY_ID)
     clearPreHandlerPtyState(TRIM_PTY_ID)
+    clearPreHandlerPtyState(REUSED_PTY_ID)
     for (const ptyId of EXIT_PTY_IDS) {
+      clearPreHandlerPtyState(ptyId)
+    }
+    for (const ptyId of WARN_PTY_IDS) {
       clearPreHandlerPtyState(ptyId)
     }
   })
@@ -93,6 +107,71 @@ describe('pre-handler PTY buffer', () => {
     })
 
     expect(oldestExit).toBeNull()
-    expect(newestExit).toBe(64)
+    expect(newestExit).toBe(PRE_HANDLER_PTY_MAX_PTYS)
+  })
+
+  it('keeps the latest exit for a reused PTY id and refreshes its recency', () => {
+    bufferPreHandlerPtyExit(EXIT_PTY_IDS[0], 1)
+    for (let index = 1; index < PRE_HANDLER_PTY_MAX_PTYS; index += 1) {
+      bufferPreHandlerPtyExit(EXIT_PTY_IDS[index], index)
+    }
+
+    bufferPreHandlerPtyExit(EXIT_PTY_IDS[0], 99)
+    bufferPreHandlerPtyExit(EXIT_PTY_IDS.at(-1)!, 100)
+
+    const oldestHandler = vi.fn()
+    drainPreHandlerPtyExit(EXIT_PTY_IDS[1], oldestHandler)
+    expect(oldestHandler).not.toHaveBeenCalled()
+    const reusedHandler = vi.fn()
+    drainPreHandlerPtyExit(EXIT_PTY_IDS[0], reusedHandler)
+    expect(reusedHandler).toHaveBeenCalledOnce()
+    expect(reusedHandler).toHaveBeenCalledWith(99)
+  })
+
+  it('clears an old lifecycle before a PTY id is reused and drains the new exit once', () => {
+    const ptyId = EXIT_PTY_IDS[0]
+    bufferPreHandlerPtyExit(ptyId, 1)
+    clearPreHandlerPtyState(ptyId)
+    bufferPreHandlerPtyExit(ptyId, 2)
+
+    const handler = vi.fn()
+    drainPreHandlerPtyExit(ptyId, handler)
+    drainPreHandlerPtyExit(ptyId, handler)
+
+    expect(handler).toHaveBeenCalledOnce()
+    expect(handler).toHaveBeenCalledWith(2)
+  })
+
+  it('filters an older lifecycle when a fresh spawn reuses the same PTY id', () => {
+    bufferPreHandlerPtyData(REUSED_PTY_ID, 'old-data')
+    bufferPreHandlerPtyExit(REUSED_PTY_ID, 1)
+    const freshSpawnCursor = capturePreHandlerPtyEventCursor()
+    bufferPreHandlerPtyData(REUSED_PTY_ID, 'new-data')
+    bufferPreHandlerPtyExit(REUSED_PTY_ID, 2)
+
+    const dataHandler = vi.fn()
+    const exitHandler = vi.fn()
+    drainPreHandlerPtyData(REUSED_PTY_ID, dataHandler, freshSpawnCursor)
+    drainPreHandlerPtyExit(REUSED_PTY_ID, exitHandler, freshSpawnCursor)
+
+    expect(dataHandler).toHaveBeenCalledOnce()
+    expect(dataHandler).toHaveBeenCalledWith('new-data', undefined)
+    expect(exitHandler).toHaveBeenCalledOnce()
+    expect(exitHandler).toHaveBeenCalledWith(2)
+  })
+
+  it('bounds warned PTY identities with the data buffer eviction lifecycle', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const warningChunk = 'x'.repeat(64 * 1_024 + 1)
+
+    for (const ptyId of WARN_PTY_IDS) {
+      bufferPreHandlerPtyData(ptyId, warningChunk)
+    }
+    expect(warn).toHaveBeenCalledTimes(PRE_HANDLER_PTY_MAX_PTYS + 1)
+
+    // The first PTY was evicted when the 65th identity arrived. Reusing it
+    // must be warnable again instead of remaining forever in the warning set.
+    bufferPreHandlerPtyData(WARN_PTY_IDS[0], warningChunk)
+    expect(warn).toHaveBeenCalledTimes(PRE_HANDLER_PTY_MAX_PTYS + 2)
   })
 })

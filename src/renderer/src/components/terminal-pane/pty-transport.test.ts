@@ -1454,7 +1454,7 @@ describe('createIpcPtyTransport', () => {
     restorePtyDataHandlersAfterFailedShutdown(snapshots)
     onData?.({ id: 'pty-1', data: 'live again' })
 
-    expect(onDataCallback).toHaveBeenCalledWith('live again')
+    expect(onDataCallback.mock.calls).toEqual([['final burst while detached'], ['live again']])
   })
 
   it('unregisterPtyDataHandlers cancels staleTitleTimer so it cannot fire stale idle transition', async () => {
