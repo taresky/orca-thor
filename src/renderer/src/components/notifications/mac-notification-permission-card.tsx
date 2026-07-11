@@ -18,7 +18,8 @@ const MAC_PROBE_POLL_MAX_ATTEMPTS = 72
 
 export function resolveMacNotificationPermissionState(
   probeState: NotificationDeliveryProbeResult['state'],
-  promptedBefore: boolean
+  promptedBefore: boolean,
+  authoritative: boolean = false
 ): MacNotificationPermissionState | null {
   if (probeState === 'unsupported') {
     return null
@@ -28,6 +29,12 @@ export function resolveMacNotificationPermissionState(
   }
   if (probeState === 'awaiting-decision') {
     return 'awaiting-permission'
+  }
+  // Why: an authoritative 'blocked' comes from the native readout reporting
+  // the permission as denied — it's definitive (no dialog will appear), so
+  // never soften it to "answer the dialog" via the probe-fallback heuristic.
+  if (authoritative) {
+    return 'blocked'
   }
   // Why: probe-fallback hosts can't tell "unanswered dialog" from "denied" —
   // a first-ever probe is what makes macOS show the permission dialog, so
@@ -64,7 +71,9 @@ export function useMacNotificationPermissionState(
           if (cancelled) {
             return
           }
-          setMacPermissionState(resolveMacNotificationPermissionState(probe.state, promptedBefore))
+          setMacPermissionState(
+            resolveMacNotificationPermissionState(probe.state, promptedBefore, probe.authoritative)
+          )
           // Why: authoritative readouts are silent, so keep tracking System
           // Settings live in every state — flipping the toggle updates the
           // card within a poll. Probe fallbacks flash a banner when delivery
@@ -92,7 +101,11 @@ export function useMacNotificationPermissionState(
       if (cancelled) {
         return
       }
-      const resolved = resolveMacNotificationPermissionState(probe.state, status.requested)
+      const resolved = resolveMacNotificationPermissionState(
+        probe.state,
+        status.requested,
+        probe.authoritative
+      )
       setMacPermissionState(resolved)
       if (resolved !== null && (probe.authoritative || resolved !== 'enabled')) {
         schedulePoll(status.requested)

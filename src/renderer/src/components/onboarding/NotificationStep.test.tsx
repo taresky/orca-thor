@@ -86,4 +86,11 @@ describe('resolveMacNotificationPermissionState', () => {
   it('treats a rejection after a prior prompt as blocked', () => {
     expect(resolveMacNotificationPermissionState('blocked', true)).toBe('blocked')
   })
+
+  it('treats an authoritative blocked readout as blocked even when not prompted before', () => {
+    // Why: a denied native readout is definitive — no macOS dialog will ever
+    // appear — so it must not be softened to the "answer the dialog" card just
+    // because the onboarding permission flag was never stamped.
+    expect(resolveMacNotificationPermissionState('blocked', false, true)).toBe('blocked')
+  })
 })
