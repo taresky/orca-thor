@@ -104,11 +104,11 @@ arrived while the initial snapshot was being built and its output sequence is
 covered by that snapshot, runtime RPC re-emits only the bounded query sequence
 after the snapshot; ordinary covered output stays deduplicated. `terminal.send`
 accepts the resulting `inputKind: query-reply` only from the earliest active
-mobile subscriber while mobile owns the terminal driver. Earliest is determined
-by preserved `subscribedAt`, so a soft-leave resubscribe does not change reply
-ownership. Peer phones are rejected, the next subscriber is promoted on
-unsubscribe, and desktop parser and capability handlers stay silent until
-desktop retakes the driver.
+phone-fitted mobile subscriber while mobile owns the terminal driver. Earliest
+is determined by preserved `subscribedAt`, so a soft-leave resubscribe does not
+change reply ownership; passive desktop-mode watchers are excluded. Peer phones
+are rejected, the next subscriber is promoted on unsubscribe, and desktop
+parser and capability handlers stay silent until desktop retakes the driver.
 
 Everything the emulator emits outside a forwarding window is discarded, which
 also swallows unsolicited core emissions (e.g. native 997 color-scheme pushes

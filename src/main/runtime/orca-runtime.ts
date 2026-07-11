@@ -6487,9 +6487,13 @@ export class OrcaRuntimeService {
       return false
     }
     // Why: soft-leave resubscribe preserves the original subscription time but
-    // reinserts the record. Elect from that stable age, not mutable Map order.
+    // reinserts the record. Elect fitted responders from that stable age, not
+    // mutable Map order or passive desktop-mode watchers.
     let earliest: { clientId: string; subscribedAt: number } | null = null
     for (const subscriber of subscribers.values()) {
+      if (!subscriber.wasResizedToPhone) {
+        continue
+      }
       if (earliest === null || subscriber.subscribedAt < earliest.subscribedAt) {
         earliest = subscriber
       }

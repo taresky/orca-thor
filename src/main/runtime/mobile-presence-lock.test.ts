@@ -271,6 +271,22 @@ describe('mobile presence lock — multi-mobile semantics', () => {
     expect(runtime.isMobileTerminalQueryReplyAuthority('pty-1', 'phone-B')).toBe(false)
   })
 
+  it('excludes an older passive desktop-mode subscriber from reply authority', async () => {
+    const { runtime } = createRuntime()
+    runtime.setMobileDisplayMode('pty-1', 'desktop')
+    await runtime.handleMobileSubscribe('pty-1', 'phone-A', { cols: 45, rows: 20 })
+    await vi.advanceTimersByTimeAsync(10)
+    await runtime.handleMobileSubscribe('pty-1', 'phone-B', { cols: 38, rows: 18 })
+
+    await vi.advanceTimersByTimeAsync(10)
+    runtime.markMobileActor('pty-1', 'phone-B')
+    runtime.setMobileDisplayMode('pty-1', 'auto')
+    await runtime.applyMobileDisplayMode('pty-1')
+
+    expect(runtime.isMobileTerminalQueryReplyAuthority('pty-1', 'phone-A')).toBe(false)
+    expect(runtime.isMobileTerminalQueryReplyAuthority('pty-1', 'phone-B')).toBe(true)
+  })
+
   it('most-recent actor wins active phone-fit dims (B subscribes after A)', async () => {
     const { runtime, ptySizes } = createRuntime()
     await runtime.handleMobileSubscribe('pty-1', 'phone-A', { cols: 45, rows: 20 })
