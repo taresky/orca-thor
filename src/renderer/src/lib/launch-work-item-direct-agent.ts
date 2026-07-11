@@ -1,6 +1,7 @@
 import { toast } from 'sonner'
 import { deliverLaunchPromptToAgentTab } from '@/lib/agent-launch-prompt-delivery'
-import { track, tuiAgentToAgentKind } from '@/lib/telemetry'
+import { track } from '@/lib/telemetry'
+import { resolveTelemetryAgentKind } from '@/lib/telemetry-agent-kind'
 import {
   buildAgentDraftLaunchPlan,
   buildAgentStartupPlan,
@@ -120,7 +121,11 @@ export function buildDirectWorkItemStartupOpts(
   const telemetry: AgentStartedTelemetry | null =
     agent === null
       ? null
-      : { agent_kind: tuiAgentToAgentKind(agent), launch_source: launchSource, request_kind: 'new' }
+      : {
+          agent_kind: resolveTelemetryAgentKind(agent),
+          launch_source: launchSource,
+          request_kind: 'new'
+        }
   return {
     startup: {
       command: plan.launchCommand,
@@ -163,7 +168,7 @@ export async function pasteDirectWorkItemDraftWhenAgentReady(args: {
       // on the dashboard is the trigger to add one.
       track('agent_error', {
         error_class: 'unknown',
-        agent_kind: tuiAgentToAgentKind(startupPlan.agent)
+        agent_kind: resolveTelemetryAgentKind(startupPlan.agent)
       })
     }
   })

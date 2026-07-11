@@ -12,6 +12,7 @@ import type { TerminalPaneSplitSource } from '../shared/feature-education-teleme
 import type { ProjectExecutionRuntimeResolution } from '../shared/project-execution-runtime'
 import type { StartupCommandDelivery } from '../shared/codex-startup-delivery'
 import type { SleepingAgentLaunchConfig } from '../shared/agent-session-resume'
+import type { AgentLaunchSpawnRequest } from '../shared/agent-launch-spawn-request'
 import type {
   BaseRefSearchResult,
   BaseRefDefaultResult,
@@ -799,6 +800,7 @@ const api = {
       launchConfig?: SleepingAgentLaunchConfig
       launchToken?: string
       launchAgent?: TuiAgent
+      agentLaunch?: AgentLaunchSpawnRequest
       startupCommandDelivery?: StartupCommandDelivery
       connectionId?: string | null
       worktreeId?: string
@@ -1864,6 +1866,22 @@ const api = {
       ): void => callback(updates)
       ipcRenderer.on('settings:changed', listener)
       return () => ipcRenderer.removeListener('settings:changed', listener)
+    },
+
+    agentCatalog: {
+      getLocal: (): Promise<unknown> => ipcRenderer.invoke('settings:agentCatalog:getLocal'),
+      mutate: (request: unknown): Promise<unknown> =>
+        ipcRenderer.invoke('settings:mutateAgentCatalog', request),
+      getLocalDraft: (args: unknown): Promise<unknown> =>
+        ipcRenderer.invoke('settings:agentCatalog:getLocalDraft', args),
+      referenceSummary: (args: unknown): Promise<unknown> =>
+        ipcRenderer.invoke('settings:agentCatalog:referenceSummary', args)
+    },
+
+    agentReferences: {
+      getLocal: (): Promise<unknown> => ipcRenderer.invoke('settings:agentReferences:getLocal'),
+      mutate: (request: unknown): Promise<unknown> =>
+        ipcRenderer.invoke('settings:mutateAgentReferences', request)
     }
   },
 

@@ -2337,9 +2337,10 @@ export type ClaudeManagedAccountRuntimeSelection = {
   wsl: Record<string, string | null>
 }
 
-/** All AI coding agents Orca knows how to launch. Used for the agent picker in the new-workspace
- *  flow and for the default-agent setting. Extend this union as new agents are added. */
-export type TuiAgent =
+/** The closed set of built-in AI coding agents Orca knows how to launch. Static behavior
+ *  registries (launch config, display names, telemetry kind, permissions, mobile parity)
+ *  are keyed by this union only. Extend it as new built-in agents are added. */
+export type BuiltInTuiAgent =
   | 'claude' // Claude Code
   | 'claude-agent-teams' // Claude Code Agent Teams via Orca native panes
   | 'openclaude' // OpenClaude
@@ -2374,6 +2375,38 @@ export type TuiAgent =
   | 'grok' // xAI Grok CLI
   | 'devin' // Devin CLI
   | 'ante' // Ante (Antigma Labs)
+
+/** Durable identity of a user-defined agent derived from a built-in base harness.
+ *  Newly minted suffixes are canonical lowercase RFC 4122 UUIDs; ids are never reused. */
+export type CustomTuiAgentId = `custom-agent:${BuiltInTuiAgent}:${string}`
+
+/** Any agent identity a launch surface may request: a built-in or a custom derivative.
+ *  Dynamic identity collections (defaults, disabled lists, quick commands, sessions) use
+ *  this union; static behavior registries stay keyed by `BuiltInTuiAgent` and dynamic
+ *  values must resolve through the catalog identity accessor first. */
+export type TuiAgent = BuiltInTuiAgent | CustomTuiAgentId
+
+export type CustomTuiAgent = {
+  id: CustomTuiAgentId
+  baseAgent: BuiltInTuiAgent
+  label: string
+  /** One executable argv element replacing the whole base command prefix; never reparsed. */
+  commandOverride?: string
+  /** Freeform args template in the shell-independent v1 grammar (tokenized before interpolation). */
+  args: string
+  env: Record<string, string>
+  /** Whether launches started from paired devices may use this agent's env values on the host. */
+  syncEnv: boolean
+}
+
+/** Tombstone kept while any persisted owner still references the deleted id. It carries
+ *  identity/label only — args, env, and executable override are never recoverable. */
+export type DeletedCustomTuiAgent = {
+  id: CustomTuiAgentId
+  baseAgent: BuiltInTuiAgent
+  label: string
+  deletedAt: number
+}
 
 export type TaskViewPresetId = 'all' | 'issues' | 'review' | 'my-issues' | 'my-prs' | 'prs'
 
@@ -2752,13 +2785,28 @@ export type GlobalSettings = {
    *  See docs/reference/terminal-query-authority.md. */
   terminalModelQueryAuthority?: boolean
   /** Which agent to pre-select in the new-workspace composer.
-   *  - null: auto (first detected agent)
+   *  - 'auto': first detected enabled built-in in canonical order (host-resolved)
    *  - 'blank': blank terminal (no agent launched)
-   *  - TuiAgent: a specific agent id */
-  defaultTuiAgent: TuiAgent | 'blank' | null
-  /** Agents hidden from future picker and automatic launch choices. Detection
-   *  remains a raw PATH capability snapshot. */
+   *  - TuiAgent: a specific agent id
+   *  - null: invalid/repaired default needing user attention (never auto-selects).
+   *  Legacy pre-v1 `null` meant Auto; the one-time schema migration maps it to 'auto'. */
+  defaultTuiAgent: TuiAgent | 'auto' | 'blank' | null
+  /** Agents hidden from future picker and automatic launch choices. Authoritative
+   *  enabled-state for built-ins and custom agents alike. Detection remains a raw
+   *  PATH capability snapshot. */
   disabledTuiAgents: TuiAgent[]
+  /** User-defined custom agents in creation order (the persisted array is the
+   *  creation-order authority; normalization never reorders surviving rows). */
+  customTuiAgents?: CustomTuiAgent[]
+  /** Reference-counted tombstones for deleted custom agents; pruned only after an
+   *  authoritative recheck proves zero references across every owner store. */
+  deletedCustomTuiAgents?: DeletedCustomTuiAgent[]
+  /** Agent catalog persistence schema version; 1 = custom-agent catalog with 'auto' default. */
+  agentCatalogSchemaVersion?: number
+  /** Monotonic revision incremented once per atomic agent-catalog mutation. */
+  agentCatalogRevision?: number
+  /** Monotonic revision incremented once per atomic agent-reference mutation. */
+  agentReferenceRevision?: number
   /** One-shot guard so the experimental Claude Agent Teams launch mode starts
    *  hidden for existing profiles without overriding later user opt-ins. */
   claudeAgentTeamsDefaultDisabledMigrated?: boolean
@@ -2815,8 +2863,9 @@ export type GlobalSettings = {
   /** Whether to extract OAuth credentials from the local Gemini CLI installation
    *  for rate-limit fetching. Disabled by default for explicit opt-in. */
   geminiCliOAuthEnabled: boolean
-  /** Per-agent CLI command overrides. A missing key means use the catalog default binary name. */
-  agentCmdOverrides: Partial<Record<TuiAgent, string>>
+  /** Per-built-in CLI command overrides. A missing key means use the catalog default binary
+   *  name. Custom-agent configuration lives only on `CustomTuiAgent`. */
+  agentCmdOverrides: Partial<Record<BuiltInTuiAgent, string>>
   /** Why: Orca bridges Codex session history from the user's real Codex home into
    *  its managed home so /resume finds it, but defaults to ~/.codex. Users who run
    *  Codex with a custom CODEX_HOME can point history discovery at that folder here.
@@ -2827,10 +2876,10 @@ export type GlobalSettings = {
     /** Per-WSL-distro absolute Linux path; missing distro falls back to <wslHome>/.codex. */
     wsl?: Record<string, string>
   }
-  /** Per-agent default CLI arguments appended after the binary/path and before prompts. */
-  agentDefaultArgs?: Partial<Record<TuiAgent, string>>
-  /** Per-agent launch environment defaults used when yolo mode is exposed as env. */
-  agentDefaultEnv?: Partial<Record<TuiAgent, Record<string, string>>>
+  /** Per-built-in default CLI arguments appended after the binary/path and before prompts. */
+  agentDefaultArgs?: Partial<Record<BuiltInTuiAgent, string>>
+  /** Per-built-in launch environment defaults used when yolo mode is exposed as env. */
+  agentDefaultEnv?: Partial<Record<BuiltInTuiAgent, Record<string, string>>>
   /** One-shot guard for adding yolo-mode default args to untouched agent launch profiles. */
   agentYoloDefaultsMigrated?: boolean
   /** Why: disabling must persist so startup does not reinstall global agent

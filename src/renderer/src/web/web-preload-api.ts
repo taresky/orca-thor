@@ -590,7 +590,21 @@ function createWebPreloadApi(): Partial<PreloadApi> {
         return syncRuntimeBackedSettings(sanitizedUpdates, next)
       },
       listFonts: () => Promise.resolve([]),
-      onChanged: () => noopUnsubscribe
+      onChanged: () => noopUnsubscribe,
+      // Why: agent catalog/reference authoring is desktop-only. Paired web renders
+      // the synced snapshots read-only (from settings.get / the future reference
+      // refetch) and never invokes these local authoring endpoints, so they reject
+      // like the other desktop-only IPC surfaces stubbed in this file.
+      agentCatalog: {
+        getLocal: () => Promise.reject(new Error('not_available_on_paired_web')),
+        mutate: () => Promise.reject(new Error('not_available_on_paired_web')),
+        getLocalDraft: () => Promise.reject(new Error('not_available_on_paired_web')),
+        referenceSummary: () => Promise.reject(new Error('not_available_on_paired_web'))
+      },
+      agentReferences: {
+        getLocal: () => Promise.reject(new Error('not_available_on_paired_web')),
+        mutate: () => Promise.reject(new Error('not_available_on_paired_web'))
+      }
     } satisfies Partial<WebSettingsApi> as unknown as WebSettingsApi,
     keybindings: createWebKeybindingsApi(),
     ui: createWebUiApi(),

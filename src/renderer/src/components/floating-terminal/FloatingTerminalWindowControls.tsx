@@ -7,10 +7,10 @@ import { getAgentCatalog, AgentIcon } from '@/lib/agent-catalog'
 import { focusTerminalTabSurface } from '@/lib/focus-terminal-tab-surface'
 import { CLIENT_PLATFORM } from '@/lib/new-workspace'
 import { buildAgentStartupPlan } from '@/lib/tui-agent-startup'
-import { tuiAgentToAgentKind } from '@/lib/telemetry'
+import { resolveTelemetryAgentKind } from '@/lib/telemetry-agent-kind'
 import { useAppStore } from '@/store'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
-import { isTuiAgentEnabled } from '../../../../shared/tui-agent-selection'
+import { isTuiAgentEnabled, toLegacyAutoPreference } from '../../../../shared/tui-agent-selection'
 import {
   resolveTuiAgentLaunchArgs,
   resolveTuiAgentLaunchEnv
@@ -40,7 +40,8 @@ export function FloatingTerminalWindowControls({
   onToggleMaximized,
   onMinimize
 }: FloatingTerminalWindowControlsProps): React.JSX.Element {
-  const defaultTuiAgent = useAppStore((s) => s.settings?.defaultTuiAgent ?? null)
+  // 'auto' is the migrated legacy null default; treat it as Auto (no fixed agent).
+  const defaultTuiAgent = toLegacyAutoPreference(useAppStore((s) => s.settings?.defaultTuiAgent))
   const createTab = useAppStore((s) => s.createTab)
   const setActiveTabForWorktree = useAppStore((s) => s.setActiveTabForWorktree)
   const activateTab = useAppStore((s) => s.activateTab)
@@ -96,7 +97,7 @@ export function FloatingTerminalWindowControls({
         ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
         : {}),
       telemetry: {
-        agent_kind: tuiAgentToAgentKind(defaultAgent),
+        agent_kind: resolveTelemetryAgentKind(defaultAgent),
         launch_source: 'shortcut',
         request_kind: 'new'
       }

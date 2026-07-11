@@ -5,6 +5,7 @@ import type { ProjectExecutionRuntimeResolution } from '../../../../shared/proje
 import type { EventProps } from '../../../../shared/telemetry-events'
 import type { TerminalOscColorQueryReplyColors } from '../../../../shared/terminal-osc-color-reply'
 import type { TuiAgent } from '../../../../shared/types'
+import type { AgentLaunchSpawnRequest } from '../../../../shared/agent-launch-spawn-request'
 import type { PtyDataMeta } from './pty-dispatcher'
 
 export type PtyBufferSnapshot = {
@@ -81,6 +82,7 @@ export type PtyTransport = {
     launchConfig?: SleepingAgentLaunchConfig
     launchToken?: string
     launchAgent?: TuiAgent
+    agentLaunch?: AgentLaunchSpawnRequest
     startupCommandDelivery?: StartupCommandDelivery
     callbacks: PtyCallbacks
   }) => void | Promise<void | string | PtyConnectResult>
@@ -128,6 +130,7 @@ export type IpcPtyTransportOptions = {
   launchConfig?: SleepingAgentLaunchConfig
   launchToken?: string
   launchAgent?: TuiAgent
+  agentLaunch?: AgentLaunchSpawnRequest
   startupCommandDelivery?: StartupCommandDelivery
   connectionId?: string | null
   worktreeId?: string

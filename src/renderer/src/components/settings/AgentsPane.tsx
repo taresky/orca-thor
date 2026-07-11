@@ -6,7 +6,12 @@ import { Check, ChevronDown, ExternalLink, Info, RefreshCw, Terminal } from 'luc
 import type { GlobalSettings, TuiAgent } from '../../../../shared/types'
 import { getAgentCatalog, AgentIcon } from '@/lib/agent-catalog'
 import { useDetectedAgents } from '@/hooks/useDetectedAgents'
-import { useAppStore } from '@/store'
+import {
+  applyAgentPermissionModeViaCatalog,
+  setDefaultTuiAgent,
+  setTuiAgentEnabled,
+  updateBuiltInTuiAgent
+} from '@/lib/agent-catalog-authoring'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { cn } from '@/lib/utils'
@@ -31,8 +36,10 @@ import {
 } from './SettingsFormControls'
 import {
   isTuiAgentEnabled,
-  normalizeDisabledTuiAgents
+  normalizeDisabledTuiAgents,
+  toLegacyAutoPreference
 } from '../../../../shared/tui-agent-selection'
+import { isBuiltInTuiAgent } from '../../../../shared/tui-agent-config'
 import {
   getTuiAgentDefaultArgs,
   getTuiAgentDefaultEnv,
@@ -40,7 +47,6 @@ import {
   resolveTuiAgentLaunchEnv
 } from '../../../../shared/tui-agent-launch-defaults'
 import {
-  applyAgentPermissionMode,
   resolveAgentPermissionModeSummary,
   type AgentPermissionMode
 } from '../../../../shared/tui-agent-permissions'
@@ -58,14 +64,6 @@ type AgentsPaneProps = {
   wslAvailable?: boolean
   wslDistros?: string[]
   wslCapabilitiesLoading?: boolean
-}
-
-type AgentAvailabilityUpdateQueueOptions = {
-  getSettings: () => GlobalSettings | null | undefined
-  fallbackSettings: GlobalSettings
-  updateSettings: AgentsPaneProps['updateSettings']
-  agentId: TuiAgent
-  enabled: boolean
 }
 
 type AgentRowProps = {
@@ -120,45 +118,6 @@ type AgentPermissionsSettingProps = {
   mode: AgentPermissionMode
   onChange: (mode: Exclude<AgentPermissionMode, 'mixed'>) => void
 }
-
-export function buildAgentAvailabilitySettingsUpdate(
-  settings: Pick<GlobalSettings, 'defaultTuiAgent' | 'disabledTuiAgents'>,
-  id: TuiAgent,
-  enabled: boolean
-): Pick<GlobalSettings, 'disabledTuiAgents'> & Partial<Pick<GlobalSettings, 'defaultTuiAgent'>> {
-  const latestDisabled = normalizeDisabledTuiAgents(settings.disabledTuiAgents)
-  const nextDisabled = enabled
-    ? latestDisabled.filter((agent) => agent !== id)
-    : latestDisabled.includes(id)
-      ? latestDisabled
-      : [...latestDisabled, id]
-
-  return {
-    disabledTuiAgents: nextDisabled,
-    ...(settings.defaultTuiAgent === id && !enabled ? { defaultTuiAgent: null } : {})
-  }
-}
-
-export function createAgentAvailabilityUpdateQueue(): (
-  options: AgentAvailabilityUpdateQueueOptions
-) => Promise<void> {
-  let pendingUpdate: Promise<unknown> = Promise.resolve()
-
-  return ({ getSettings, fallbackSettings, updateSettings, agentId, enabled }) => {
-    // Why: serialize full-array replacements so each write sees the store after
-    // the previous IPC has reconciled, while preserving the user's requested state.
-    pendingUpdate = pendingUpdate
-      .catch(() => {})
-      .then(() =>
-        updateSettings(
-          buildAgentAvailabilitySettingsUpdate(getSettings() ?? fallbackSettings, agentId, enabled)
-        )
-      )
-    return pendingUpdate.then(() => undefined)
-  }
-}
-
-const enqueueAgentAvailabilityUpdate = createAgentAvailabilityUpdateQueue()
 
 export function AgentAvailabilityControl({
   label,
@@ -691,7 +650,9 @@ export function AgentsPane({
     [detectedList]
   )
 
-  const defaultAgent = settings.defaultTuiAgent
+  // 'auto' is the migrated legacy null default; fold it into the existing
+  // null (Auto) handling until the catalog UI unit distinguishes them.
+  const defaultAgent = toLegacyAutoPreference(settings.defaultTuiAgent)
   const agentOwnership = getSettingOwnershipSummary('agentLaunchDefaults')
   const cmdOverrides = settings.agentCmdOverrides ?? {}
   const agentDefaultArgs = settings.agentDefaultArgs ?? {}
@@ -703,55 +664,36 @@ export function AgentsPane({
   const disabledAgents = normalizeDisabledTuiAgents(settings.disabledTuiAgents)
 
   const setDefault = (id: TuiAgent | 'blank' | null): void => {
-    updateSettings({ defaultTuiAgent: id })
+    void setDefaultTuiAgent(id)
   }
 
   const setAgentEnabled = (id: TuiAgent, enabled: boolean): void => {
-    void enqueueAgentAvailabilityUpdate({
-      getSettings: () => useAppStore.getState().settings,
-      fallbackSettings: settings,
-      updateSettings,
-      agentId: id,
-      enabled
-    })
+    void setTuiAgentEnabled(id, enabled)
   }
 
   const saveOverride = (id: TuiAgent, value: string): void => {
-    const next = { ...cmdOverrides }
-    if (value) {
-      next[id] = value
-    } else {
-      delete next[id]
+    if (!isBuiltInTuiAgent(id)) {
+      return
     }
-    updateSettings({ agentCmdOverrides: next })
+    void updateBuiltInTuiAgent(id, { commandOverride: value || null })
   }
 
   const saveAgentArgs = (id: TuiAgent, value: string): void => {
-    updateSettings({
-      agentDefaultArgs: {
-        ...agentDefaultArgs,
-        [id]: value
-      }
-    })
+    if (!isBuiltInTuiAgent(id)) {
+      return
+    }
+    void updateBuiltInTuiAgent(id, { args: value })
   }
 
   const saveAgentEnv = (id: TuiAgent, value: Record<string, string>): void => {
-    updateSettings({
-      agentDefaultEnv: {
-        ...agentDefaultEnv,
-        [id]: value
-      }
-    })
+    if (!isBuiltInTuiAgent(id)) {
+      return
+    }
+    void updateBuiltInTuiAgent(id, { env: value })
   }
 
   const saveAgentPermissionMode = (mode: Exclude<AgentPermissionMode, 'mixed'>): void => {
-    updateSettings(
-      applyAgentPermissionMode({
-        mode,
-        agentDefaultArgs,
-        agentDefaultEnv
-      })
-    )
+    void applyAgentPermissionModeViaCatalog(mode, { agentDefaultArgs, agentDefaultEnv })
   }
 
   // Why: null means detection is in flight, not "all agents are installed".

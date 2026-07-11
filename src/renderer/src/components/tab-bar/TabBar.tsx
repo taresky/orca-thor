@@ -24,6 +24,7 @@ import type {
   TuiAgent,
   WorkspaceVisibleTabType
 } from '../../../../shared/types'
+import { toLegacyAutoPreference } from '../../../../shared/tui-agent-selection'
 import type { ProjectExecutionRuntimeResolution } from '../../../../shared/project-execution-runtime'
 import { resolveTerminalTabTitle } from '../../../../shared/tab-title-resolution'
 import { useAppStore } from '../../store'
@@ -324,7 +325,8 @@ function TabBarInner({
     }
     return s.sshConnectionStates.get(worktreeConnectionId)?.remotePlatform ?? null
   })
-  const defaultAgent = useAppStore((s) => s.settings?.defaultTuiAgent)
+  // 'auto' is the migrated legacy null default; treat it as Auto for ordering.
+  const defaultAgent = toLegacyAutoPreference(useAppStore((s) => s.settings?.defaultTuiAgent))
   const agentCmdOverrides = useAppStore(
     (s) => s.settings?.agentCmdOverrides ?? EMPTY_AGENT_CMD_OVERRIDES
   )

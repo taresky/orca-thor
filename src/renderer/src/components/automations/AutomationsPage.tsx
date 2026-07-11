@@ -15,7 +15,11 @@ import {
   X
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { filterEnabledTuiAgents, isTuiAgentEnabled } from '../../../../shared/tui-agent-selection'
+import {
+  filterEnabledTuiAgents,
+  isTuiAgentEnabled,
+  toLegacyAutoPreference
+} from '../../../../shared/tui-agent-selection'
 import type { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -392,11 +396,13 @@ export default function AutomationsPage(): React.JSX.Element {
   const repoMap = useRepoMap()
   const worktreeMap = useWorktreeMap()
   const enabledAgents = filterEnabledTuiAgents(AGENTS, settings?.disabledTuiAgents)
+  // 'auto' (migrated legacy null) selects no fixed agent, so fall back to the catalog.
+  const preferredDefaultAgent = toLegacyAutoPreference(settings?.defaultTuiAgent)
   const defaultAgent =
-    settings?.defaultTuiAgent &&
-    settings.defaultTuiAgent !== 'blank' &&
-    isTuiAgentEnabled(settings.defaultTuiAgent, settings.disabledTuiAgents)
-      ? settings.defaultTuiAgent
+    preferredDefaultAgent &&
+    preferredDefaultAgent !== 'blank' &&
+    isTuiAgentEnabled(preferredDefaultAgent, settings?.disabledTuiAgents)
+      ? preferredDefaultAgent
       : (enabledAgents[0] ?? AGENTS[0])
 
   const [automations, setAutomations] = useState<Automation[]>([])

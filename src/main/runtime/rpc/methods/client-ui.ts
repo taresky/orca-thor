@@ -4,13 +4,7 @@ import {
   type FeatureInteractionId
 } from '../../../../shared/feature-interactions'
 import { isFeatureTipId } from '../../../../shared/feature-tips'
-import {
-  normalizeTuiAgentArgsRecord,
-  normalizeTuiAgentEnvRecord
-} from '../../../../shared/tui-agent-launch-defaults'
-import { isTuiAgent } from '../../../../shared/tui-agent-config'
 import { isTaskProvider } from '../../../../shared/task-providers'
-import { normalizeDisabledTuiAgents } from '../../../../shared/tui-agent-selection'
 import { normalizeWorktreeCardProperties } from '../../../../shared/worktree-card-properties'
 import type { PersistedUIState, TaskProvider } from '../../../../shared/types'
 import { defineMethod, type RpcMethod } from '../core'
@@ -126,24 +120,14 @@ const GitHubProjectSettings = z
 
 const SettingsUpdate = z
   .object({
-    defaultTuiAgent: z
-      .unknown()
-      .transform((value) =>
-        value === null || value === 'blank' || isTuiAgent(value) ? value : undefined
-      )
-      .optional(),
-    disabledTuiAgents: z
-      .unknown()
-      .transform((value) => normalizeDisabledTuiAgents(value))
-      .optional(),
-    agentDefaultArgs: z
-      .unknown()
-      .transform((value) => normalizeTuiAgentArgsRecord(value))
-      .optional(),
-    agentDefaultEnv: z
-      .unknown()
-      .transform((value) => normalizeTuiAgentEnvRecord(value))
-      .optional(),
+    // Why: these agent-authoring fields are kept in the schema only so a legacy
+    // client's payload parses and reaches the handler's client_upgrade_required
+    // rejection instead of a generic invalid_argument. They are never applied;
+    // catalog/reference state is owned by the atomic mutation APIs.
+    defaultTuiAgent: z.unknown().optional(),
+    disabledTuiAgents: z.unknown().optional(),
+    agentDefaultArgs: z.unknown().optional(),
+    agentDefaultEnv: z.unknown().optional(),
     defaultTaskSource: TaskProviderParam.optional(),
     visibleTaskProviders: z.array(TaskProviderParam).optional(),
     defaultTaskViewPreset: z
@@ -257,16 +241,57 @@ const UiUpdate = z
   .strict()
   .default({})
 
+// Why: agent catalog/reference state is owned by the atomic mutation APIs, not
+// the generic settings write. A legacy client that includes any of these keys is
+// rejected wholesale with client_upgrade_required (no partial apply) so it cannot
+// erase a custom reference it is too old to represent. Fields never shipped by an
+// old settings.update client (custom/tombstone arrays, revisions, reference
+// owners) are absent from the schema above and fail strict() before reaching the
+// handler; they are listed here only for defense in depth.
+const AGENT_REJECTED_SETTINGS_UPDATE_KEYS = [
+  'defaultTuiAgent',
+  'disabledTuiAgents',
+  'agentCmdOverrides',
+  'agentDefaultArgs',
+  'agentDefaultEnv',
+  'customTuiAgents',
+  'deletedCustomTuiAgents',
+  'agentCatalogRevision',
+  'agentReferenceRevision',
+  'terminalQuickCommands',
+  'commitMessageAi',
+  'sourceControlAi'
+] as const
+
 export const CLIENT_UI_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'settings.get',
     params: null,
-    handler: (_params, { runtime }) => ({ settings: runtime.getClientSettings() })
+    handler: (_params, { runtime }) => ({
+      settings: runtime.getClientSettings(),
+      agentCatalog: runtime.getAgentCatalogSnapshot(),
+      // Small capability descriptor; the full snapshot ships from
+      // settings.agentReferences.get so the two never compete under one frame.
+      agentReferences: { version: 1 as const, revision: runtime.getAgentReferenceRevision() }
+    })
+  }),
+  defineMethod({
+    name: 'settings.agentReferences.get',
+    params: null,
+    handler: (_params, { runtime }) => ({ agentReferences: runtime.getAgentReferenceSnapshot() })
   }),
   defineMethod({
     name: 'settings.update',
     params: SettingsUpdate,
-    handler: (params, { runtime }) => ({ settings: runtime.updateClientSettings(params) })
+    handler: (params, { runtime }) => {
+      const provided = params as Record<string, unknown>
+      for (const key of AGENT_REJECTED_SETTINGS_UPDATE_KEYS) {
+        if (key in provided) {
+          throw new Error('client_upgrade_required')
+        }
+      }
+      return { settings: runtime.updateClientSettings(params) }
+    }
   }),
   defineMethod({
     name: 'ui.get',

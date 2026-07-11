@@ -309,6 +309,9 @@ const MOBILE_RPC_METHOD_ALLOWLIST = new Set([
   'nativeChat.subscribe',
   'nativeChat.unsubscribe',
   'settings.get',
+  // Why: env-free reference snapshot fetch for the mobile agent-reference
+  // cache; authoring mutations stay desktop-only and are NOT allowlisted.
+  'settings.agentReferences.get',
   'settings.update',
   'ssh.connect',
   'ssh.getState',

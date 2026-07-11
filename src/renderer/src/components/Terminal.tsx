@@ -36,6 +36,7 @@ import {
 import { isIntentionalAppRestartInProgress } from '@/lib/updater-beforeunload'
 import EditorAutosaveController from './editor/EditorAutosaveController'
 import type { Tab, TabContentType, TabGroupLayoutNode, TuiAgent } from '../../../shared/types'
+import { toLegacyAutoPreference } from '../../../shared/tui-agent-selection'
 import { hasFeatureInteraction } from '../../../shared/feature-interactions'
 import BrowserPane from './browser-pane/BrowserPane'
 import BrowserPaneOverlayLayer from './browser-pane/BrowserPaneOverlayLayer'
@@ -1584,7 +1585,7 @@ function Terminal(): React.JSX.Element | null {
           const connectionId = getConnectionId(activeWorktreeId)
           agentActionId = 'tab.newAgent'
           agentToLaunch = resolveDefaultAgentForNewTab({
-            defaultTuiAgent: state.settings?.defaultTuiAgent,
+            defaultTuiAgent: toLegacyAutoPreference(state.settings?.defaultTuiAgent),
             detectedAgentIds:
               typeof connectionId === 'string'
                 ? state.remoteDetectedAgentIds[connectionId]

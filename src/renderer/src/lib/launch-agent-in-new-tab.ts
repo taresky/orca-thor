@@ -8,7 +8,8 @@ import {
 import { CLIENT_PLATFORM } from '@/lib/new-workspace'
 import { getAgentLaunchPlatformForRepo } from '@/lib/agent-launch-platform'
 import { reconcileTabOrder } from '@/components/tab-bar/reconcile-order'
-import { track, tuiAgentToAgentKind } from '@/lib/telemetry'
+import { track } from '@/lib/telemetry'
+import { resolveTelemetryAgentKind } from '@/lib/telemetry-agent-kind'
 import { deliverLaunchPromptToAgentTab } from '@/lib/agent-launch-prompt-delivery'
 import { initialAgentTabViewModeProps } from '@/lib/native-chat-initial-view-mode'
 import { isNativeChatTranscriptLocalReadable } from '@/lib/native-chat-transcript-readability'
@@ -249,7 +250,7 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
       ? { initialAgentStatus: { agent, prompt: trimmedPrompt } }
       : {}),
     telemetry: {
-      agent_kind: tuiAgentToAgentKind(agent),
+      agent_kind: resolveTelemetryAgentKind(agent),
       launch_source: launchSource ?? 'tab_bar_quick_launch',
       request_kind: 'new'
     }
@@ -299,7 +300,7 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
         failureNotified = true
         track('agent_error', {
           error_class: 'paste_readiness_timeout',
-          agent_kind: tuiAgentToAgentKind(agent)
+          agent_kind: resolveTelemetryAgentKind(agent)
         })
       }
     }).then((delivered) => {

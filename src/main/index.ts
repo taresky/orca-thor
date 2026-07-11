@@ -1807,6 +1807,10 @@ app.whenReady().then(async () => {
       .map((account) => ({ id: account.id, managedHomePath: account.managedHomePath }))
   })
   const runtimeService = new OrcaRuntimeService(store, stats, {
+    // Why: the concrete Store backs the shared agent-catalog service used by both
+    // the runtime RPC surface and the local IPC handlers registered on this same
+    // instance, keeping repair tokens and reference scanners in agreement.
+    agentCatalogStore: store ?? undefined,
     // Why: resolve the PTY provider lazily. initDaemonPtyProvider() runs later
     // inside attachMainWindowServices and calls setLocalPtyProvider(routedAdapter)
     // to swap the in-process provider for the daemon-routed one. Capturing the

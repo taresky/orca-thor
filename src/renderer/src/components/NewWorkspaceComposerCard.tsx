@@ -26,6 +26,7 @@ import { SettingsSwitch } from '@/components/settings/SettingsFormControls'
 import type RepoCombobox from '@/components/repo/RepoCombobox'
 import AgentCombobox from '@/components/agent/AgentCombobox'
 import { getAgentCatalog } from '@/lib/agent-catalog'
+import { setDefaultTuiAgent } from '@/lib/agent-catalog-authoring'
 import { useAppStore } from '@/store'
 import { cn } from '@/lib/utils'
 import { WORKSPACE_FILE_PATH_MIME } from '@/lib/workspace-file-drag'
@@ -37,7 +38,7 @@ import {
 } from '@/lib/text-control-paste'
 import { getScreenSubmitModifierLabel } from '@/lib/screen-submit-shortcut'
 import { useContextualTour } from '@/components/contextual-tours/use-contextual-tour'
-import { filterEnabledTuiAgents } from '../../../shared/tui-agent-selection'
+import { filterEnabledTuiAgents, toLegacyAutoPreference } from '../../../shared/tui-agent-selection'
 import type {
   GitHubWorkItem,
   GitLabWorkItem,
@@ -623,9 +624,9 @@ export default function NewWorkspaceComposerCard({
   const { isFileDragOver, dragHandlers } = useComposerFileDragOver()
   const openModal = useAppStore((s) => s.openModal)
   const activeModal = useAppStore((s) => s.activeModal)
-  const defaultTuiAgent = useAppStore((s) => s.settings?.defaultTuiAgent ?? null)
+  // 'auto' is the migrated legacy null default; treat it as Auto in the picker.
+  const defaultTuiAgent = toLegacyAutoPreference(useAppStore((s) => s.settings?.defaultTuiAgent))
   const disabledTuiAgents = useAppStore((s) => s.settings?.disabledTuiAgents ?? [])
-  const updateSettings = useAppStore((s) => s.updateSettings)
   const nameInputFocusFrameRef = React.useRef<number | null>(null)
   const branchNameInputId = React.useId()
   const submitShortcutModifierLabel = getScreenSubmitModifierLabel()
@@ -674,12 +675,9 @@ export default function NewWorkspaceComposerCard({
   const showSetupAgentStartupPolicy =
     setupControlsEnabled && setupConfig !== null && setupConfig.kind !== 'default-tabs'
 
-  const handleSetDefaultAgent = React.useCallback(
-    (next: TuiAgent | 'blank' | null) => {
-      updateSettings({ defaultTuiAgent: next })
-    },
-    [updateSettings]
-  )
+  const handleSetDefaultAgent = React.useCallback((next: TuiAgent | 'blank' | null) => {
+    void setDefaultTuiAgent(next)
+  }, [])
 
   const cancelNameInputFocusFrame = React.useCallback((): void => {
     if (nameInputFocusFrameRef.current === null) {

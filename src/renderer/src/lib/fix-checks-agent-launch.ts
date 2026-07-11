@@ -19,7 +19,7 @@ import {
   DEFAULT_SOURCE_CONTROL_ACTION_COMMAND_TEMPLATES,
   renderSourceControlActionCommandTemplate
 } from '../../../shared/source-control-ai-actions'
-import { isTuiAgentEnabled } from '../../../shared/tui-agent-selection'
+import { isTuiAgentEnabled, toLegacyAutoPreference } from '../../../shared/tui-agent-selection'
 import type {
   GitHubWorkItem,
   TuiAgent,
@@ -101,7 +101,7 @@ async function pickExistingWorktreeAgent(
   }
   const settings = useAppStore.getState().settings
   const agent = pickSourceControlLaunchAgent({
-    defaultAgent: settings?.defaultTuiAgent,
+    defaultAgent: toLegacyAutoPreference(settings?.defaultTuiAgent),
     detectedAgents,
     disabledAgents: settings?.disabledTuiAgents
   })

@@ -36,6 +36,7 @@ import {
 import { recordCrashBreadcrumb } from '../crash-reporting/crash-breadcrumb-store'
 import { isTuiAgent } from '../../shared/tui-agent-config'
 import type { SleepingAgentLaunchConfig } from '../../shared/agent-session-resume'
+import type { AgentLaunchSpawnRequest } from '../../shared/agent-launch-spawn-request'
 import type { ProjectExecutionRuntimeResolution } from '../../shared/project-execution-runtime'
 import {
   isWslShellName,
@@ -3052,6 +3053,9 @@ export function registerPtyHandlers(
       if (args.startupCommandDelivery !== undefined) {
         spawnOptions.startupCommandDelivery = args.startupCommandDelivery
       }
+      if (typeof args.launchToken === 'string' && args.launchToken.length > 0) {
+        spawnOptions.launchToken = args.launchToken
+      }
       if (args.worktreeId !== undefined) {
         spawnOptions.worktreeId = args.worktreeId
       }
@@ -3567,6 +3571,15 @@ export function registerPtyHandlers(
         commandDelivery?: 'renderer' | 'provider'
         launchConfig?: SleepingAgentLaunchConfig
         launchAgent?: TuiAgent
+        // Why: host admission launch token forwarded to daemon/relay/remote
+        // providers so a surviving terminal self-identifies by token after a
+        // main crash. Local in-process PTYs ignore it.
+        launchToken?: string
+        // Why: when present the handler resolves the launch through the host
+        // boundary and IGNORES client command/launchConfig/launchAgent/env; the
+        // legacy shape stays authoritative when it is absent (U3 incremental
+        // caller migration). Intent/reference are built host-side, never here.
+        agentLaunch?: AgentLaunchSpawnRequest
         startupCommandDelivery?: StartupCommandDelivery
         connectionId?: string | null
         worktreeId?: string
@@ -3920,6 +3933,9 @@ export function registerPtyHandlers(
       }
       if (isTuiAgent(args.launchAgent)) {
         spawnOptions.launchAgent = args.launchAgent
+      }
+      if (typeof args.launchToken === 'string' && args.launchToken.length > 0) {
+        spawnOptions.launchToken = args.launchToken
       }
       if (args.worktreeId !== undefined) {
         spawnOptions.worktreeId = args.worktreeId

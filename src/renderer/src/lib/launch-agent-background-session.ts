@@ -6,7 +6,7 @@ import type {
 } from '@/lib/agent-background-session-contract'
 import { getAgentLaunchPlatformForRepo } from '@/lib/agent-launch-platform'
 import { CLIENT_PLATFORM } from '@/lib/new-workspace'
-import { tuiAgentToAgentKind } from '@/lib/telemetry'
+import { resolveTelemetryAgentKind } from '@/lib/telemetry-agent-kind'
 import { pasteDraftWhenAgentReady } from '@/lib/agent-paste-draft'
 import { showAutomationPromptNotSentToast } from '@/lib/agent-background-session-timeout-toast'
 import { getLocalProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
@@ -230,7 +230,7 @@ export async function launchAgentBackgroundSession(
         tabId: tab.id,
         leafId,
         telemetry: {
-          agent_kind: tuiAgentToAgentKind(agent),
+          agent_kind: resolveTelemetryAgentKind(agent),
           launch_source: launchSource ?? 'unknown',
           request_kind: 'new'
         }

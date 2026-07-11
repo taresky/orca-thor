@@ -668,6 +668,19 @@ import {
 } from '../worktree-create-candidates'
 import { normalizeSparseDirectories } from '../ipc/sparse-checkout-directories'
 import type { Store } from '../persistence'
+import { getOrCreateAgentCatalogService } from '../agent-launch/agent-catalog-service'
+import {
+  projectLegacyDefaultTuiAgent,
+  projectLegacyDisabledTuiAgents
+} from '../agent-launch/agent-catalog-projections'
+import type {
+  AgentCatalogProjectionError,
+  AgentCatalogSnapshot
+} from '../../shared/agent-catalog-snapshot'
+import type {
+  AgentReferenceProjectionError,
+  AgentReferenceSnapshot
+} from '../../shared/agent-reference-snapshot'
 import type { StatsCollector } from '../stats/collector'
 import { AgentDetector } from '../stats/agent-detector'
 import {
@@ -1194,6 +1207,9 @@ type RuntimePtyController = {
     telemetry?: WorktreeStartupLaunch['telemetry']
     connectionId?: string | null
     worktreeId?: string
+    // Why: forwarded to daemon/relay/remote providers so a surviving terminal
+    // persists the token on its own record for crash reconciliation.
+    launchToken?: string
     preAllocatedHandle?: string
     tabId?: string
     leafId?: string
@@ -2110,6 +2126,11 @@ export class OrcaRuntimeService {
   private readonly runtimeId = randomUUID()
   private readonly startedAt = Date.now()
   private readonly store: RuntimeStore | null
+  // Why: the agent-catalog service needs the concrete Store (RuntimeStore is a
+  // narrowed subset), and it must be the SAME instance the local IPC handlers
+  // use so repair tokens and reference scanners agree per Store identity.
+  private readonly agentCatalogStore: Store | null
+  private agentCatalogSettingsUnsubscribe: (() => void) | null = null
   private rendererGraphEpoch = 0
   private graphStatus: RuntimeGraphStatus = 'unavailable'
   private authoritativeWindowId: number | null = null
@@ -2500,9 +2521,15 @@ export class OrcaRuntimeService {
       // managed-Codex sessions. The runtime ctor runs in BOTH window and serve.
       getAdditionalAiVaultCodexHomePaths?: () => readonly string[]
       buildAgentHookPtyEnv?: () => Record<string, string>
+      // Why: the concrete Store backing the agent-catalog service. Passed here
+      // (not derived from `store`) because RuntimeStore is a narrowed subset that
+      // cannot satisfy the service getter, and both the runtime RPC surface and
+      // the local IPC handlers must share one service per Store identity.
+      agentCatalogStore?: Store
     }
   ) {
     this.store = store
+    this.agentCatalogStore = deps?.agentCatalogStore ?? null
     if (stats) {
       this.stats = stats
       this.agentDetector = new AgentDetector(stats)
@@ -2540,6 +2567,20 @@ export class OrcaRuntimeService {
         state.emulator.applyPushedViewAttributes(attributes)
       }
     })
+    // Why: mirror catalog/reference revision bumps onto the client-event stream
+    // so connected mobile/paired clients refetch. The handle shares the runtime's
+    // lifetime (both are process-lifetime singletons created together with the
+    // Store) and is disposed via disposeAgentCatalogSubscription() if torn down.
+    if (this.agentCatalogStore) {
+      this.agentCatalogSettingsUnsubscribe = this.agentCatalogStore.onSettingsChanged((updates) => {
+        this.emitAgentCatalogRevisionEvents(updates)
+      })
+    }
+  }
+
+  disposeAgentCatalogSubscription(): void {
+    this.agentCatalogSettingsUnsubscribe?.()
+    this.agentCatalogSettingsUnsubscribe = null
   }
 
   getLocalProvider(): IPtyProvider | null {
@@ -2603,8 +2644,13 @@ export class OrcaRuntimeService {
     }
     const settings = this.store.getSettings()
     return {
-      defaultTuiAgent: settings.defaultTuiAgent ?? null,
-      disabledTuiAgents: settings.disabledTuiAgents ?? [],
+      // Why: legacy compatibility projection for pre-catalog clients. Auto → null
+      // (legacy auto-launch), while a custom/tombstoned/repair-needed or blank
+      // default projects 'blank' — never its base — so a safe custom default
+      // cannot become a built-in launch inheriting global/YOLO args; custom ids
+      // are dropped from the disabled list an old client cannot render.
+      defaultTuiAgent: projectLegacyDefaultTuiAgent(settings.defaultTuiAgent),
+      disabledTuiAgents: projectLegacyDisabledTuiAgents(settings.disabledTuiAgents ?? []),
       agentCmdOverrides: settings.agentCmdOverrides ?? {},
       agentDefaultArgs: settings.agentDefaultArgs ?? {},
       agentDefaultEnv: settings.agentDefaultEnv ?? {},
@@ -2623,13 +2669,12 @@ export class OrcaRuntimeService {
   }
 
   updateClientSettings(
+    // Why: agent-authoring fields are no longer accepted here — they are owned by
+    // the atomic catalog/reference mutation APIs and rejected at the settings.update
+    // RPC boundary. Only the non-agent client settings pass through.
     updates: Pick<
       Partial<GlobalSettings>,
       | 'agentStatusHooksEnabled'
-      | 'defaultTuiAgent'
-      | 'disabledTuiAgents'
-      | 'agentDefaultArgs'
-      | 'agentDefaultEnv'
       | 'defaultTaskSource'
       | 'defaultTaskViewPreset'
       | 'visibleTaskProviders'
@@ -2672,6 +2717,43 @@ export class OrcaRuntimeService {
       applyAgentStatusHooksEnabled(updates.agentStatusHooksEnabled)
     }
     return this.getClientSettings()
+  }
+
+  /** Env-free revisioned catalog projection for mobile/paired clients; a typed
+   *  projection error when the snapshot exceeds the remote frame budget. */
+  getAgentCatalogSnapshot(): AgentCatalogSnapshot | AgentCatalogProjectionError {
+    if (!this.agentCatalogStore) {
+      throw new Error('runtime_unavailable')
+    }
+    return getOrCreateAgentCatalogService(this.agentCatalogStore).getRemoteSnapshot()
+  }
+
+  getAgentReferenceRevision(): number {
+    if (!this.agentCatalogStore) {
+      throw new Error('runtime_unavailable')
+    }
+    return getOrCreateAgentCatalogService(this.agentCatalogStore).getReferenceRevision()
+  }
+
+  /** Full agent-reference snapshot (quick commands, commit-message/Source Control
+   *  choices); fetched in its own frame so it never competes with the catalog. */
+  getAgentReferenceSnapshot(): AgentReferenceSnapshot | AgentReferenceProjectionError {
+    if (!this.agentCatalogStore) {
+      throw new Error('runtime_unavailable')
+    }
+    return getOrCreateAgentCatalogService(this.agentCatalogStore).getRemoteReferenceSnapshot()
+  }
+
+  private emitAgentCatalogRevisionEvents(updates: Partial<GlobalSettings>): void {
+    if (typeof updates.agentCatalogRevision === 'number') {
+      this.emitClientEvent({ type: 'agentCatalogChanged', revision: updates.agentCatalogRevision })
+    }
+    if (typeof updates.agentReferenceRevision === 'number') {
+      this.emitClientEvent({
+        type: 'agentReferencesChanged',
+        revision: updates.agentReferenceRevision
+      })
+    }
   }
 
   listAutomations(): Automation[] {
@@ -17050,6 +17132,7 @@ export class OrcaRuntimeService {
         telemetry: launchOpts.telemetry,
         connectionId: workspace.connectionId,
         worktreeId: workspace.id,
+        ...(launchToken ? { launchToken } : {}),
         preAllocatedHandle,
         tabId,
         leafId,

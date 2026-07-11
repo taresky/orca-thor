@@ -1020,6 +1020,12 @@ export function useIpcEvents(): void {
           })
         return
       }
+      // Why: no-op for now — later units attach the mobile/paired snapshot refetch
+      // keyed by the announced revision. Handled here so the event is not routed to
+      // the activateWorktree fall-through below.
+      if (event.type === 'agentCatalogChanged' || event.type === 'agentReferencesChanged') {
+        return
+      }
       void ensureRuntimeEventRepoKnown(environmentId, event.repoId)
         .then(() => activateNotifiedWorktree(event, { allowRuntimeEnvironment: true }))
         .catch((error) => {

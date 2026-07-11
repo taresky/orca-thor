@@ -7,6 +7,7 @@ import type { TerminalColorSchemeMode } from '../../../../shared/terminal-color-
 import type { StartupCommandDelivery } from '../../../../shared/codex-startup-delivery'
 import type { SetupSplitDirection, TuiAgent } from '../../../../shared/types'
 import type { SleepingAgentLaunchConfig } from '../../../../shared/agent-session-resume'
+import type { AgentLaunchSpawnRequest } from '../../../../shared/agent-launch-spawn-request'
 import type { TerminalKittyKeyboardModeTracker } from '../../../../shared/terminal-kitty-keyboard-mode-tracker'
 
 export type PtyConnectionDeps = {
@@ -23,6 +24,7 @@ export type PtyConnectionDeps = {
     launchConfig?: SleepingAgentLaunchConfig
     launchToken?: string
     launchAgent?: TuiAgent
+    agentLaunch?: AgentLaunchSpawnRequest
     draftPrompt?: string
     /** Telemetry payload for `agent_started`. Forwarded to `pty:spawn`
      *  so main fires the event only after the spawn succeeds. */

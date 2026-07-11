@@ -20,13 +20,17 @@ import { activateAndRevealWorktree, type AgentStartedTelemetry } from '@/lib/wor
 import { runBackgroundWorktreeCreation } from '@/lib/worktree-creation-flow'
 import type { WorktreeCreationRequest } from '@/lib/pending-worktree-creation'
 import { buildAgentDraftLaunchPlan, buildAgentStartupPlan } from '@/lib/tui-agent-startup'
-import { filterEnabledTuiAgents, isTuiAgentEnabled } from '../../../shared/tui-agent-selection'
+import {
+  filterEnabledTuiAgents,
+  isTuiAgentEnabled,
+  toLegacyAutoPreference
+} from '../../../shared/tui-agent-selection'
 import { repoIsRemote } from '../../../shared/agent-launch-remote'
 import {
   resolveTuiAgentLaunchArgs,
   resolveTuiAgentLaunchEnv
 } from '../../../shared/tui-agent-launch-defaults'
-import { tuiAgentToAgentKind } from '@/lib/telemetry'
+import { resolveTelemetryAgentKind } from '@/lib/telemetry-agent-kind'
 import { isGitRepoKind } from '../../../shared/repo-kind'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import { resolveWorktreeCreateBaseBranch } from '@/runtime/worktree-create-base'
@@ -1113,11 +1117,13 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       ),
     [disabledTuiAgents]
   )
+  // 'auto' (migrated legacy null) selects no fixed agent, so fall back to the catalog.
+  const preferredDefaultAgent = toLegacyAutoPreference(settings?.defaultTuiAgent)
   const fallbackDefaultAgent: TuiAgent =
-    settings?.defaultTuiAgent &&
-    settings.defaultTuiAgent !== 'blank' &&
-    isTuiAgentEnabled(settings.defaultTuiAgent, disabledTuiAgents)
-      ? settings.defaultTuiAgent
+    preferredDefaultAgent &&
+    preferredDefaultAgent !== 'blank' &&
+    isTuiAgentEnabled(preferredDefaultAgent, disabledTuiAgents)
+      ? preferredDefaultAgent
       : (enabledCatalogAgents[0] ?? 'claude')
   const [tuiAgent, setTuiAgent] = useState<TuiAgent>(
     persistDraft ? (newWorkspaceDraft?.agent ?? fallbackDefaultAgent) : fallbackDefaultAgent
@@ -3607,7 +3613,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       // self-contained. Agents that need post-ready paste/follow-up stay on
       // the renderer path so prompt delivery is not skipped.
       const composerTelemetry: AgentStartedTelemetry = {
-        agent_kind: tuiAgentToAgentKind(tuiAgent),
+        agent_kind: resolveTelemetryAgentKind(tuiAgent),
         launch_source: telemetrySource === 'onboarding' ? 'onboarding' : 'new_workspace_composer',
         request_kind: 'new'
       }
@@ -4051,7 +4057,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
           agent === null
             ? null
             : {
-                agent_kind: tuiAgentToAgentKind(agent),
+                agent_kind: resolveTelemetryAgentKind(agent),
                 launch_source:
                   telemetrySource === 'onboarding' ? 'onboarding' : 'new_workspace_composer',
                 request_kind: 'new'

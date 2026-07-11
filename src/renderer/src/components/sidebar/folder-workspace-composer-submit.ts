@@ -10,7 +10,7 @@ import {
   buildAgentStartupPlan,
   type AgentStartupPlan
 } from '@/lib/tui-agent-startup'
-import { tuiAgentToAgentKind } from '@/lib/telemetry'
+import { resolveTelemetryAgentKind } from '@/lib/telemetry-agent-kind'
 import { activateAndRevealFolderWorkspace } from '@/lib/worktree-activation'
 import { isWorkItemLookupText } from '@/lib/work-item-lookup-text'
 import { TUI_AGENT_CONFIG } from '../../../../shared/tui-agent-config'
@@ -238,7 +238,7 @@ export async function submitFolderWorkspaceCreate({
             ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
             : {}),
           telemetry: {
-            agent_kind: tuiAgentToAgentKind(quickAgent),
+            agent_kind: resolveTelemetryAgentKind(quickAgent),
             launch_source: launchSource,
             request_kind: 'new' as const
           }

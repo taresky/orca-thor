@@ -14,12 +14,13 @@ import { CLIENT_PLATFORM, getWorkspaceIntentName, getWorkspaceSeedName } from '@
 import { getLocalRepoProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
 import { resolveSourceControlLaunchPlatform } from '@/lib/source-control-launch-platform'
 import { repoIsRemote } from '../../../shared/agent-launch-remote'
+import { toLegacyAutoPreference } from '../../../shared/tui-agent-selection'
 import { resolveGitHubWorkItemIdentity } from '@/lib/github-work-item-identity'
 import {
   resolveTuiAgentLaunchArgs,
   resolveTuiAgentLaunchEnv
 } from '../../../shared/tui-agent-launch-defaults'
-import { tuiAgentToAgentKind } from '@/lib/telemetry'
+import { resolveTelemetryAgentKind } from '@/lib/telemetry-agent-kind'
 import type { GitHubWorkItem, GlobalSettings, Repo, TuiAgent } from '../../../shared/types'
 import type { TaskSourceContext, WorkspaceRunContext } from '../../../shared/task-source-context'
 import type { AgentStartedTelemetry } from '@/lib/worktree-activation'
@@ -132,7 +133,7 @@ export async function resolvePreferredQuickAgentForGitHubWorkItem(
         ? await store.ensureRuntimeDetectedAgents(host.environmentId)
         : await store.ensureDetectedAgents()
   return pickQuickWorkspaceAgent(
-    store.settings?.defaultTuiAgent,
+    toLegacyAutoPreference(store.settings?.defaultTuiAgent),
     detectedAgents,
     store.settings?.disabledTuiAgents
   )
@@ -225,7 +226,7 @@ export function buildGitHubWorkItemStartupPlan(args: {
     startupPlan,
     quickPrompt,
     quickTelemetry: {
-      agent_kind: tuiAgentToAgentKind(agent),
+      agent_kind: resolveTelemetryAgentKind(agent),
       launch_source: 'new_workspace_composer',
       request_kind: 'new'
     }

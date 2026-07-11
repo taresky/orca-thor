@@ -22,7 +22,7 @@ import { getSetupRunnerCommandPlatformForPath } from '../../../shared/setup-runn
 import { buildAgentStartupPlan } from './tui-agent-startup'
 import { getAgentLaunchPlatformForRepo } from '@/lib/agent-launch-platform'
 import { CLIENT_PLATFORM } from './new-workspace'
-import { tuiAgentToAgentKind } from './telemetry'
+import { resolveTelemetryAgentKind } from './telemetry-agent-kind'
 import { agentKindToTuiAgent } from '../../../shared/agent-kind'
 import { useAppStore } from '@/store'
 import type { PendingSidebarWorktreeReveal } from '@/store/slices/ui'
@@ -276,7 +276,7 @@ function buildCreatedAgentReopenStartup(worktree: Worktree): WorktreeStartupPayl
       ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
       : {}),
     telemetry: {
-      agent_kind: tuiAgentToAgentKind(agent),
+      agent_kind: resolveTelemetryAgentKind(agent),
       launch_source: 'sidebar',
       request_kind: 'resume'
     }

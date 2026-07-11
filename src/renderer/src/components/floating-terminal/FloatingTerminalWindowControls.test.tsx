@@ -61,7 +61,9 @@ vi.mock('@/lib/telemetry', () => ({
 }))
 
 vi.mock('../../../../shared/tui-agent-selection', () => ({
-  isTuiAgentEnabled: () => true
+  isTuiAgentEnabled: () => true,
+  toLegacyAutoPreference: (value: unknown) =>
+    value === 'auto' || value === undefined ? null : value
 }))
 
 vi.mock('../../../../shared/tui-agent-launch-defaults', () => ({

@@ -78,6 +78,10 @@ import {
   buildWorkspaceRunContext
 } from '../shared/task-source-context'
 import type { MigrationUnsupportedPtyEntry } from '../shared/agent-status-types'
+import {
+  createPinnedPreV1Backup,
+  migrateAgentCatalogSchema
+} from './agent-launch/agent-catalog-schema-migration'
 import { MOBILE_PAIRING_USERDATA_FILES } from './runtime/mobile-pairing-files'
 import { hardenExistingSecureFile } from '../shared/secure-file'
 import {
@@ -2617,6 +2621,9 @@ export class Store {
   private githubCacheDirty = false
   private gitUsernameCache = new Map<string, string>()
   private loadNeedsSave = false
+  // Why: a failed pinned pre-v1 backup blocks the agent-catalog migration; the
+  // error is held for Settings to report instead of silently retrying writes.
+  private agentCatalogMigrationErrorValue: string | null = null
   private settingsChangeListeners = new Set<
     (
       updates: Partial<GlobalSettings>,
@@ -3044,6 +3051,24 @@ export class Store {
         const migratedDisabledTuiAgents = normalizeDisabledTuiAgents(
           parsed.settings?.disabledTuiAgents
         )
+        // Agent-catalog v1 schema migration (legacy null default -> 'auto'). The
+        // pinned pre-v1 backup must exist before the first v1 write; a backup
+        // failure keeps the profile pre-v1 and surfaces a local migration error.
+        const agentCatalogMigration = migrateAgentCatalogSchema({
+          settings: parsed.settings,
+          preV1RawContents: raw,
+          createBackup: () => createPinnedPreV1Backup(dataFile, raw)
+        })
+        if (agentCatalogMigration.didMigrate) {
+          this.loadNeedsSave = true
+        }
+        if (agentCatalogMigration.backupError) {
+          this.agentCatalogMigrationErrorValue = agentCatalogMigration.backupError
+          console.error(
+            '[persistence] agent-catalog v1 migration blocked; pinned pre-v1 backup failed:',
+            agentCatalogMigration.backupError
+          )
+        }
         const migratedAgentYoloDefaults = migrateAgentYoloDefaults(parsed.settings)
         if (
           parsed.settings?.agentYoloDefaultsMigrated !== true ||
@@ -3187,7 +3212,10 @@ export class Store {
             voice: {
               ...getDefaultVoiceSettings(),
               ...parsed.settings?.voice
-            }
+            },
+            // Applied last so the one-time v1 stamp (or the forced pre-v1 shape
+            // after a failed pinned backup) wins over both defaults and parsed.
+            ...agentCatalogMigration.settingsPatch
           },
           // Why: 'recent' used to mean the weighted smart sort. One-shot
           // migration moves it to 'smart'; the flag prevents re-firing after
@@ -5119,6 +5147,12 @@ export class Store {
 
   getSettings(): GlobalSettings {
     return this.state.settings
+  }
+
+  /** Non-null when the agent-catalog v1 migration was blocked by a failed pinned
+   *  pre-v1 backup; the profile remains pre-v1 until the next successful load. */
+  getAgentCatalogMigrationError(): string | null {
+    return this.agentCatalogMigrationErrorValue
   }
 
   onSettingsChanged(

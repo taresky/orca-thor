@@ -49,6 +49,19 @@ import type { LinearIssueAttributeFilter } from '../shared/linear-issue-attribut
 import type { ProjectExecutionRuntimeResolution } from '../shared/project-execution-runtime'
 import type { StartupCommandDelivery } from '../shared/codex-startup-delivery'
 import type { SleepingAgentLaunchConfig } from '../shared/agent-session-resume'
+import type { AgentLaunchSpawnRequest } from '../shared/agent-launch-spawn-request'
+import type {
+  AgentCatalogMutationRequest,
+  AgentCatalogMutationResult,
+  LocalAgentCatalogSnapshot,
+  LocalCustomAgentDraftResult
+} from '../shared/agent-catalog-snapshot'
+import type {
+  AgentReferenceMutationRequest,
+  AgentReferenceMutationResult,
+  AgentReferenceSummary,
+  LocalAgentReferenceSnapshot
+} from '../shared/agent-reference-snapshot'
 import type {
   LocalhostWorktreeLabelResult,
   LocalhostWorktreeLabelRoute
@@ -77,6 +90,7 @@ import type {
   ForceDeleteWorktreeBranchResult,
   FsChangedPayload,
   GhosttyImportPreview,
+  CustomTuiAgentId,
   GlobalSettings,
   GitBranchCompareResult,
   GitCommitCompareResult,
@@ -1211,6 +1225,7 @@ export type PreloadApi = {
       launchConfig?: SleepingAgentLaunchConfig
       launchToken?: string
       launchAgent?: TuiAgent
+      agentLaunch?: AgentLaunchSpawnRequest
       startupCommandDelivery?: StartupCommandDelivery
       connectionId?: string | null
       worktreeId?: string
@@ -2073,6 +2088,25 @@ export type PreloadApi = {
      *  menu toggles) so the renderer can stay in sync with main's persisted
      *  state without round-tripping through settings:get. */
     onChanged: (callback: (updates: Partial<GlobalSettings>) => void) => () => void
+    /** Agent-catalog authoring surface. Local preload IPC only — never runtime
+     *  RPC. Catalog/reference fields cannot be written through settings.set;
+     *  they go through these revision-checked mutations. */
+    agentCatalog: {
+      getLocal: () => Promise<LocalAgentCatalogSnapshot>
+      mutate: (request: AgentCatalogMutationRequest) => Promise<AgentCatalogMutationResult>
+      getLocalDraft: (args: {
+        locator: { id: CustomTuiAgentId } | { repairToken: string }
+        expectedRevision: number
+      }) => Promise<LocalCustomAgentDraftResult | { status: 'stale' }>
+      /** Owner kind + count only; no prompt/config/env. Desktop-only. */
+      referenceSummary: (args: { id: CustomTuiAgentId }) => Promise<AgentReferenceSummary[]>
+    }
+    agentReferences: {
+      getLocal: () => Promise<LocalAgentReferenceSnapshot>
+      mutate: (
+        request: AgentReferenceMutationRequest
+      ) => Promise<AgentReferenceMutationResult<LocalAgentReferenceSnapshot>>
+    }
   }
   localhostWorktreeLabels: {
     register: (args: LocalhostWorktreeLabelRoute) => Promise<LocalhostWorktreeLabelResult>

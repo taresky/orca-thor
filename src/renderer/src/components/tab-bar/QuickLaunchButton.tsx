@@ -10,7 +10,10 @@ import { useOptionalShortcutLabel } from '@/hooks/useShortcutLabel'
 import { launchAgentInNewTab } from '@/lib/launch-agent-in-new-tab'
 import type { TuiAgent } from '../../../../shared/types'
 import type { LaunchSource } from '../../../../shared/telemetry-events'
-import { filterEnabledTuiAgents } from '../../../../shared/tui-agent-selection'
+import {
+  filterEnabledTuiAgents,
+  toLegacyAutoPreference
+} from '../../../../shared/tui-agent-selection'
 import { translate } from '@/i18n/i18n'
 
 export type QuickLaunchAgentMenuItemsProps = {
@@ -106,7 +109,8 @@ function QuickLaunchAgentMenuItemsInner({
   // found (store not hydrated), null for local repos, string for remote.
   const connectionId = useAppStore((s) => getConnectionIdFromState(s, worktreeId))
   const { detectedIds } = useDetectedAgents(connectionId)
-  const defaultAgent = useAppStore((s) => s.settings?.defaultTuiAgent)
+  // 'auto' is the migrated legacy null default; treat it as Auto for ordering.
+  const defaultAgent = toLegacyAutoPreference(useAppStore((s) => s.settings?.defaultTuiAgent))
   const disabledAgents = useAppStore((s) => s.settings?.disabledTuiAgents ?? [])
   const openSettingsPage = useAppStore((s) => s.openSettingsPage)
   const openSettingsTarget = useAppStore((s) => s.openSettingsTarget)

@@ -1,7 +1,8 @@
 import { z } from 'zod'
-import { isTuiAgent } from '../../../../shared/tui-agent-config'
-import type { TuiAgent } from '../../../../shared/types'
+import { isBuiltInTuiAgent } from '../../../../shared/tui-agent-config'
+import type { BuiltInTuiAgent } from '../../../../shared/types'
 import { sleepingAgentLaunchConfigSchema } from '../../../../shared/workspace-session-sleeping-agents'
+import { AgentLaunchSpawnRequestSchema } from './agent-launch-spawn-schema'
 import { OptionalBoolean } from '../schemas'
 
 export const WorktreeTabSelector = z.object({
@@ -118,18 +119,23 @@ export const CreateTerminalTab = WorktreeTabSelector.extend({
   startupCommandDelivery: z.enum(['fast', 'shell-ready']).optional(),
   launchConfig: sleepingAgentLaunchConfigSchema,
   launchToken: z.string().min(1).max(128).optional(),
+  // Why: legacy preset field. Built-in ids only — a custom agent id is admitted
+  // solely on the sanctioned `agentLaunch` path (U3), never a legacy field.
   agent: z
-    .custom<TuiAgent>(isTuiAgent, {
+    .custom<BuiltInTuiAgent>(isBuiltInTuiAgent, {
       message: 'Unknown agent preset'
     })
     .optional(),
   // Why: `agent` is the legacy preset field; `launchAgent` is the launch-plan
-  // identity used when preserving resume config across runtime boundaries.
+  // identity used when preserving resume config across runtime boundaries. Both
+  // reject custom ids on the legacy path.
   launchAgent: z
-    .custom<TuiAgent>(isTuiAgent, {
+    .custom<BuiltInTuiAgent>(isBuiltInTuiAgent, {
       message: 'Unknown launch agent'
     })
     .optional(),
+  // Sanctioned host-resolved launch path; the only field that admits a custom id.
+  agentLaunch: AgentLaunchSpawnRequestSchema.optional(),
   activate: z.boolean().optional(),
   // Why: idempotency key so a retried create (double-tap, reconnect replay)
   // returns the in-flight operation instead of spawning a duplicate terminal.

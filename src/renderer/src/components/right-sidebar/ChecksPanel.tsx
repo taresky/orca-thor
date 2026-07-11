@@ -62,6 +62,7 @@ import type {
   PRCheckRunDetails,
   PRComment
 } from '../../../../shared/types'
+import { toLegacyAutoPreference } from '../../../../shared/tui-agent-selection'
 import { getConnectionId } from '@/lib/connection-context'
 import {
   buildResolvePullRequestConflictsPrompt,
@@ -147,6 +148,7 @@ import {
   saveSourceControlActionRecipe,
   type SourceControlAiWriteTarget
 } from '../../../../shared/source-control-ai-recipe-save'
+import { saveSourceControlAiSettings } from '@/lib/agent-catalog-authoring'
 import { resolveSourceControlLaunchPlatform } from '@/lib/source-control-launch-platform'
 import { getLocalProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
@@ -393,7 +395,6 @@ export default function ChecksPanel(): React.JSX.Element {
     ? (getConnectionId(activeWorktreeId) ?? repo?.connectionId ?? null)
     : null
   const settings = useAppStore((s) => s.settings)
-  const updateSettings = useAppStore((s) => s.updateSettings)
   const updateRepo = useAppStore((s) => s.updateRepo)
   const fetchPRForBranch = useAppStore((s) => s.fetchPRForBranch)
   const fetchHostedReviewForBranch = useAppStore((s) => s.fetchHostedReviewForBranch)
@@ -502,12 +503,12 @@ export default function ChecksPanel(): React.JSX.Element {
         recipe
       })
       if ('sourceControlAi' in result) {
-        await updateSettings({ sourceControlAi: result.sourceControlAi })
+        await saveSourceControlAiSettings(result.sourceControlAi)
         return
       }
       await updateRepo(result.target.repoId, result.update)
     },
-    [updateRepo, updateSettings]
+    [updateRepo]
   )
   const asyncResultKeyRef = useRef<string>('')
   const refreshRequestKeyRef = useRef<string | null>(null)
@@ -2539,7 +2540,7 @@ export default function ChecksPanel(): React.JSX.Element {
   const noEnabledAgentKnown =
     detectedAgentsForAI != null &&
     pickDefaultSourceControlAgent(
-      settings?.defaultTuiAgent,
+      toLegacyAutoPreference(settings?.defaultTuiAgent),
       detectedAgentsForAI,
       settings?.disabledTuiAgents
     ) == null

@@ -1,6 +1,7 @@
 import { buildAgentStartupPlan } from '@/lib/tui-agent-startup'
 import { tuiAgentToAgentKind } from '@/lib/telemetry'
-import { isTuiAgentEnabled } from '../../../shared/tui-agent-selection'
+import { isTuiAgentEnabled, toLegacyAutoPreference } from '../../../shared/tui-agent-selection'
+import { resolveTuiAgentBaseAgent } from '../../../shared/custom-tui-agents'
 import {
   resolveTuiAgentLaunchArgs,
   resolveTuiAgentLaunchEnv
@@ -29,7 +30,8 @@ function getClientPlatform(): NodeJS.Platform {
 export function buildOnboardingFolderAgentStartup(
   settings: GlobalSettings | null
 ): OnboardingFolderAgentStartup | undefined {
-  const agent = settings?.defaultTuiAgent
+  // 'auto' is the migrated legacy null default; treat it as Auto (no seed agent).
+  const agent = toLegacyAutoPreference(settings?.defaultTuiAgent)
   if (
     !settings ||
     !agent ||
@@ -61,7 +63,9 @@ export function buildOnboardingFolderAgentStartup(
       ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
       : {}),
     telemetry: {
-      agent_kind: tuiAgentToAgentKind(agent),
+      agent_kind: tuiAgentToAgentKind(
+        resolveTuiAgentBaseAgent(agent, settings.customTuiAgents, settings.deletedCustomTuiAgents)
+      ),
       launch_source: 'onboarding',
       request_kind: 'new'
     }
