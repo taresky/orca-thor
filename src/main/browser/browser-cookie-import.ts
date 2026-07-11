@@ -1522,7 +1522,12 @@ export async function importCookiesFromBrowser(
   try {
     // Why: the browser can commit cookies only to WAL while it remains open;
     // snapshot retries prevent pairing the main DB with a racing WAL generation.
-    sourceSnapshot = createChromiumCookieSnapshot(browser.cookiesPath)
+    // Why: snapshot bytes are sensitive — keep them under userData, not os.tmpdir().
+    const snapshotTempRoot = join(app.getPath('userData'), 'cookie-import-snapshots')
+    mkdirSync(snapshotTempRoot, { recursive: true })
+    sourceSnapshot = createChromiumCookieSnapshot(browser.cookiesPath, {
+      tempRoot: snapshotTempRoot
+    })
   } catch (err) {
     try {
       unlinkSync(stagingCookiesPath)

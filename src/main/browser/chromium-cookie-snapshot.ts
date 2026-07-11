@@ -1,8 +1,11 @@
-import { copyFileSync, mkdtempSync, rmSync, statSync, unlinkSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, statSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const SNAPSHOT_ATTEMPTS = 5
+// Why: continuous Chromium writers can keep all immediate retries inside one
+// write burst; a short pause lets the burst settle without making import laggy.
+const SNAPSHOT_RETRY_BACKOFF_MS = 25
 
 type FileState = {
   device: bigint
@@ -18,7 +21,21 @@ export type ChromiumCookieSnapshot = {
 }
 
 type ChromiumCookieSnapshotOptions = {
+  /** Prefer a private app path (e.g. userData); tests inject an isolated root. */
   tempRoot?: string
+  /** Delay between failed snapshot attempts. Defaults to 25ms. */
+  retryBackoffMs?: number
+  /** Injectable sleep for tests; defaults to portable Atomics.wait sleep. */
+  sleep?: (ms: number) => void
+}
+
+function sleepSync(ms: number): void {
+  if (ms <= 0) {
+    return
+  }
+  // Why: keep createChromiumCookieSnapshot synchronous for the import pipeline;
+  // Atomics.wait is the portable bounded sleep without child_process/platform tools.
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 }
 
 function removeSnapshotDirectory(path: string): void {
@@ -52,6 +69,9 @@ function readFileState(path: string): FileState | null {
 }
 
 function sameFileState(left: FileState | null, right: FileState | null): boolean {
+  // Why: mtime/ctime equality is coarse FS stability only; concurrent writers that
+  // finish within the same timestamp quantum can still pass. Retries + backoff
+  // shrink that window but cannot eliminate it without content hashing.
   if (!left || !right) {
     return left === right
   }
@@ -117,12 +137,21 @@ export function createChromiumCookieSnapshot(
   sourcePath: string,
   options: ChromiumCookieSnapshotOptions = {}
 ): ChromiumCookieSnapshot {
-  const snapshotDir = mkdtempSync(join(options.tempRoot ?? tmpdir(), 'orca-cookie-import-'))
+  // Why: cookie DB bytes are sensitive; production passes userData via tempRoot.
+  // Fall back to os.tmpdir() so unit tests can import this module without Electron.
+  const tempRoot = options.tempRoot ?? tmpdir()
+  mkdirSync(tempRoot, { recursive: true })
+  const snapshotDir = mkdtempSync(join(tempRoot, 'orca-cookie-import-'))
   const databasePath = join(snapshotDir, 'Cookies')
   let keepSnapshot = false
+  const sleep = options.sleep ?? sleepSync
+  const backoffMs = options.retryBackoffMs ?? SNAPSHOT_RETRY_BACKOFF_MS
 
   try {
     for (let attempt = 0; attempt < SNAPSHOT_ATTEMPTS; attempt += 1) {
+      if (attempt > 0) {
+        sleep(backoffMs)
+      }
       if (copyStableAttempt(sourcePath, databasePath)) {
         keepSnapshot = true
         return {
@@ -134,7 +163,11 @@ export function createChromiumCookieSnapshot(
     throw new Error('Chromium cookies database changed while creating a snapshot')
   } finally {
     if (!keepSnapshot) {
-      removeSnapshotDirectory(snapshotDir)
+      try {
+        removeSnapshotDirectory(snapshotDir)
+      } catch {
+        // Why: cleanup must not replace the original snapshot failure for the caller.
+      }
     }
   }
 }

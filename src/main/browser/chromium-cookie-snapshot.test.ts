@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as NodeFs from 'node:fs'
 
-const { beforeCopyMock } = vi.hoisted(() => ({ beforeCopyMock: vi.fn() }))
+const { beforeCopyMock, rmSyncShouldThrow } = vi.hoisted(() => ({
+  beforeCopyMock: vi.fn(),
+  rmSyncShouldThrow: { value: false }
+}))
 
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof NodeFs>()
@@ -10,6 +13,12 @@ vi.mock('node:fs', async (importOriginal) => {
     copyFileSync: (...args: Parameters<typeof actual.copyFileSync>) => {
       beforeCopyMock(...args)
       return actual.copyFileSync(...args)
+    },
+    rmSync: (...args: Parameters<typeof actual.rmSync>) => {
+      if (rmSyncShouldThrow.value) {
+        throw new Error('cleanup failed')
+      }
+      return actual.rmSync(...args)
     }
   }
 })
@@ -20,6 +29,8 @@ import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { createChromiumCookieTestDatabase } from './browser-cookie-import-test-database'
 import { createChromiumCookieSnapshot } from './chromium-cookie-snapshot'
+
+const SNAPSHOT_ATTEMPTS = 5
 
 function sourceFiles(databasePath: string): Map<string, Buffer> {
   const files = new Map<string, Buffer>()
@@ -44,10 +55,12 @@ describe('createChromiumCookieSnapshot', () => {
     root = mkdtempSync(join(tmpdir(), 'orca-chromium-snapshot-test-'))
     writer = null
     beforeCopyMock.mockReset()
+    rmSyncShouldThrow.value = false
   })
 
   afterEach(() => {
     writer?.close()
+    rmSyncShouldThrow.value = false
     rmSync(root, { recursive: true, force: true })
   })
 
@@ -103,7 +116,10 @@ describe('createChromiumCookieSnapshot', () => {
       }
     })
 
-    const snapshot = createChromiumCookieSnapshot(sourcePath, { tempRoot: root })
+    const snapshot = createChromiumCookieSnapshot(sourcePath, {
+      tempRoot: root,
+      retryBackoffMs: 0
+    })
     const database = new DatabaseSync(snapshot.databasePath, { readOnly: true })
     const row = database.prepare("SELECT value FROM cookies WHERE name = 'raced-in'").get()
     database.close()
@@ -127,7 +143,10 @@ describe('createChromiumCookieSnapshot', () => {
       }
     })
 
-    const snapshot = createChromiumCookieSnapshot(sourcePath, { tempRoot: root })
+    const snapshot = createChromiumCookieSnapshot(sourcePath, {
+      tempRoot: root,
+      retryBackoffMs: 0
+    })
     const database = new DatabaseSync(snapshot.databasePath, { readOnly: true })
     const row = database.prepare("SELECT value FROM cookies WHERE name = 'checkpointed'").get()
     database.close()
@@ -135,6 +154,89 @@ describe('createChromiumCookieSnapshot', () => {
     expect(row).toEqual(expect.objectContaining({ value: 'main-value' }))
     expect(beforeCopyMock.mock.calls.filter(([source]) => source === sourcePath)).toHaveLength(2)
     snapshot.cleanup()
+  })
+
+  it('backs off between unstable attempts before a successful snapshot', () => {
+    const sourcePath = join(root, 'Chrome', 'Default', 'Cookies')
+    createChromiumCookieTestDatabase(sourcePath, []).close()
+    const sleep = vi.fn()
+    let raceCount = 0
+    beforeCopyMock.mockImplementation((source: string) => {
+      if (source === sourcePath && raceCount < 2) {
+        raceCount += 1
+        if (!writer) {
+          writer = new DatabaseSync(sourcePath)
+          writer.exec('PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0;')
+        }
+        writer.exec(
+          `INSERT INTO cookies (creation_utc, host_key, name, value, path, expires_utc, is_secure, is_httponly, samesite) VALUES (${raceCount}, '.example.com', 'raced-${raceCount}', 'v${raceCount}', '/', 0, 0, 0, 0)`
+        )
+      }
+    })
+
+    const snapshot = createChromiumCookieSnapshot(sourcePath, {
+      tempRoot: root,
+      retryBackoffMs: 40,
+      sleep
+    })
+    const database = new DatabaseSync(snapshot.databasePath, { readOnly: true })
+    const rows = database.prepare('SELECT name FROM cookies ORDER BY name').all()
+    database.close()
+
+    expect(rows).toEqual([
+      expect.objectContaining({ name: 'raced-1' }),
+      expect.objectContaining({ name: 'raced-2' })
+    ])
+    expect(sleep).toHaveBeenCalledTimes(2)
+    expect(sleep).toHaveBeenNthCalledWith(1, 40)
+    expect(sleep).toHaveBeenNthCalledWith(2, 40)
+    expect(beforeCopyMock.mock.calls.filter(([source]) => source === sourcePath)).toHaveLength(3)
+    snapshot.cleanup()
+  })
+
+  it('throws after exhausting unstable snapshot attempts and leaves no temp dirs', () => {
+    const sourcePath = join(root, 'Chrome', 'Default', 'Cookies')
+    const snapshotsRoot = join(root, 'snapshots')
+    mkdirSync(snapshotsRoot)
+    writer = createChromiumCookieTestDatabase(sourcePath, [{ name: 'session', value: 'value' }], {
+      journalMode: 'wal'
+    })
+    const sleep = vi.fn()
+    let mutation = 0
+    beforeCopyMock.mockImplementation((source: string) => {
+      if (source === sourcePath) {
+        mutation += 1
+        writer?.exec(
+          `INSERT INTO cookies (creation_utc, host_key, name, value, path, expires_utc, is_secure, is_httponly, samesite) VALUES (${mutation}, '.example.com', 'mut-${mutation}', 'v', '/', 0, 0, 0, 0)`
+        )
+      }
+    })
+
+    expect(() =>
+      createChromiumCookieSnapshot(sourcePath, {
+        tempRoot: snapshotsRoot,
+        retryBackoffMs: 15,
+        sleep
+      })
+    ).toThrow('Chromium cookies database changed while creating a snapshot')
+    expect(beforeCopyMock.mock.calls.filter(([source]) => source === sourcePath)).toHaveLength(
+      SNAPSHOT_ATTEMPTS
+    )
+    expect(sleep).toHaveBeenCalledTimes(SNAPSHOT_ATTEMPTS - 1)
+    expect(sleep).toHaveBeenCalledWith(15)
+    expect(readdirSync(snapshotsRoot)).toEqual([])
+  })
+
+  it('preserves the original error when cleanup fails after snapshot failure', () => {
+    const snapshotsRoot = join(root, 'snapshots')
+    mkdirSync(snapshotsRoot)
+    rmSyncShouldThrow.value = true
+
+    expect(() =>
+      createChromiumCookieSnapshot(join(root, 'missing', 'Cookies'), {
+        tempRoot: snapshotsRoot
+      })
+    ).toThrow('does not exist')
   })
 
   it('removes a partial snapshot when a WAL copy fails', () => {
