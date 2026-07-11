@@ -186,7 +186,9 @@ describe('dropAgentStatus + retention suppressor', () => {
     expect(s.tabsByWorktree['wt-1']?.some((tab) => tab.id === 'tab-closed')).toBe(false)
     expect(s.agentStatusByPaneKey['tab-closed:0']).toBeUndefined()
     expect(s.agentStatusByPaneKey['tab-orphan:0']).toBeUndefined()
-    expect(s.retentionSuppressedPaneKeys['tab-orphan:0']).toBe(true)
+    // No suppressor for the orphan: its tab is already gone, so retention sync
+    // never re-surfaces it and a suppressor would leak permanently.
+    expect(s.retentionSuppressedPaneKeys['tab-orphan:0']).toBeUndefined()
     expect(s.agentStatusByPaneKey['tab-active-child:0']).toBeDefined()
     expect(s.agentStatusByPaneKey['tab-live:0']).toBeDefined()
     expect(s.agentStatusByPaneKey['tab-other-orphan:0']).toBeDefined()

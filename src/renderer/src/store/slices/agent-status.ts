@@ -1895,7 +1895,13 @@ export const createAgentStatusSlice: StateCreator<AppState, [], [], AgentStatusS
         // the user just tore it down. Planting suppressors is the cheap guard
         // for the common ordering; the rare inverse ordering has the same
         // bounded suppressor-leak tradeoff described in dropAgentStatus.
-        const suppressorAdds = liveKeys.filter((k) => !(k in s.retentionSuppressedPaneKeys))
+        //
+        // Skip completed-orphan keys: their tab is already gone, so retention
+        // sync never snapshots them and no live→gone transition ever fires to
+        // consume the suppressor — planting one would leak permanently.
+        const suppressorAdds = liveKeys.filter(
+          (k) => !completedOrphanKeySet.has(k) && !(k in s.retentionSuppressedPaneKeys)
+        )
         let nextRetentionSuppressedPaneKeys = s.retentionSuppressedPaneKeys
         if (suppressorAdds.length > 0) {
           nextRetentionSuppressedPaneKeys = { ...s.retentionSuppressedPaneKeys }
