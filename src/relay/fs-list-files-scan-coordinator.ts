@@ -4,21 +4,21 @@
  * Why: rapid workspace switching used to stack N concurrent full-tree scans
  * on the single-threaded relay and its one SSH channel, starving small
  * interactive fs.readDir/fs.stat requests past their 30s timeout. This
- * coordinator guarantees at most one scan in flight per client:
+ * coordinator guarantees at most one scan in flight per (client, scan key):
  *   - a request for the same root/excludes joins the in-flight scan
  *     (Quick Open + file-explorer filter share one scan),
- *   - a request for a different root supersedes it — the old scan is aborted
- *     and its request fails fast instead of running to completion (this also
- *     protects against older Orca clients that never send rpc.cancel),
+ *   - a request for a DIFFERENT root/excludes runs as its own concurrent
+ *     single-flight scan. Why #7769: two independent callers on one SSH
+ *     connection — e.g. the editor's markdown-document scan (no excludes) and
+ *     Quick Open (nested-worktree excludes) — share one relay clientId. Keying
+ *     only by clientId let a newer request supersede an older unrelated one,
+ *     surfacing a spurious "superseded"/empty-list failure to a caller that
+ *     never cancelled. Abandoned scans are still stopped via their requester's
+ *     rpc.cancel (see attach below), not by evicting a sibling caller,
  *   - when every joined requester cancels (rpc.cancel / client detach), the
  *     scan is aborted so abandoned work stops immediately.
  */
-import {
-  FileListingCancelledError,
-  fileListingCancellationError
-} from '../shared/file-listing-cancellation'
-
-export const LIST_FILES_SUPERSEDED_MESSAGE = 'File listing superseded by a newer request'
+import { fileListingCancellationError } from '../shared/file-listing-cancellation'
 
 type ScanEntry = {
   key: string
@@ -28,7 +28,7 @@ type ScanEntry = {
 }
 
 export class ListFilesScanCoordinator {
-  private readonly scansByClient = new Map<number, ScanEntry>()
+  private readonly scansByClient = new Map<number, Map<string, ScanEntry>>()
 
   run(opts: {
     clientId: number
@@ -41,12 +41,14 @@ export class ListFilesScanCoordinator {
       return Promise.reject(fileListingCancellationError(signal))
     }
 
-    const existing = this.scansByClient.get(clientId)
-    if (existing && existing.key === key && !existing.controller.signal.aborted) {
+    let byKey = this.scansByClient.get(clientId)
+    const existing = byKey?.get(key)
+    if (existing && !existing.controller.signal.aborted) {
       return this.attach(existing, signal)
     }
-    if (existing) {
-      existing.controller.abort(new FileListingCancelledError(LIST_FILES_SUPERSEDED_MESSAGE))
+    if (!byKey) {
+      byKey = new Map<string, ScanEntry>()
+      this.scansByClient.set(clientId, byKey)
     }
 
     const controller = new AbortController()
@@ -56,10 +58,14 @@ export class ListFilesScanCoordinator {
       promise: Promise.resolve([]),
       attachedCount: 0
     }
-    this.scansByClient.set(clientId, entry)
+    byKey.set(key, entry)
     entry.promise = start(controller.signal).finally(() => {
-      if (this.scansByClient.get(clientId) === entry) {
-        this.scansByClient.delete(clientId)
+      const scans = this.scansByClient.get(clientId)
+      if (scans?.get(key) === entry) {
+        scans.delete(key)
+        if (scans.size === 0) {
+          this.scansByClient.delete(clientId)
+        }
       }
     })
     return this.attach(entry, signal)

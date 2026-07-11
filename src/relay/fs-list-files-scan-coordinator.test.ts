@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import {
-  LIST_FILES_SUPERSEDED_MESSAGE,
-  ListFilesScanCoordinator
-} from './fs-list-files-scan-coordinator'
+import { ListFilesScanCoordinator } from './fs-list-files-scan-coordinator'
 import {
   FileListingCancelledError,
   isFileListingCancellation
@@ -67,20 +64,27 @@ describe('ListFilesScanCoordinator', () => {
     await expect(second).resolves.toEqual(['x.ts'])
   })
 
-  it('supersedes a different-key scan: aborts the old one and rejects it fast', async () => {
+  // Why #7769: two unrelated callers on one relay client (one SSH connection)
+  // — e.g. the editor's markdown-document scan and Quick Open — carry
+  // different keys. Neither may supersede the other: the loser used to reject
+  // with the "superseded" error even though nobody cancelled it.
+  it('runs different-key scans concurrently instead of superseding (#7769)', async () => {
     const coordinator = new ListFilesScanCoordinator()
-    const scan = controllableScan()
+    const scanA = controllableScan()
+    const scanB = controllableScan()
 
-    const first = coordinator.run({ clientId: 1, key: 'workspace-a', start: scan.start })
-    const second = coordinator.run({ clientId: 1, key: 'workspace-b', start: scan.start })
+    const first = coordinator.run({ clientId: 1, key: 'workspace-a', start: scanA.start })
+    const second = coordinator.run({ clientId: 1, key: 'workspace-b', start: scanB.start })
 
-    expect(scan.starts).toHaveLength(2)
-    expect(scan.starts[0].aborted).toBe(true)
-    await expect(first).rejects.toThrow(LIST_FILES_SUPERSEDED_MESSAGE)
-    await first.catch((err) => expect(isFileListingCancellation(err)).toBe(true))
+    // Each caller gets its own live scan; neither aborts the other.
+    expect(scanA.starts).toHaveLength(1)
+    expect(scanB.starts).toHaveLength(1)
+    expect(scanA.starts[0].aborted).toBe(false)
+    expect(scanB.starts[0].aborted).toBe(false)
 
-    expect(scan.starts[1].aborted).toBe(false)
-    scan.finish(['b.ts'])
+    scanA.finish(['a.ts'])
+    scanB.finish(['b.ts'])
+    await expect(first).resolves.toEqual(['a.ts'])
     await expect(second).resolves.toEqual(['b.ts'])
   })
 

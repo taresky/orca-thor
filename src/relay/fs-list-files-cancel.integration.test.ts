@@ -66,7 +66,6 @@ import {
 import { RelayDispatcher } from './dispatcher'
 import { RelayContext } from './context'
 import { FsHandler } from './fs-handler'
-import { LIST_FILES_SUPERSEDED_MESSAGE } from './fs-list-files-scan-coordinator'
 
 async function flushPipe(): Promise<void> {
   // The in-memory pipe defers each hop with setImmediate; a few macrotask
@@ -151,29 +150,31 @@ describe('Integration: cancellable fs.listFiles (#7721)', () => {
     expect(fakeListFiles.scans[0].signal?.aborted).toBe(true)
   })
 
-  it('a scan for a different workspace supersedes the previous scan', async () => {
-    const first = mux.request('fs.listFiles', { rootPath: '/workspace/a' })
-    // Attach the rejection handler up front: the error response arrives on a
-    // macrotask inside flushPipe, before any later `await expect` could.
-    const firstOutcome = first.then(
-      () => null,
-      (err: Error) => err
-    )
+  // Why #7769: two independent callers on one SSH connection (one relay
+  // clientId) — e.g. the editor's markdown-document scan (no excludePaths) and
+  // Quick Open (nested-worktree excludePaths) — carry different scan keys.
+  // Neither may supersede the other: the earlier one must complete and return
+  // its own result, not fail with a "superseded" error nobody triggered.
+  it('runs two concurrent unrelated listings without superseding either', async () => {
+    const markdown = mux.request('fs.listFiles', { rootPath: '/workspace/a' })
     await flushPipe()
     expect(fakeListFiles.scans).toHaveLength(1)
 
-    const second = mux.request('fs.listFiles', { rootPath: '/workspace/b' })
+    const quickOpen = mux.request('fs.listFiles', {
+      rootPath: '/workspace/a',
+      excludePaths: ['/workspace/a/worktrees/feature']
+    })
     await flushPipe()
     expect(fakeListFiles.scans).toHaveLength(2)
 
-    // The stale scan is aborted and its request fails fast — it does not run
-    // to completion behind the new one and does not hit the 30s timeout.
-    expect(fakeListFiles.scans[0].signal?.aborted).toBe(true)
-    const firstError = await firstOutcome
-    expect(firstError?.message).toContain(LIST_FILES_SUPERSEDED_MESSAGE)
+    // The first scan is not aborted by the second — both stay live.
+    expect(fakeListFiles.scans[0].signal?.aborted).toBe(false)
+    expect(fakeListFiles.scans[1].signal?.aborted).toBe(false)
 
-    fakeListFiles.scans[1].resolve(['b.ts'])
-    await expect(second).resolves.toEqual(['b.ts'])
+    fakeListFiles.scans[0].resolve(['README.md'])
+    fakeListFiles.scans[1].resolve(['src/index.ts'])
+    await expect(markdown).resolves.toEqual(['README.md'])
+    await expect(quickOpen).resolves.toEqual(['src/index.ts'])
   })
 
   it('identical concurrent requests coalesce into a single scan', async () => {
