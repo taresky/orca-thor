@@ -11,6 +11,8 @@ import {
 import { CLIPBOARD_TEXT_MEASURE_YIELD_CODE_UNITS } from '../../shared/clipboard-text'
 import { redactPtyIdForDiagnostics } from '../../shared/pty-delivery-diagnostics'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../shared/constants'
+import { getHostAgentSessionRecordStore } from '../agent-launch/agent-session-record-store-host'
+import { getHostAgentLaunchBoundary } from '../agent-launch/agent-launch-boundary-host'
 
 const isWindowsHost = process.platform === 'win32'
 const posixOnlyIt = isWindowsHost ? it.skip : it
@@ -1348,11 +1350,12 @@ describe('registerPtyHandlers', () => {
     describe('host-resolved agent launch (agentLaunch)', () => {
       // Why: when the client opts into `agentLaunch`, the host resolves the
       // launch and the resolved plan — not any client command — is what spawns.
-      function makeAgentLaunchSpy(): ReturnType<typeof vi.fn> {
+      function makeAgentLaunchSpy(spawnResult?: Record<string, unknown>): ReturnType<typeof vi.fn> {
         const spawnSpy = vi.fn(async (options: Record<string, unknown>) => ({
           id: 'agent-launch-pty',
           pid: 321,
-          ...options
+          ...options,
+          ...spawnResult
         }))
         setLocalPtyProvider({
           spawn: spawnSpy,
@@ -1557,6 +1560,154 @@ describe('registerPtyHandlers', () => {
           }
         })) as { draftPrompt?: string }
         expect(nativeResult.draftPrompt).toBeUndefined()
+      })
+
+      it('suppresses the launch outcome and releases the admission token when the provider reattaches', async () => {
+        // A resolved launch the provider satisfies by reattaching an existing
+        // process (daemon-retry race, or u3's cold-restore miss-fallback preamble
+        // whose reattach HIT) never exec'd: no 'launched' receipt (receipt-cannot-
+        // lie), no post-start prompt paste, register skipped, and the fresh
+        // admission token released rather than retained. Suppression is variant-
+        // agnostic — a fresh selection that reattaches shares the resume path here.
+        const spawnSpy = makeAgentLaunchSpy({ isReattach: true })
+        handlers.clear()
+        registerPtyHandlers(
+          mainWindow as never,
+          undefined,
+          undefined,
+          agentLaunchSettings() as never
+        )
+        const registerSpy = vi.spyOn(getHostAgentSessionRecordStore(), 'register')
+        const leafId = '22222222-2222-4222-8222-222222222222'
+        // aider takes its prompt over stdin after start, so a fresh launch would
+        // return a followupPrompt; the reattach must suppress that too.
+        const result = (await handlers.get('pty:spawn')!(null, {
+          cols: 80,
+          rows: 24,
+          tabId: 'tab-reattach',
+          leafId,
+          worktreeId: 'wt-reattach',
+          env: { ORCA_PANE_KEY: `tab-reattach:${leafId}` },
+          agentLaunch: { selection: { kind: 'agent', agent: 'aider' }, prompt: 'do the thing' }
+        })) as {
+          isReattach?: boolean
+          agentLaunch?: unknown
+          followupPrompt?: unknown
+        }
+
+        expect(result.isReattach).toBe(true)
+        expect(result.agentLaunch).toBeUndefined()
+        expect(result.followupPrompt).toBeUndefined()
+        expect(registerSpy).not.toHaveBeenCalled()
+        const spawnOptions = spawnSpy.mock.calls.at(-1)![0] as { env?: Record<string, string> }
+        const mintedToken = spawnOptions.env?.ORCA_AGENT_LAUNCH_TOKEN
+        expect(typeof mintedToken).toBe('string')
+        expect(getHostAgentLaunchBoundary().retainedFor(mintedToken!)).toBeNull()
+        registerSpy.mockRestore()
+      })
+
+      it('emits the receipt and retains the token when a reattach misses and spawns fresh', async () => {
+        // The one-shot miss-fallback exec'd the resolved launch — a normal fresh
+        // spawn: receipt returned, resume record registered, token retained.
+        makeAgentLaunchSpy({ isReattach: false })
+        handlers.clear()
+        registerPtyHandlers(
+          mainWindow as never,
+          undefined,
+          undefined,
+          agentLaunchSettings() as never
+        )
+        const registerSpy = vi.spyOn(getHostAgentSessionRecordStore(), 'register')
+        const leafId = '33333333-3333-4333-8333-333333333333'
+        const result = (await handlers.get('pty:spawn')!(null, {
+          cols: 80,
+          rows: 24,
+          tabId: 'tab-miss',
+          leafId,
+          worktreeId: 'wt-miss',
+          env: { ORCA_PANE_KEY: `tab-miss:${leafId}` },
+          agentLaunch: { selection: { kind: 'agent', agent: 'claude' }, prompt: 'hi' }
+        })) as { agentLaunch?: { status?: string; receipt?: { launchToken?: string } } }
+
+        expect(result.agentLaunch?.status).toBe('launched')
+        const receiptToken = result.agentLaunch?.receipt?.launchToken
+        expect(typeof receiptToken).toBe('string')
+        expect(registerSpy).toHaveBeenCalledTimes(1)
+        expect(getHostAgentLaunchBoundary().retainedFor(receiptToken!)).not.toBeNull()
+        registerSpy.mockRestore()
+      })
+
+      it('resolves a resume variant with provider command delivery so the relay writer delivers it', async () => {
+        // u3's cold-restore flip stopped client-assembling the resume command over
+        // SSH — the resolved RESUME command must ride commandDelivery:'provider' so
+        // the host/relay startup-command writer submits it to the (possibly remote)
+        // shell, exactly like a fresh agentLaunch. ssh-pty-provider forwards
+        // command + commandDelivery:'provider' to the relay (ssh-pty-provider.test)
+        // and the relay delivers any provider startupCommand (pty-handler.test);
+        // this proves the RESUME path emits that provider-delivered command (the
+        // resume-vs-fresh split lives in the resolver, never in delivery).
+        const spawnSpy = makeAgentLaunchSpy()
+        handlers.clear()
+        registerPtyHandlers(
+          mainWindow as never,
+          undefined,
+          undefined,
+          agentLaunchSettings() as never
+        )
+        const store = getHostAgentSessionRecordStore()
+        store.register({
+          worktreeId: 'wt-resume-delivery',
+          requestedAgent: 'claude',
+          baseAgent: 'claude',
+          launchSnapshot: {
+            version: 1,
+            requestedAgent: 'claude',
+            baseAgent: 'claude',
+            displayLabel: 'Claude',
+            mode: 'built-in',
+            argv: ['claude'],
+            agentEnv: {},
+            capturedEnvPolicy: 'none',
+            target: {
+              platform: isWindowsHost ? 'win32' : 'darwin',
+              execution: 'native',
+              shell: isWindowsHost ? 'powershell' : 'posix',
+              isRemote: false,
+              executionHostId: 'local'
+            }
+          },
+          launchToken: 'resume-delivery-token'
+        })
+        store.bindProviderSessionByToken('resume-delivery-token', {
+          key: 'session_id',
+          id: 'resume-sess-1'
+        })
+        const result = (await handlers.get('pty:spawn')!(null, {
+          cols: 80,
+          rows: 24,
+          worktreeId: 'wt-resume-delivery',
+          agentLaunch: {
+            resume: {
+              operation: 'resume',
+              sessionKey: {
+                worktreeId: 'wt-resume-delivery',
+                baseAgent: 'claude',
+                providerSessionId: 'resume-sess-1'
+              }
+            }
+          }
+        })) as { agentLaunch?: { status?: string } }
+
+        expect(result.agentLaunch?.status).toBe('launched')
+        const options = spawnSpy.mock.calls.at(-1)![0] as {
+          command?: string
+          commandDelivery?: string
+        }
+        expect(options.commandDelivery).toBe('provider')
+        expect(options.command).toContain('claude')
+        // The command is the RESUME command, not a bare fresh launch — it carries
+        // the bound provider session id.
+        expect(options.command).toContain('resume-sess-1')
       })
     })
 

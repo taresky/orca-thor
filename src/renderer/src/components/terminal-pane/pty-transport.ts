@@ -503,6 +503,7 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
     launchToken,
     launchAgent,
     agentLaunch,
+    legacyResumeRecordedConnectionId,
     startupCommandDelivery,
     connectionId,
     worktreeId,
@@ -699,6 +700,13 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
         const shouldSendLocalCwdFallback =
           cwdFallback === 'worktree' && !connectionId && !options.sessionId
         const resolvedAgentLaunch = options.agentLaunch ?? agentLaunch
+        // Why: `null` (a local legacy record) is a meaningful value distinct from
+        // "not provided", so resolve the per-call override before the construction
+        // default without collapsing null via `??`.
+        const resolvedLegacyRecordedConnectionId =
+          options.legacyResumeRecordedConnectionId !== undefined
+            ? options.legacyResumeRecordedConnectionId
+            : legacyResumeRecordedConnectionId
         // The agentLaunch overload may resolve to a pre-spawn typed failure with
         // no PTY; the conditional spread erases that at the type level, so widen
         // back to the union we narrow below.
@@ -711,9 +719,20 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
           // Why: on the host-resolved agentLaunch path the host owns command,
           // launchConfig, and token assembly and ignores these client fields, so
           // we send only the request; the legacy/resume path keeps sending the
-          // resolved command and any stored config/token.
+          // resolved command and any stored config/token. Exception: a pre-U5
+          // legacy record's captured config + recorded owner ride ALONGSIDE the
+          // resume variant (one-release handoff) so the host can prove and ingest
+          // them on first resume; it ignores them until its ingest lands.
           ...(resolvedAgentLaunch
-            ? { agentLaunch: resolvedAgentLaunch }
+            ? {
+                agentLaunch: resolvedAgentLaunch,
+                ...((options.launchConfig ?? launchConfig)
+                  ? { launchConfig: options.launchConfig ?? launchConfig }
+                  : {}),
+                ...(resolvedLegacyRecordedConnectionId !== undefined
+                  ? { legacyResumeRecordedConnectionId: resolvedLegacyRecordedConnectionId }
+                  : {})
+              }
             : {
                 command: options.command ?? command,
                 ...((options.launchConfig ?? launchConfig)

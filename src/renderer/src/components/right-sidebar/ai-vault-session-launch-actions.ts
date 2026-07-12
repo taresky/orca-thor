@@ -1,11 +1,12 @@
 import { useCallback } from 'react'
 import { toast } from 'sonner'
 import {
-  buildAiVaultResumeCommandForWorktree,
   buildAiVaultResumeStartupForWorktree,
   type AiVaultResumeStartup
 } from '@/lib/ai-vault-resume-command'
 import { launchAiVaultSessionInNewTab } from '@/lib/launch-ai-vault-session'
+import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
+import { isWebRuntimeSessionActive } from '@/runtime/web-runtime-session'
 import {
   activateAndRevealFolderWorkspace,
   activateAndRevealWorktree
@@ -17,6 +18,7 @@ import {
   getAiVaultResumeWorkspaceTargetStatus
 } from '@/lib/ai-vault-resume-target'
 import type { AiVaultAgent, AiVaultSession } from '../../../../shared/ai-vault-types'
+import type { AgentLaunchVaultResumeEntry } from '../../../../shared/agent-launch-spawn-request'
 import type { Worktree } from '../../../../shared/types'
 import { translate } from '@/i18n/i18n'
 import { agentLabel } from './ai-vault-session-filters'
@@ -25,6 +27,18 @@ import {
   isKnownAiVaultResumeWorkspaceTarget,
   type AiVaultSessionResumeTargetState
 } from './ai-vault-session-resume'
+
+// Echoes a discovered session's identity for the host-owned vault-resume arm and
+// copy IPC. filePath rides only the trusted desktop IPC; the executing host
+// re-derives it from its own fresh discovery, so it is never a spawn input.
+function buildAiVaultResumeEntry(session: AiVaultSession): AgentLaunchVaultResumeEntry {
+  return {
+    executionHostId: session.executionHostId,
+    agent: session.agent,
+    sessionId: session.sessionId,
+    filePath: session.filePath
+  }
+}
 
 export function useAiVaultSessionLaunchActions({
   activeWorktree,
@@ -38,20 +52,9 @@ export function useAiVaultSessionLaunchActions({
   agentCmdOverrides?: Partial<Record<AiVaultAgent, string | null>>
 }): {
   buildResumeStartup: (session: AiVaultSession, worktreeId?: string | null) => AiVaultResumeStartup
-  copyResumeCommand: (session: AiVaultSession, worktreeId?: string | null) => Promise<void>
+  copyResumeCommand: (session: AiVaultSession) => Promise<void>
   handleResume: (session: AiVaultSession, targetWorktreeId?: string) => void
 } {
-  const buildResumeCommand = useCallback(
-    (session: AiVaultSession, worktreeId?: string | null): string =>
-      buildAiVaultResumeCommandForWorktree({
-        state: useAppStore.getState(),
-        worktreeId: worktreeId ?? activeWorktreeId ?? activeWorktree?.id ?? null,
-        session,
-        commandOverride: agentCmdOverrides?.[session.agent]
-      }),
-    [activeWorktree?.id, activeWorktreeId, agentCmdOverrides]
-  )
-
   const buildResumeStartup = useCallback(
     (session: AiVaultSession, worktreeId?: string | null) =>
       buildAiVaultResumeStartupForWorktree({
@@ -63,18 +66,29 @@ export function useAiVaultSessionLaunchActions({
     [activeWorktree?.id, activeWorktreeId, agentCmdOverrides]
   )
 
-  const copyResumeCommand = useCallback(
-    async (session: AiVaultSession, worktreeId?: string | null): Promise<void> => {
-      await window.api.ui.writeClipboardText(buildResumeCommand(session, worktreeId))
-      toast.success(
+  const copyResumeCommand = useCallback(async (session: AiVaultSession): Promise<void> => {
+    // Host-owned copy: the host re-validates the discovered entry against its own
+    // fresh scanner and assembles the command from its settings; the client only
+    // echoes identity and writes the returned string. On web/paired the IPC strips
+    // filePath and the executing host re-derives it.
+    const result = await window.api.aiVault.resumeCommand(buildAiVaultResumeEntry(session))
+    if (result.status !== 'ok') {
+      toast.error(
         translate(
-          'auto.components.right.sidebar.AiVaultPanel.resumeCommandCopied',
-          'Resume command copied'
+          'auto.components.right.sidebar.AiVaultPanel.resumeSessionUnavailable',
+          'This session can no longer be resumed.'
         )
       )
-    },
-    [buildResumeCommand]
-  )
+      return
+    }
+    await window.api.ui.writeClipboardText(result.command)
+    toast.success(
+      translate(
+        'auto.components.right.sidebar.AiVaultPanel.resumeCommandCopied',
+        'Resume command copied'
+      )
+    )
+  }, [])
 
   const handleResume = useCallback(
     (session: AiVaultSession, targetWorktreeId?: string): void => {
@@ -100,11 +114,28 @@ export function useAiVaultSessionLaunchActions({
         return
       }
 
-      const launchResult = launchAiVaultSessionInNewTab({
-        agent: session.agent,
-        worktreeId: targetId.worktreeId,
-        ...buildResumeStartup(session, targetId.worktreeId)
-      })
+      // Web-runtime resume-via-arm is ruled to U7, so that surface keeps assembling
+      // the command client-side (no regression). Desktop rides the host-owned arm:
+      // the host re-validates the discovered entry and owns command/env assembly.
+      const isWebRuntimeTarget = isWebRuntimeSessionActive(
+        getRuntimeEnvironmentIdForWorktree(useAppStore.getState(), targetId.worktreeId)
+      )
+      const launchResult = launchAiVaultSessionInNewTab(
+        isWebRuntimeTarget
+          ? {
+              agent: session.agent,
+              worktreeId: targetId.worktreeId,
+              ...buildResumeStartup(session, targetId.worktreeId)
+            }
+          : {
+              agent: session.agent,
+              worktreeId: targetId.worktreeId,
+              command: '',
+              agentLaunch: {
+                vaultResume: { operation: 'resume', entry: buildAiVaultResumeEntry(session) }
+              }
+            }
+      )
       const showQueuedToast = (): void => {
         toast.success(
           translate(

@@ -140,8 +140,12 @@ export function buildAgentStartupPlanFromResolvedLaunch(
         )
       : submitParts(launch, trimmedPrompt)
 
+  // The durable launch config records only the base command (no resume flags), so
+  // a fresh relaunch never re-resumes a stale session; the resume flags land only
+  // in the one-shot launchCommand between the base argv and any prompt suffix.
   const baseCommand = buildShellCommandFromArgv(launch.argv, shell)
-  const finalArgv = [...launch.argv, ...parts.argvSuffix]
+  const resumeSuffix = launch.resumeArgvSuffix ?? []
+  const finalArgv = [...launch.argv, ...resumeSuffix, ...parts.argvSuffix]
   const spawnEnv = { ...launch.agentEnv, ...parts.extraEnv }
   return {
     agent: launch.requestedAgent,

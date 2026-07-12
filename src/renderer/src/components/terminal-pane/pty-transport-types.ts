@@ -6,8 +6,8 @@ import type { EventProps } from '../../../../shared/telemetry-events'
 import type { TerminalOscColorQueryReplyColors } from '../../../../shared/terminal-osc-color-reply'
 import type { TuiAgent } from '../../../../shared/types'
 import type {
-  AgentLaunchSpawnOutcome,
-  AgentLaunchSpawnRequest
+  AgentLaunchInput,
+  AgentLaunchSpawnOutcome
 } from '../../../../shared/agent-launch-spawn-request'
 import type { PtyDataMeta } from './pty-dispatcher'
 
@@ -104,7 +104,10 @@ export type PtyTransport = {
     launchConfig?: SleepingAgentLaunchConfig
     launchToken?: string
     launchAgent?: TuiAgent
-    agentLaunch?: AgentLaunchSpawnRequest
+    agentLaunch?: AgentLaunchInput
+    /** One-release legacy handoff: a pre-U5 record's recorded execution owner,
+     *  sent with `launchConfig` alongside a resume variant for host provenance. */
+    legacyResumeRecordedConnectionId?: string | null
     startupCommandDelivery?: StartupCommandDelivery
     callbacks: PtyCallbacks
   }) => void | Promise<void | string | PtyConnectResult | PtyConnectAgentLaunchFailure>
@@ -152,7 +155,10 @@ export type IpcPtyTransportOptions = {
   launchConfig?: SleepingAgentLaunchConfig
   launchToken?: string
   launchAgent?: TuiAgent
-  agentLaunch?: AgentLaunchSpawnRequest
+  agentLaunch?: AgentLaunchInput
+  /** One-release legacy handoff: a pre-U5 record's recorded execution owner,
+   *  sent with `launchConfig` alongside a resume variant for host provenance. */
+  legacyResumeRecordedConnectionId?: string | null
   startupCommandDelivery?: StartupCommandDelivery
   connectionId?: string | null
   worktreeId?: string

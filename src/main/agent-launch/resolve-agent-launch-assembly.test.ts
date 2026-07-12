@@ -454,6 +454,7 @@ describe('snapshot immutability', () => {
       'mode',
       'argv',
       'agentEnv',
+      'capturedEnvPolicy',
       'target'
     ])
   })

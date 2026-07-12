@@ -9885,6 +9885,7 @@
           },
           "AiVaultPanel": {
             "resumeCommandCopied": "재개 명령이 복사됨",
+            "resumeSessionUnavailable": "이 세션은 더 이상 재개할 수 없습니다.",
             "valueCopied": "{{value0}} 복사됨",
             "valueCopyFailed": "{{value0}}을(를) 복사할 수 없습니다",
             "openWorkspaceBeforeResuming": "세션을 재개하기 전에 워크스페이스를 여세요.",

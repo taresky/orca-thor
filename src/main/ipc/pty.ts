@@ -40,9 +40,12 @@ import { recordCrashBreadcrumb } from '../crash-reporting/crash-breadcrumb-store
 import { isTuiAgent } from '../../shared/tui-agent-config'
 import type { SleepingAgentLaunchConfig } from '../../shared/agent-session-resume'
 import type {
+  AgentLaunchInput,
   AgentLaunchSpawnOutcome,
   AgentLaunchSpawnRequest
 } from '../../shared/agent-launch-spawn-request'
+import type { AgentLaunchSnapshot, LaunchIntent } from '../../shared/agent-launch-host-contract'
+import type { AgentProviderSessionMetadata } from '../../shared/agent-session-resume'
 import {
   describeSpawnExecutionHost,
   deriveAgentLaunchHostState,
@@ -50,6 +53,13 @@ import {
   resolveLocalTargetHomePath
 } from '../agent-launch/agent-launch-host-state'
 import { resolveAgentLaunchSpawn } from '../agent-launch/agent-launch-spawn'
+import { resolveResumeLaunchIngest } from '../agent-launch/agent-launch-resume-ingest'
+import { buildVaultResumeStartup } from '../agent-launch/agent-launch-vault-resume'
+import { revalidateAiVaultResumeEntry } from './ai-vault-resume-command'
+import { discoverAiVaultSessionsAcrossHosts } from './ai-vault'
+import { resolveStartupShell } from '../../shared/tui-agent-startup-shell'
+import { getHostAgentSessionRecordStore } from '../agent-launch/agent-session-record-store-host'
+import { registerHostSessionLaunch } from '../agent-launch/agent-session-launch-registration'
 import { getHostAgentLaunchBoundary } from '../agent-launch/agent-launch-boundary-host'
 import type { ProjectExecutionRuntimeResolution } from '../../shared/project-execution-runtime'
 import {
@@ -1184,6 +1194,11 @@ export function clearProviderPtyState(id: string): void {
     }
     ptyPendingGenByPtyId.delete(id)
     if (stillOwnsPaneKey) {
+      // Drop any unbound launch staging for this pane so a spawn that failed or a
+      // pane closed before its hook bound a provider session does not strand a
+      // staging handle. Durable bound records are intentionally kept — a slept
+      // session still resumes by its ownership key.
+      getHostAgentSessionRecordStore().disposeStagingForPane(paneKey)
       // Why: notify registered consumers AFTER we've dropped the paneKey↔ptyId
       // entries so a listener that re-reads the map sees the post-teardown
       // state. Wrap each call so one throwing listener cannot block the rest.
@@ -3619,8 +3634,16 @@ export function registerPtyHandlers(
         // Why: when present the handler resolves the launch through the host
         // boundary and IGNORES client command/launchConfig/launchAgent/env; the
         // legacy shape stays authoritative when it is absent (U3 incremental
-        // caller migration). Intent/reference are built host-side, never here.
-        agentLaunch?: AgentLaunchSpawnRequest
+        // caller migration). Intent/reference are built host-side, never here. A
+        // resume/fork variant names only a session key; the host loads the record.
+        agentLaunch?: AgentLaunchInput
+        // Why: one-release legacy-migration compatibility. On the FIRST resume of a
+        // pre-U5 sleeping session the renderer surrenders the recorded execution
+        // owner alongside args.launchConfig so the host can prove the opaque legacy
+        // command still targets the same host before replay, then owns the config.
+        // Deleted with the client launchConfig read once every record carries a v1
+        // snapshot (U10 cleanup).
+        legacyResumeRecordedConnectionId?: string | null
         startupCommandDelivery?: StartupCommandDelivery
         connectionId?: string | null
         worktreeId?: string
@@ -3724,57 +3747,154 @@ export function registerPtyHandlers(
           descriptor,
           { worktreePath: cwd ?? null, repoPath: null }
         )
-        const resolution = await resolveAgentLaunchSpawn(
-          {
-            getSettings: hostState.getSettings,
-            getCatalogRevision: hostState.getCatalogRevision,
-            boundary: getHostAgentLaunchBoundary()
-          },
-          {
-            request: args.agentLaunch,
-            // pty:spawn is the in-process desktop caller; never mobile/paired.
-            intent: { kind: 'interactive', client: 'desktop' },
-            target: hostState.target,
-            variables: hostState.variables,
-            scope:
-              typeof args.worktreeId === 'string' && args.worktreeId.length > 0
-                ? args.worktreeId
-                : 'local-pty-spawn',
-            principal: { kind: 'local' }
+        // pty:spawn is the in-process desktop caller; never mobile/paired. A
+        // resume/fork variant loads the private record by session key; anything
+        // unknown is an in-band invalid_launch_snapshot (no PTY created).
+        // Non-null only for the resolver path (fresh selection or v1-snapshot
+        // resume); an opaque legacy replay leaves it null and skips the resolver.
+        let resumeRequest: AgentLaunchSpawnRequest | null = null
+        let resumeIntent: LaunchIntent = { kind: 'interactive', client: 'desktop' }
+        let resumePersistedSnapshot: AgentLaunchSnapshot | undefined
+        let resumeProviderSession: AgentProviderSessionMetadata | undefined
+        if ('resume' in args.agentLaunch) {
+          const ingest = resolveResumeLaunchIngest(
+            {
+              resume: args.agentLaunch.resume,
+              client: 'desktop',
+              // Trusted desktop-only opaque legacy replay context: current
+              // execution owner + shell, plus the pre-U5 config the renderer
+              // surrenders on first resume (args.launchConfig) with its recorded
+              // owner. The host validates, replays, and owns it thereafter.
+              legacy: {
+                shell: resolveStartupShell(hostState.target.platform, hostState.target.shell),
+                connectionId: args.connectionId ?? null,
+                ...(args.launchConfig
+                  ? {
+                      handoff: {
+                        launchConfig: args.launchConfig,
+                        recordedConnectionId: args.legacyResumeRecordedConnectionId ?? null
+                      }
+                    }
+                  : {})
+              }
+            },
+            getHostAgentSessionRecordStore()
+          )
+          if (!ingest.ok) {
+            return { agentLaunch: { status: 'failed', failure: ingest.failure } }
           }
-        )
-        if (!resolution.ok) {
-          return 'failure' in resolution
-            ? { agentLaunch: { status: 'failed', failure: resolution.failure } }
-            : { agentLaunch: { status: 'rejected', requestError: resolution.requestError } }
+          if (ingest.kind === 'legacy') {
+            // Opaque replay bypasses the resolver: feed the pre-U5
+            // launchCommand/launchConfig directly and let the pre-U5 downstream
+            // spawn path (Agent Teams env regen, base-env attribution) run. No
+            // admission token/receipt — legacy resumes attribute via ORCA_PANE_KEY.
+            args.command = ingest.launchCommand
+            args.commandDelivery = 'provider'
+            args.launchConfig = ingest.launchConfig
+            args.launchAgent = ingest.baseAgent
+          } else {
+            resumeRequest = ingest.request
+            resumeIntent = ingest.intent
+            resumePersistedSnapshot = ingest.persistedSnapshot
+            resumeProviderSession = ingest.resumeProviderSession
+          }
+        } else if ('vaultResume' in args.agentLaunch) {
+          const vault = args.agentLaunch.vaultResume
+          // pty:spawn only spawns; a 'copy' request is served by the host copy
+          // method, never here.
+          if (vault.operation !== 'resume') {
+            return {
+              agentLaunch: { status: 'failed', failure: { code: 'invalid_launch_snapshot' } }
+            }
+          }
+          // Re-validate the client-echoed entry against the desktop's OWN fresh
+          // multi-host discovery (the same one the picker showed); an entry the
+          // host did not itself discover (or a field mismatch) is invalid and
+          // creates no PTY. The client's filePath is ignored —
+          // buildVaultResumeStartup re-derives it from this session.
+          const session = await revalidateAiVaultResumeEntry(
+            vault.entry,
+            discoverAiVaultSessionsAcrossHosts
+          )
+          if (!session) {
+            return {
+              agentLaunch: { status: 'failed', failure: { code: 'invalid_launch_snapshot' } }
+            }
+          }
+          // Vault resume bypasses the resolver like legacy replay: feed the
+          // assembled command/env/launchConfig to the pre-U5 downstream spawn
+          // path. No admission token/receipt — it attributes via ORCA_PANE_KEY.
+          const startup = buildVaultResumeStartup({
+            session,
+            hostPlatform: hostState.target.platform,
+            settings: getLaunchSettings()
+          })
+          args.command = startup.command
+          args.commandDelivery = 'provider'
+          if (startup.env) {
+            args.env = { ...args.env, ...startup.env }
+          }
+          if (startup.launchConfig) {
+            args.launchConfig = startup.launchConfig
+          }
+          args.launchAgent = session.agent
+        } else {
+          resumeRequest = args.agentLaunch
         }
-        agentLaunchToken = resolution.receipt.launchToken
-        agentLaunchOutcome = { status: 'launched', receipt: resolution.receipt }
-        args.command = resolution.plan.launchCommand
-        args.commandDelivery = 'provider'
-        args.launchConfig = resolution.plan.launchConfig
-        // Why: expectedProcess/telemetry lookups are keyed on the built-in base
-        // agent; the requested (possibly custom) identity travels in the receipt.
-        args.launchAgent = resolution.receipt.baseAgent
-        args.launchToken = resolution.receipt.launchToken
-        if (resolution.plan.startupCommandDelivery !== undefined) {
-          args.startupCommandDelivery = resolution.plan.startupCommandDelivery
+        if (resumeRequest) {
+          const resolution = await resolveAgentLaunchSpawn(
+            {
+              getSettings: hostState.getSettings,
+              getCatalogRevision: hostState.getCatalogRevision,
+              boundary: getHostAgentLaunchBoundary()
+            },
+            {
+              request: resumeRequest,
+              intent: resumeIntent,
+              target: hostState.target,
+              variables: hostState.variables,
+              scope:
+                typeof args.worktreeId === 'string' && args.worktreeId.length > 0
+                  ? args.worktreeId
+                  : 'local-pty-spawn',
+              principal: { kind: 'local' },
+              ...(resumePersistedSnapshot ? { persistedSnapshot: resumePersistedSnapshot } : {}),
+              ...(resumeProviderSession ? { resumeProviderSession } : {})
+            }
+          )
+          if (!resolution.ok) {
+            return 'failure' in resolution
+              ? { agentLaunch: { status: 'failed', failure: resolution.failure } }
+              : { agentLaunch: { status: 'rejected', requestError: resolution.requestError } }
+          }
+          agentLaunchToken = resolution.receipt.launchToken
+          agentLaunchOutcome = { status: 'launched', receipt: resolution.receipt }
+          args.command = resolution.plan.launchCommand
+          args.commandDelivery = 'provider'
+          args.launchConfig = resolution.plan.launchConfig
+          // Why: expectedProcess/telemetry lookups are keyed on the built-in base
+          // agent; the requested (possibly custom) identity travels in the receipt.
+          args.launchAgent = resolution.receipt.baseAgent
+          args.launchToken = resolution.receipt.launchToken
+          if (resolution.plan.startupCommandDelivery !== undefined) {
+            args.startupCommandDelivery = resolution.plan.startupCommandDelivery
+          }
+          // Why: the launch token is admission-minted host-side, so the client can
+          // no longer supply it; inject it for hook pane-attribution. The base-env
+          // block strips ORCA_AGENT_LAUNCH_TOKEN when no proven pane key is present.
+          args.env = {
+            ...args.env,
+            ...resolution.plan.env,
+            ORCA_AGENT_LAUNCH_TOKEN: resolution.receipt.launchToken
+          }
+          // Why: stdin-after-start agents launch bare; the host returns the resolved
+          // prompt for the renderer's readiness-gated paste writer to deliver.
+          agentLaunchFollowupPrompt = resolution.plan.followupPrompt
+          // Why: draft launches whose agent has no native flag/env affordance (or an
+          // oversized inline draft) return the text for the renderer to paste
+          // UNSUBMITTED; native-flag/env drafts deliver host-side and set nothing.
+          agentLaunchDraftPrompt = resolution.plan.draftPrompt ?? null
         }
-        // Why: the launch token is admission-minted host-side, so the client can no
-        // longer supply it; inject it for hook pane-attribution. The base-env block
-        // strips ORCA_AGENT_LAUNCH_TOKEN when no proven pane key is present.
-        args.env = {
-          ...args.env,
-          ...resolution.plan.env,
-          ORCA_AGENT_LAUNCH_TOKEN: resolution.receipt.launchToken
-        }
-        // Why: stdin-after-start agents launch bare; the host returns the resolved
-        // prompt for the renderer's readiness-gated paste writer to deliver.
-        agentLaunchFollowupPrompt = resolution.plan.followupPrompt
-        // Why: draft launches whose agent has no native flag/env affordance (or an
-        // oversized inline draft) return the text for the renderer to paste
-        // UNSUBMITTED; native-flag/env drafts deliver host-side and set nothing.
-        agentLaunchDraftPrompt = resolution.plan.draftPrompt ?? null
       }
       const isClaudeLaunch = !args.connectionId && isClaudeLaunchCommand(args.command)
       if (isClaudeLaunch && isClaudeAuthSwitchInProgress()) {
@@ -4515,7 +4635,34 @@ export function registerPtyHandlers(
         }
         // Why: the PTY is registered — move the admission reservation to a
         // retained handoff so reconciliation can identify the surviving terminal.
-        settleAgentLaunch('registered')
+        // A resolved fresh launch that the provider satisfied by REATTACHING an
+        // existing process (daemon-retry race, or u3's cold-restore one-shot
+        // miss-fallback preamble whose reattach HIT) never exec'd `args.command`:
+        // release its admission token instead of retaining it (no new capacity is
+        // consumed — the process was already admitted at its original spawn) and
+        // suppress its launch outcome below. An in-band 'launched' receipt for a
+        // reattach would lie (receipt-cannot-lie).
+        settleAgentLaunch(result.isReattach ? 'failed' : 'registered')
+        // Register this fresh agent launch's private resume attribution (§577):
+        // the immutable snapshot + token, keyed by launch token, so a later resume
+        // finds it once the agent's hook binds a provider session. A reattach is
+        // not a fresh launch, so it is skipped.
+        if (
+          agentLaunchToken &&
+          !result.isReattach &&
+          agentLaunchOutcome?.status === 'launched' &&
+          typeof args.worktreeId === 'string'
+        ) {
+          registerHostSessionLaunch({
+            boundary: getHostAgentLaunchBoundary(),
+            store: getHostAgentSessionRecordStore(),
+            launchToken: agentLaunchToken,
+            worktreeId: args.worktreeId,
+            receipt: agentLaunchOutcome.receipt,
+            ...(rememberedPaneKey ? { paneKey: rememberedPaneKey } : {}),
+            terminalId: result.id
+          })
+        }
         const response = {
           ...result,
           ...(!result.isReattach && effectiveLaunchConfig
@@ -4524,9 +4671,18 @@ export function registerPtyHandlers(
           // Why: a daemon-retry race can surface isReattach even for a minted
           // session id, and a reattach must never claim its cwd was remapped.
           ...(startupCwdFallback && !result.isReattach ? { startupCwdFallback } : {}),
-          ...(agentLaunchOutcome ? { agentLaunch: agentLaunchOutcome } : {}),
-          ...(agentLaunchFollowupPrompt ? { followupPrompt: agentLaunchFollowupPrompt } : {}),
-          ...(agentLaunchDraftPrompt ? { draftPrompt: agentLaunchDraftPrompt } : {})
+          // Why: a reattach never exec'd the resolved launch, so its outcome and
+          // the fresh-launch prompts are suppressed — a 'launched' receipt would
+          // lie, and pasting a plan prompt into an already-running reattached
+          // session would double-deliver. A miss-fallback that exec'd fresh is not
+          // a reattach and keeps all three.
+          ...(agentLaunchOutcome && !result.isReattach ? { agentLaunch: agentLaunchOutcome } : {}),
+          ...(agentLaunchFollowupPrompt && !result.isReattach
+            ? { followupPrompt: agentLaunchFollowupPrompt }
+            : {}),
+          ...(agentLaunchDraftPrompt && !result.isReattach
+            ? { draftPrompt: agentLaunchDraftPrompt }
+            : {})
         }
         return resolvePaneSpawnReservation(reservationPaneKey, paneSpawnReservation, response)
       } catch (err) {
@@ -4539,6 +4695,11 @@ export function registerPtyHandlers(
         // Why: a spawn/persist/post-spawn failure releases the launch admission
         // reservation (no terminal survives to reconcile).
         settleAgentLaunch('failed')
+        // Drop any private resume attribution staged for this launch so a failed
+        // spawn strands no record (no-op if register was not reached).
+        if (agentLaunchToken) {
+          getHostAgentSessionRecordStore().rollbackByToken(agentLaunchToken)
+        }
         rejectPaneSpawnReservation(reservationPaneKey, paneSpawnReservation, err)
         throw err
       }

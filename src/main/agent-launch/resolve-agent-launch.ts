@@ -7,13 +7,14 @@ import type { GlobalSettings } from '../../shared/types'
 import { TUI_AGENT_CONFIG } from '../../shared/tui-agent-config'
 import { resolveStartupShell, CMD_UNENCODABLE_CHAR_RE } from '../../shared/tui-agent-startup-shell'
 import type { AgentStartupShell } from '../../shared/tui-agent-startup-shell'
+import { getAgentResumeArgv, isResumableTuiAgent } from '../../shared/agent-session-resume'
 import type { AgentCatalog } from '../../shared/agent-catalog-normalization'
 import type {
   AgentLaunchResolution,
   AgentLaunchSnapshot,
   ResolveAgentLaunchRequest
 } from '../../shared/agent-launch-host-contract'
-import type { AgentLaunchRequestError } from '../../shared/agent-launch-contract'
+import type { AgentLaunchNotice, AgentLaunchRequestError } from '../../shared/agent-launch-contract'
 import { resolveSelection } from './resolve-agent-selection'
 import { buildLaunchContext } from './resolve-agent-launch-context'
 import { assembleCommand } from './resolve-agent-command'
@@ -21,6 +22,10 @@ import { prepareVariableValues } from './resolve-agent-variables'
 import { clientOfIntent } from './resolve-agent-env-admission'
 import { checkCommandTooLong, checkEnvPayloadTooLarge } from './agent-launch-payload-caps'
 import { buildResolvedLaunch, type LaunchTarget } from './resolve-agent-launch-result'
+import {
+  resolveMobileRemoveOnlyReplayEnv,
+  snapshotDefinitionChangedNotice
+} from './resolve-agent-launch-snapshot-comparison'
 
 export type ResolveAgentLaunchOutcome =
   | AgentLaunchResolution
@@ -68,11 +73,13 @@ function targetMatchesSnapshot(target: LaunchTarget, snapshot: AgentLaunchSnapsh
 }
 
 /** Replay a validated snapshot: argv/env come from the immutable snapshot, not
- *  the current definition (U5 owns the definition-changed comparison). Fails
- *  closed on identity/target mismatch. */
+ *  the current definition. Fails closed on identity/target mismatch, and carries
+ *  `snapshot_definition_changed` when the current effective definition drifted.  */
 function replayFromSnapshot(
   request: ResolveAgentLaunchRequest,
-  target: LaunchTarget
+  target: LaunchTarget,
+  catalog: AgentCatalog,
+  settings: GlobalSettings
 ): ResolveAgentLaunchOutcome {
   const snapshot = request.persistedSnapshot
   if (!snapshot) {
@@ -84,9 +91,30 @@ function replayFromSnapshot(
   if (!targetMatchesSnapshot(target, snapshot)) {
     return { ok: false, failure: { code: 'invalid_launch_snapshot' } }
   }
+  const client = clientOfIntent(request.intent)
+  const comparisonInput = {
+    snapshot,
+    catalog,
+    settings,
+    target,
+    client,
+    variables: request.variables,
+    targetHomePath: request.targetHomePath ?? null
+  }
   const env = Object.create(null) as Record<string, string>
-  for (const key of Object.keys(snapshot.agentEnv)) {
-    env[key] = snapshot.agentEnv[key]
+  let envWithheld = false
+  if (client === 'mobile' || client === 'paired-web') {
+    // Remove-only replay (§581): withhold any captured entry the current live
+    // definition no longer authorizes (opt-out, removed key, rotated value,
+    // deleted def) — never substitute current values or add new ones.
+    const replayEnv = resolveMobileRemoveOnlyReplayEnv(comparisonInput)
+    Object.assign(env, replayEnv.env)
+    envWithheld = replayEnv.withheld
+  } else {
+    // Desktop/host replay copies the captured env unchanged.
+    for (const key of Object.keys(snapshot.agentEnv)) {
+      env[key] = snapshot.agentEnv[key]
+    }
   }
   // Confidential transport is a current gate that constrains replay: captured
   // env never crosses hosts on an authenticated-but-plaintext channel.
@@ -100,6 +128,31 @@ function replayFromSnapshot(
       }
     }
   }
+  // Append the provider resume flags to the replayed base argv, derived from the
+  // record's session (never persisted in the snapshot). A resume against a
+  // non-resumable base or a session whose key type does not match the base cannot
+  // produce a valid resume command, so it invalidates the replay.
+  let resumeArgvSuffix: readonly string[] | undefined
+  if (request.resumeProviderSession) {
+    if (!isResumableTuiAgent(snapshot.baseAgent)) {
+      return { ok: false, failure: { code: 'invalid_launch_snapshot' } }
+    }
+    const resumeArgv = getAgentResumeArgv(snapshot.baseAgent, request.resumeProviderSession)
+    if (!resumeArgv) {
+      return { ok: false, failure: { code: 'invalid_launch_snapshot' } }
+    }
+    resumeArgvSuffix = resumeArgv.slice(1)
+  }
+  const definitionNotice = snapshotDefinitionChangedNotice(comparisonInput)
+  const notices: AgentLaunchNotice[] = []
+  if (definitionNotice) {
+    notices.push(definitionNotice)
+  }
+  if (envWithheld) {
+    // One generic notice for any mobile/paired remove-only withholding; it names
+    // no keys/values (secrets rule).
+    notices.push({ code: 'env_withheld', label: snapshot.displayLabel })
+  }
   return {
     ok: true,
     launch: buildResolvedLaunch({
@@ -108,15 +161,16 @@ function replayFromSnapshot(
       baseAgent: snapshot.baseAgent,
       displayLabel: snapshot.displayLabel,
       argv: [...snapshot.argv] as unknown as typeof snapshot.argv,
+      ...(resumeArgvSuffix ? { resumeArgvSuffix } : {}),
       env,
       envPolicy: Object.keys(env).length > 0 ? 'full' : 'none',
       referenced: [],
       values: { repoPath: null, worktreePath: null },
-      notices: [],
+      notices,
       target,
       targetHomePath: request.targetHomePath ?? null,
       intentKind: request.intent.kind,
-      client: clientOfIntent(request.intent),
+      client,
       config: TUI_AGENT_CONFIG[snapshot.baseAgent],
       basis: 'snapshot',
       definitionDigestSource: { replaySnapshot: snapshot.argv },
@@ -142,7 +196,7 @@ export function resolveAgentLaunch(
   const target = deriveTarget(request)
 
   if (selection.decision.launch === 'replay-snapshot') {
-    return replayFromSnapshot(request, target)
+    return replayFromSnapshot(request, target, catalog, settings)
   }
 
   const client = clientOfIntent(request.intent)

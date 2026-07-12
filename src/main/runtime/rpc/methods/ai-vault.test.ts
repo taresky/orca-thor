@@ -226,3 +226,67 @@ describe('aiVault.listSessions handler + shared cache', () => {
     expect(options.additionalCodexSessionsDirs).toContain('/ctor/codex/home/sessions')
   })
 })
+
+describe('aiVault.resumeCommand handler', () => {
+  beforeEach(() => {
+    resetAiVaultSessionListCacheForTests()
+    scanAiVaultSessions.mockReset()
+    scanAiVaultSessions.mockResolvedValue({
+      sessions: [makeSession()],
+      issues: [],
+      scannedAt: SCANNED_AT
+    })
+  })
+
+  afterEach(() => {
+    resetAiVaultSessionListCacheForTests()
+  })
+
+  function realRuntimeDispatcher(): RpcDispatcher {
+    // Why: use the real runtime so the RPC → resolveAiVaultResumeCommand → shared
+    // scan wiring is exercised end-to-end, not a hand-rolled stub.
+    const runtime = new OrcaRuntimeService(null, undefined, {})
+    return new RpcDispatcher({ runtime, methods: AI_VAULT_METHODS })
+  }
+
+  it('re-validates the echoed entry and returns the assembled command', async () => {
+    const response = (await realRuntimeDispatcher().dispatch(
+      makeRequest('aiVault.resumeCommand', {
+        entry: { executionHostId: 'local', agent: 'claude', sessionId: 'sess-1' }
+      })
+    )) as { ok: boolean; result: { status: string; command?: string } }
+    expect(response.ok).toBe(true)
+    expect(response.result.status).toBe('ok')
+    expect(response.result.command).toContain('sess-1')
+  })
+
+  it('fails closed when the host did not discover the echoed entry', async () => {
+    const response = (await realRuntimeDispatcher().dispatch(
+      makeRequest('aiVault.resumeCommand', {
+        entry: { executionHostId: 'local', agent: 'claude', sessionId: 'ghost' }
+      })
+    )) as { ok: boolean; result: { status: string; failure?: { code: string } } }
+    expect(response.ok).toBe(true)
+    expect(response.result).toEqual({
+      status: 'failed',
+      failure: { code: 'invalid_launch_snapshot' }
+    })
+  })
+
+  it('ignores a client-supplied filePath and re-derives from the discovered entry', async () => {
+    // The untrusted RPC surface must not let a client point resume at an
+    // arbitrary path; the host uses its own discovered session identity.
+    const response = (await realRuntimeDispatcher().dispatch(
+      makeRequest('aiVault.resumeCommand', {
+        entry: {
+          executionHostId: 'local',
+          agent: 'claude',
+          sessionId: 'sess-1',
+          filePath: '/attacker/controlled.jsonl'
+        }
+      })
+    )) as { ok: boolean; result: { status: string; command?: string } }
+    expect(response.result.status).toBe('ok')
+    expect(response.result.command).not.toContain('/attacker/controlled.jsonl')
+  })
+})

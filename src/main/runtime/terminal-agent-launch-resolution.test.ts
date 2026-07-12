@@ -7,6 +7,7 @@ import {
   resolveTerminalAgentLaunch,
   type TerminalAgentLaunchDeps
 } from './terminal-agent-launch-resolution'
+import { AgentSessionRecordStore } from '../agent-launch/agent-session-record-store'
 import { AgentLaunchBoundary } from '../agent-launch/agent-launch-boundary'
 import {
   AgentLaunchAdmissionStore,
@@ -31,6 +32,7 @@ function makeSnapshot(): AgentLaunchSnapshot {
     mode: 'built-in',
     argv: ['/opt/resolved-claude', '--tui'],
     agentEnv: {},
+    capturedEnvPolicy: 'none',
     target: {
       platform: 'linux',
       execution: 'native',
@@ -83,6 +85,7 @@ function makeDeps(
     detectStockBaseAgents: vi.fn(async () => ['claude']),
     resolveTargetHomePath: vi.fn(async () => '/home/dev'),
     markWorkspaceTrusted: vi.fn(),
+    sessionRecordStore: new AgentSessionRecordStore(),
     resolve: (request) => resolve(request),
     ...overrides
   }
@@ -173,5 +176,56 @@ describe('resolveTerminalAgentLaunch', () => {
       kind: 'failed',
       outcome: { status: 'rejected', requestError: { code: 'untrusted_reference' } }
     })
+  })
+})
+
+describe('resolveTerminalAgentLaunch resume/fork', () => {
+  const KEY = { worktreeId: 'wt-1', baseAgent: 'claude' as const, providerSessionId: 'sess-1' }
+
+  function storeWithRecord(): AgentSessionRecordStore {
+    const store = new AgentSessionRecordStore()
+    store.register({
+      paneKey: 'pane-a',
+      terminalId: 'term-a',
+      worktreeId: 'wt-1',
+      requestedAgent: 'claude',
+      baseAgent: 'claude',
+      launchSnapshot: makeSnapshot(),
+      launchToken: 'token-a'
+    })
+    store.bindProviderSessionByToken('token-a', { key: 'session_id', id: 'sess-1' })
+    return store
+  }
+
+  it('feeds the loaded record snapshot + session into the resolver as a resume intent', async () => {
+    let captured: ResolveAgentLaunchRequest | null = null
+    const resolve = (request: ResolveAgentLaunchRequest): ResolveAgentLaunchOutcome => {
+      captured = request
+      return { ok: true as const, launch: makeLaunch() }
+    }
+    const deps = makeDeps(resolve, { sessionRecordStore: storeWithRecord() })
+    const result = await resolveTerminalAgentLaunch(deps, {
+      ...makeArgs('mobile'),
+      request: { resume: { operation: 'resume', sessionKey: KEY } }
+    })
+    expect(result.kind).toBe('resolved')
+    expect(captured!.intent).toEqual({ kind: 'resume', operation: 'resume', client: 'mobile' })
+    expect(captured!.persistedSnapshot).toEqual(makeSnapshot())
+    expect(captured!.resumeProviderSession).toEqual({ key: 'session_id', id: 'sess-1' })
+  })
+
+  it('fails invalid_launch_snapshot for an unknown session key without resolving', async () => {
+    const resolve = vi.fn(() => ({ ok: true as const, launch: makeLaunch() }))
+    const deps = makeDeps(resolve, { sessionRecordStore: new AgentSessionRecordStore() })
+    const result = await resolveTerminalAgentLaunch(deps, {
+      ...makeArgs('mobile'),
+      request: { resume: { operation: 'resume', sessionKey: KEY } }
+    })
+    expect(result).toEqual({
+      kind: 'failed',
+      outcome: { status: 'failed', failure: { code: 'invalid_launch_snapshot' } }
+    })
+    // No record → the resolver was never invoked.
+    expect(resolve).not.toHaveBeenCalled()
   })
 })

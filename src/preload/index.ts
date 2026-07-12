@@ -16,7 +16,10 @@ import type { TerminalPaneSplitSource } from '../shared/feature-education-teleme
 import type { ProjectExecutionRuntimeResolution } from '../shared/project-execution-runtime'
 import type { StartupCommandDelivery } from '../shared/codex-startup-delivery'
 import type { SleepingAgentLaunchConfig } from '../shared/agent-session-resume'
-import type { AgentLaunchSpawnRequest } from '../shared/agent-launch-spawn-request'
+import type {
+  AgentLaunchInput,
+  AgentLaunchVaultResumeEntry
+} from '../shared/agent-launch-spawn-request'
 import type {
   BaseRefSearchResult,
   BaseRefDefaultResult,
@@ -810,7 +813,11 @@ const api = {
       launchConfig?: SleepingAgentLaunchConfig
       launchToken?: string
       launchAgent?: TuiAgent
-      agentLaunch?: AgentLaunchSpawnRequest
+      agentLaunch?: AgentLaunchInput
+      // Why: one-release legacy handoff — a pre-U5 sleeping record surrenders
+      // its recorded execution owner alongside `launchConfig` so the host can
+      // prove the opaque legacy command still targets the same host.
+      legacyResumeRecordedConnectionId?: string | null
       startupCommandDelivery?: StartupCommandDelivery
       connectionId?: string | null
       worktreeId?: string
@@ -3869,6 +3876,8 @@ const api = {
       ipcRenderer.invoke('aiVault:listSessions', args),
     listSubagentSessions: (args: AiVaultSubagentListArgs): Promise<unknown> =>
       ipcRenderer.invoke('aiVault:listSubagentSessions', args),
+    resumeCommand: (entry: AgentLaunchVaultResumeEntry): Promise<unknown> =>
+      ipcRenderer.invoke('aiVault:resumeCommand', entry),
     onWindowFocused: (callback: () => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent) => callback()
       ipcRenderer.on('aiVault:windowFocused', listener)

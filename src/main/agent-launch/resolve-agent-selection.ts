@@ -89,7 +89,7 @@ function autoPickBuiltIn(
   return null
 }
 
-type RequestedState =
+export type RequestedState =
   | { state: 'enabled-built-in'; base: BuiltInTuiAgent }
   | { state: 'disabled-built-in'; base: BuiltInTuiAgent }
   | { state: 'enabled-custom'; agent: TuiAgent; base: BuiltInTuiAgent }
@@ -99,7 +99,7 @@ type RequestedState =
   | { state: 'missing-no-tombstone'; agent: TuiAgent }
   | { state: 'base-disabled'; agent: TuiAgent; base: BuiltInTuiAgent }
 
-function classifyRequestedState(agent: TuiAgent, catalog: AgentCatalog): RequestedState {
+export function classifyRequestedState(agent: TuiAgent, catalog: AgentCatalog): RequestedState {
   if (isBuiltInTuiAgent(agent)) {
     return catalog.disabledAgents.has(agent)
       ? { state: 'disabled-built-in', base: agent }

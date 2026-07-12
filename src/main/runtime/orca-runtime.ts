@@ -676,6 +676,8 @@ import { getHostAgentLaunchBoundary } from '../agent-launch/agent-launch-boundar
 import { buildPendingAgentLaunchSummary } from '../agent-launch/agent-launch-pending-summary-host'
 import type { PendingAgentLaunchSummary } from '../../shared/agent-launch-pending-summary'
 import { getHostAgentLaunchOperationStore } from '../agent-launch/agent-launch-operation-store-host'
+import { getHostAgentSessionRecordStore } from '../agent-launch/agent-session-record-store-host'
+import { registerHostSessionLaunch } from '../agent-launch/agent-session-launch-registration'
 import type { AgentLaunchHostDescriptor } from '../agent-launch/agent-launch-host-state'
 import {
   platformForDescriptor,
@@ -752,7 +754,15 @@ export type LocalWorktreeCreateAgentLaunchFinished = {
   wrappedSetupCommand?: string
   startupTerminal?: CreatedWorktreeResult['startupTerminal']
 }
-import type { AgentLaunchSpawnRequest } from '../../shared/agent-launch-spawn-request'
+import type {
+  AgentLaunchInput,
+  AgentLaunchSpawnRequest,
+  AgentLaunchVaultResumeEntry
+} from '../../shared/agent-launch-spawn-request'
+import {
+  resolveVaultResumeCopyCommand,
+  type VaultResumeCopyResult
+} from '../agent-launch/agent-launch-vault-resume'
 import type {
   AgentLaunchFailure,
   AgentLaunchNoticeCode,
@@ -1141,7 +1151,8 @@ type TerminalCreateOptions = {
   // U3: when present, the host resolves the launch from its own state and IGNORES
   // any client command/env/launchConfig/launchAgent above. clientKind is the
   // authenticated RPC scope (undefined = in-process desktop), never client JSON.
-  agentLaunch?: AgentLaunchSpawnRequest
+  // A resume/fork variant names only a session key; the host loads the record.
+  agentLaunch?: AgentLaunchInput
   clientKind?: AuthenticatedClientKind
   startupCommandDelivery?: WorktreeStartupLaunch['startupCommandDelivery']
   telemetry?: WorktreeStartupLaunch['telemetry']
@@ -1187,7 +1198,7 @@ type MobileSessionTerminalCreateOptions = {
   agent?: TuiAgent
   launchConfig?: SleepingAgentLaunchConfig
   launchAgent?: TuiAgent
-  agentLaunch?: AgentLaunchSpawnRequest
+  agentLaunch?: AgentLaunchInput
   clientKind?: AuthenticatedClientKind
   activate?: boolean
   clientMutationId?: string
@@ -3203,6 +3214,25 @@ export class OrcaRuntimeService {
   // cache so the desktop panel and the mobile screen never double-scan.
   listAiVaultSessions(args?: AiVaultListArgs): Promise<AiVaultListResult> {
     return listAiVaultSessions(args)
+  }
+
+  // Host-owned 'copy' vault-resume (U5): the client echoes a discovered entry's
+  // identity and the runtime re-validates it against its OWN fresh local scan
+  // (correct by construction — a remote/SSH runtime scans its own disk) before
+  // assembling the copyable resume command. An entry the host did not itself
+  // discover is an in-band invalid_launch_snapshot, never a substituted command.
+  async resolveAiVaultResumeCommand(
+    entry: AgentLaunchVaultResumeEntry
+  ): Promise<VaultResumeCopyResult> {
+    // Force a fresh scan with a high limit so a deleted session cannot replay
+    // from stale cache and an older target still surfaces past the recency cap.
+    const discovered = await this.listAiVaultSessions({ limit: 2000, force: true })
+    return resolveVaultResumeCopyCommand({
+      entry,
+      sessions: discovered.sessions,
+      hostPlatform: process.platform,
+      settings: this.store?.getSettings?.()
+    })
   }
 
   setPtyController(controller: RuntimePtyController | null): void {
@@ -15339,6 +15369,16 @@ export class OrcaRuntimeService {
             // ledger holds no token by design. Local-git creations reach that
             // path too, so this must match the other two spawn sites.
             getHostAgentLaunchOperationStore().recordRegisteredReceipt(terminal.handle, receipt)
+            // Stage the private resume attribution for this worktree-create agent.
+            registerHostSessionLaunch({
+              boundary: getHostAgentLaunchBoundary(),
+              store: getHostAgentSessionRecordStore(),
+              launchToken: receipt.launchToken,
+              worktreeId: worktree.id,
+              receipt,
+              ...(terminal.paneKey ? { paneKey: terminal.paneKey } : {}),
+              terminalId: terminal.handle
+            })
             this.deliverWorktreeAgentLaunchPrompt(terminal.handle, plan, receipt)
             return { terminalId: terminal.handle }
           }
@@ -17822,6 +17862,17 @@ export class OrcaRuntimeService {
     // Main-private terminal -> receipt attribution so a settled `launched` retry
     // replay can reissue the client-safe receipt without the ledger holding a token.
     getHostAgentLaunchOperationStore().recordRegisteredReceipt(terminal.handle, receipt)
+    // Stage the private resume attribution so a slept worktree-create agent resumes
+    // by ownership key once its provider hook binds (§577). Runs mid-spawn (before
+    // the transaction settles the token), so the helper reads the pending snapshot.
+    registerHostSessionLaunch({
+      boundary: getHostAgentLaunchBoundary(),
+      store: getHostAgentSessionRecordStore(),
+      launchToken: receipt.launchToken,
+      worktreeId,
+      receipt,
+      terminalId: terminal.handle
+    })
     this.deliverWorktreeAgentLaunchPrompt(terminal.handle, plan, receipt)
     return { terminalId: terminal.handle }
   }
@@ -17932,6 +17983,15 @@ export class OrcaRuntimeService {
           // registered PTY, so a settled `launched` retry replay can reissue the
           // client-safe receipt without the ledger ever holding a token.
           getHostAgentLaunchOperationStore().recordRegisteredReceipt(terminal.handle, receipt)
+          // Stage the private resume attribution for this worktree-create agent.
+          registerHostSessionLaunch({
+            boundary: getHostAgentLaunchBoundary(),
+            store: getHostAgentSessionRecordStore(),
+            launchToken: receipt.launchToken,
+            worktreeId,
+            receipt,
+            terminalId: terminal.handle
+          })
           this.deliverWorktreeAgentLaunchPrompt(terminal.handle, plan, receipt)
           return { terminalId: terminal.handle }
         }
@@ -17952,7 +18012,7 @@ export class OrcaRuntimeService {
    *  hook (driven by the resolved base agent's preflightTrust preset). */
   private async resolveWorkspaceAgentLaunch(
     workspace: TerminalWorkspaceLaunchScope,
-    request: AgentLaunchSpawnRequest,
+    request: AgentLaunchInput,
     clientKind: AuthenticatedClientKind
   ): Promise<TerminalAgentLaunchResolution> {
     return resolveTerminalAgentLaunch(
@@ -17962,6 +18022,7 @@ export class OrcaRuntimeService {
         getCatalogRevision: () => this.requireStore().getSettings().agentCatalogRevision ?? 1,
         detectStockBaseAgents: (descriptor) => this.detectStockBaseAgentsForDescriptor(descriptor),
         resolveTargetHomePath: (descriptor) => this.resolveTargetHomeForDescriptor(descriptor),
+        sessionRecordStore: getHostAgentSessionRecordStore(),
         markWorkspaceTrusted: async (launch) => {
           if (workspace.connectionId) {
             await this.markRemoteWorkspaceTrustedForAgent(
@@ -18121,7 +18182,7 @@ export class OrcaRuntimeService {
   // arm; every other (legacy) call keeps the pure RuntimeTerminalCreate result.
   async createTerminal(
     worktreeSelector: string | undefined,
-    opts: TerminalCreateOptions & { agentLaunch: AgentLaunchSpawnRequest }
+    opts: TerminalCreateOptions & { agentLaunch: AgentLaunchInput }
   ): Promise<RuntimeTerminalCreate | RuntimeTerminalCreateAgentLaunchFailure>
   async createTerminal(
     worktreeSelector?: string,
@@ -18355,6 +18416,19 @@ export class OrcaRuntimeService {
       // PTY spawned and registered: retain the admission handoff record.
       if (agentLaunchAdmissionToken !== null) {
         getHostAgentLaunchBoundary().settleAgentLaunch(agentLaunchAdmissionToken, 'registered')
+        // Stage the private resume attribution so a slept paired-web session
+        // resumes by ownership key once its provider hook binds (§577).
+        if (agentLaunchReceipt) {
+          registerHostSessionLaunch({
+            boundary: getHostAgentLaunchBoundary(),
+            store: getHostAgentSessionRecordStore(),
+            launchToken: agentLaunchAdmissionToken,
+            worktreeId: workspace.id,
+            receipt: agentLaunchReceipt,
+            ...(paneKey ? { paneKey } : {}),
+            terminalId: result.id
+          })
+        }
       }
       return {
         handle,
@@ -18450,6 +18524,19 @@ export class OrcaRuntimeService {
     // populates this.leaves may not have arrived yet. Wait for the leaf to
     // appear so we can return a valid handle the caller can use right away.
     const handle = await this.waitForTerminalHandle(reply.tabId)
+    // The launch was resolved main-side and the renderer spawned the PTY from the
+    // pre-resolved command (no client agentLaunch), so pty.ts does not register
+    // this one — stage its private resume attribution here (§577).
+    if (rendererAdmissionToken !== null && rendererReceipt && worktreeId) {
+      registerHostSessionLaunch({
+        boundary: getHostAgentLaunchBoundary(),
+        store: getHostAgentSessionRecordStore(),
+        launchToken: rendererAdmissionToken,
+        worktreeId,
+        receipt: rendererReceipt,
+        terminalId: handle
+      })
+    }
     return {
       handle,
       tabId: reply.tabId,
@@ -18492,7 +18579,7 @@ export class OrcaRuntimeService {
   // call keeps the pure RuntimeMobileSessionCreateTerminalResult.
   createMobileSessionTerminal(
     worktreeSelector: string,
-    opts: MobileSessionTerminalCreateOptions & { agentLaunch: AgentLaunchSpawnRequest }
+    opts: MobileSessionTerminalCreateOptions & { agentLaunch: AgentLaunchInput }
   ): Promise<
     RuntimeMobileSessionCreateTerminalResult | RuntimeMobileSessionCreateTerminalAgentLaunchFailure
   >
@@ -18578,6 +18665,18 @@ export class OrcaRuntimeService {
     }
     if (mobileAdmissionToken !== null) {
       getHostAgentLaunchBoundary().settleAgentLaunch(mobileAdmissionToken, 'registered')
+      // Stage the private resume attribution so a slept mobile session resumes by
+      // ownership key once its provider hook binds (§577).
+      if (mobileReceipt) {
+        registerHostSessionLaunch({
+          boundary: getHostAgentLaunchBoundary(),
+          store: getHostAgentSessionRecordStore(),
+          launchToken: mobileAdmissionToken,
+          worktreeId,
+          receipt: mobileReceipt,
+          terminalId: mobileCreated.tab.id
+        })
+      }
     }
     return mobileReceipt
       ? { ...mobileCreated, agentLaunch: { status: 'launched' as const, receipt: mobileReceipt } }

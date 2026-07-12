@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { isBuiltInTuiAgent } from '../../../../shared/tui-agent-config'
 import type { BuiltInTuiAgent } from '../../../../shared/types'
 import { sleepingAgentLaunchConfigSchema } from '../../../../shared/workspace-session-sleeping-agents'
-import { AgentLaunchSpawnRequestSchema } from './agent-launch-spawn-schema'
+import { AgentLaunchInputSchema } from './agent-launch-spawn-schema'
 import { agentLaunchNoticeCodeSchema } from '../../../../shared/agent-launch-notice-schema'
 import { OptionalBoolean } from '../schemas'
 
@@ -146,7 +146,7 @@ export const CreateTerminalTab = WorktreeTabSelector.extend({
     })
     .optional(),
   // Sanctioned host-resolved launch path; the only field that admits a custom id.
-  agentLaunch: AgentLaunchSpawnRequestSchema.optional(),
+  agentLaunch: AgentLaunchInputSchema.optional(),
   activate: z.boolean().optional(),
   // Why: idempotency key so a retried create (double-tap, reconnect replay)
   // returns the in-flight operation instead of spawning a duplicate terminal.

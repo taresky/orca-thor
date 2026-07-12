@@ -2,10 +2,16 @@ import { describe, expect, it, vi } from 'vitest'
 import type { AppState } from '@/store/types'
 import { buildAiVaultResumeCommand } from '../../../shared/ai-vault-types'
 import {
-  buildAiVaultResumeCommandForWorktree,
   buildAiVaultResumeStartupForWorktree,
   getAiVaultResumePlatform
 } from './ai-vault-resume-command'
+
+// The production copy path is now host-owned (window.api.aiVault.resumeCommand);
+// these cases still assert the shared assembler's command output, which stays live
+// for the drag-drop payload and the web-runtime resume fallback.
+const buildAiVaultResumeCommandForWorktree = (
+  args: Parameters<typeof buildAiVaultResumeStartupForWorktree>[0]
+): string => buildAiVaultResumeStartupForWorktree(args).command
 
 vi.mock('@/lib/new-workspace', () => ({
   CLIENT_PLATFORM: 'win32'

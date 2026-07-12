@@ -50,8 +50,10 @@ import type { ProjectExecutionRuntimeResolution } from '../shared/project-execut
 import type { StartupCommandDelivery } from '../shared/codex-startup-delivery'
 import type { SleepingAgentLaunchConfig } from '../shared/agent-session-resume'
 import type {
+  AgentLaunchInput,
   AgentLaunchSpawnOutcome,
-  AgentLaunchSpawnRequest
+  AgentLaunchVaultResumeCopyResult,
+  AgentLaunchVaultResumeEntry
 } from '../shared/agent-launch-spawn-request'
 import type {
   AgentLaunchNoticeCode,
@@ -831,6 +833,9 @@ export type AiVaultApi = {
   listSessions: (args?: AiVaultListArgs) => Promise<AiVaultListResult>
   /** Lists the Task subagent transcripts of one session, on demand. */
   listSubagentSessions: (args: AiVaultSubagentListArgs) => Promise<AiVaultSubagentListResult>
+  /** Host-owned 'copy' vault-resume (U5): the client echoes a discovered entry's
+   *  identity and the host re-validates + assembles the copyable command string. */
+  resumeCommand: (entry: AgentLaunchVaultResumeEntry) => Promise<AgentLaunchVaultResumeCopyResult>
   /** Fires when any app window regains OS focus; returns an unsubscribe. */
   onWindowFocused: (callback: () => void) => () => void
 }
@@ -920,7 +925,9 @@ export type AppApi = {
 
 /** pty:spawn arguments. `agentLaunch` opts into host-resolved agent launch:
  *  when present the host resolves the launch itself and IGNORES any
- *  command/launchConfig/launchAgent/env, returning an AgentLaunchSpawnOutcome. */
+ *  command/launchConfig/launchAgent/env, returning an AgentLaunchSpawnOutcome.
+ *  Either a fresh identity+prompt selection or a provider-session resume/fork
+ *  by session key. */
 export type PtySpawnOptions = {
   cols: number
   rows: number
@@ -931,7 +938,12 @@ export type PtySpawnOptions = {
   launchConfig?: SleepingAgentLaunchConfig
   launchToken?: string
   launchAgent?: TuiAgent
-  agentLaunch?: AgentLaunchSpawnRequest
+  agentLaunch?: AgentLaunchInput
+  // Why: one-release legacy handoff — a pre-U5 sleeping record surrenders its
+  // recorded execution owner alongside `launchConfig` so the host can prove the
+  // opaque legacy command still targets the same host before replay. Deleted
+  // with the client launchConfig read once every record carries a v1 snapshot.
+  legacyResumeRecordedConnectionId?: string | null
   startupCommandDelivery?: StartupCommandDelivery
   connectionId?: string | null
   worktreeId?: string
@@ -1326,7 +1338,7 @@ export type PreloadApi = {
     // to a normal result, so existing callers keep the non-union result.
     spawn: {
       (
-        opts: PtySpawnOptions & { agentLaunch: AgentLaunchSpawnRequest }
+        opts: PtySpawnOptions & { agentLaunch: AgentLaunchInput }
       ): Promise<PtySpawnResult | PtySpawnAgentLaunchFailure>
       (opts: PtySpawnOptions): Promise<PtySpawnResult>
     }

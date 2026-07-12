@@ -36,25 +36,6 @@ export type AiVaultResumeStartup = {
   launchConfig?: SleepingAgentLaunchConfig
 }
 
-export function buildAiVaultResumeCommandForWorktree(args: {
-  state: Pick<
-    AppState,
-    | 'activeRepoId'
-    | 'activeWorktreeId'
-    | 'folderWorkspaces'
-    | 'projectGroups'
-    | 'projects'
-    | 'repos'
-    | 'settings'
-    | 'worktreesByRepo'
-  >
-  worktreeId?: string | null
-  session: AiVaultResumeCommandSession
-  commandOverride?: string | null
-}): string {
-  return buildAiVaultResumeStartupForWorktree(args).command
-}
-
 export function buildAiVaultResumeStartupForWorktree(args: {
   state: Pick<
     AppState,

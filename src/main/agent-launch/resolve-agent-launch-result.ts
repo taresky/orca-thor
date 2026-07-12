@@ -35,6 +35,9 @@ export type BuildResolvedLaunchParams = {
   baseAgent: BuiltInTuiAgent
   displayLabel: string
   argv: AgentArgv
+  /** Provider resume flags appended on a replay; excluded from the snapshot and
+   *  durable launch config. */
+  resumeArgvSuffix?: readonly string[]
   env: Record<string, string>
   envPolicy: 'full' | 'withheld' | 'none'
   referenced: readonly LaunchVariableName[]
@@ -91,6 +94,7 @@ export function buildResolvedLaunch(params: BuildResolvedLaunchParams): Resolved
     mode: params.mode,
     argv: [...params.argv] as unknown as AgentArgv,
     agentEnv: frozenEnv(params.env),
+    capturedEnvPolicy: params.envPolicy,
     target: {
       platform: target.platform,
       execution: target.execution,
@@ -138,6 +142,7 @@ export function buildResolvedLaunch(params: BuildResolvedLaunchParams): Resolved
     baseAgent: params.baseAgent,
     displayLabel: params.displayLabel,
     argv: snapshot.argv,
+    ...(params.resumeArgvSuffix ? { resumeArgvSuffix: params.resumeArgvSuffix } : {}),
     agentEnv: snapshot.agentEnv,
     variables: {
       values: { repoPath: params.values.repoPath, worktreePath: params.values.worktreePath },

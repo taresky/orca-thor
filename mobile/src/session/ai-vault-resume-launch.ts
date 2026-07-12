@@ -1,3 +1,8 @@
+// U5→U7 HOLD (byte-preserving): mobile vault resume still assembles the command
+// client-side. The host-owned vault-resume arm is not wired on the runtime
+// terminal-create SPAWN path (it fails closed pending a bypass resolution kind),
+// so flipping this now would fail closed — that wiring is ruled to U7, where the
+// landed ai-vault-resume-outcome resolver wires in alongside the flip.
 import type { AiVaultSession } from '../../../src/shared/ai-vault-types'
 import {
   buildAiVaultResumeCommand,

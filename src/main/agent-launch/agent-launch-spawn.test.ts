@@ -27,6 +27,7 @@ function makeSnapshot(): AgentLaunchSnapshot {
     mode: 'built-in',
     argv: ['/opt/resolved-claude', '--tui'],
     agentEnv: {},
+    capturedEnvPolicy: 'none',
     target: {
       platform: 'linux',
       execution: 'native',

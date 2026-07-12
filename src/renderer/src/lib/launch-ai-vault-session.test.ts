@@ -93,6 +93,54 @@ describe('launchAiVaultSessionInNewTab', () => {
     expect(result).toEqual({ tabId: 'tab-1', groupId: 'group-1' })
   })
 
+  it('queues the host-owned vault-resume arm with an empty command on desktop', () => {
+    launchAiVaultSessionInNewTab({
+      agent: 'claude',
+      worktreeId: 'wt-1',
+      targetGroupId: 'group-1',
+      command: '',
+      agentLaunch: {
+        vaultResume: {
+          operation: 'resume',
+          entry: {
+            executionHostId: 'local',
+            agent: 'claude',
+            sessionId: 'session-1',
+            filePath: '/vault/session-1.jsonl'
+          }
+        }
+      }
+    })
+
+    expect(mockQueueTabStartupCommand).toHaveBeenCalledWith('tab-1', {
+      command: '',
+      agentLaunch: {
+        vaultResume: {
+          operation: 'resume',
+          entry: {
+            executionHostId: 'local',
+            agent: 'claude',
+            sessionId: 'session-1',
+            filePath: '/vault/session-1.jsonl'
+          }
+        }
+      },
+      launchAgent: 'claude',
+      telemetry: {
+        agent_kind: 'claude',
+        launch_source: 'sidebar',
+        request_kind: 'resume'
+      }
+    })
+    // The host owns argv + env on this path; no client command/env/launchConfig rides.
+    const queued = mockQueueTabStartupCommand.mock.calls[0]?.[1] as {
+      env?: unknown
+      launchConfig?: unknown
+    }
+    expect(queued.env).toBeUndefined()
+    expect(queued.launchConfig).toBeUndefined()
+  })
+
   it('queues configured resume startup details for agent history resumes', () => {
     launchAiVaultSessionInNewTab({
       agent: 'claude',

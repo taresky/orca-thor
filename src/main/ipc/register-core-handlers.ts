@@ -188,7 +188,10 @@ export function registerCoreHandlers(
     getActiveRuntimeAiVaultHostInfos: () =>
       getSavedRuntimeAiVaultHostInfos(app.getPath('userData')),
     scanRuntimeAiVaultSessions: async (environmentId, args, options) =>
-      scanRuntimeAiVaultSessions(app.getPath('userData'), environmentId, args, options)
+      scanRuntimeAiVaultSessions(app.getPath('userData'), environmentId, args, options),
+    // Host settings for the copy-command assembly (cmd overrides, default
+    // args/env, Windows shell); the store owns the authoritative values.
+    getVaultResumeSettings: () => store.getSettings?.()
   })
   registerNativeChatHandlers()
   registerClipboardHandlers(store)

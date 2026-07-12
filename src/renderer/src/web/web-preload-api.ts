@@ -11,6 +11,10 @@ import type {
 } from '../../../preload/api-types'
 import type { RuntimeRpcResponse } from '../../../shared/runtime-rpc-envelope'
 import type { AiVaultListArgs, AiVaultListResult } from '../../../shared/ai-vault-types'
+import type {
+  AgentLaunchVaultResumeCopyResult,
+  AgentLaunchVaultResumeEntry
+} from '../../../shared/agent-launch-spawn-request'
 import { buildNativeChatUnsubscribe } from '../../../shared/native-chat-stream-unsubscribe'
 import type {
   ComputerUsePermissionSetupResult,
@@ -1229,6 +1233,17 @@ function createAiVaultApi(): NonNullable<Partial<PreloadApi>['aiVault']> {
     // transcript listing has no server-side method yet, so the browser client
     // reports an empty (not erroring) result.
     listSubagentSessions: () => Promise.resolve({ sessions: [], issues: [] }),
+    // Why: the browser client echoes only the entry's identity — never its
+    // filePath (trusted desktop IPC only). The paired server re-validates against
+    // its own scan and re-derives the transcript path before assembling.
+    resumeCommand: (entry: AgentLaunchVaultResumeEntry) =>
+      callRuntimeResult<AgentLaunchVaultResumeCopyResult>('aiVault.resumeCommand', {
+        entry: {
+          executionHostId: entry.executionHostId,
+          agent: entry.agent,
+          sessionId: entry.sessionId
+        }
+      }),
     onWindowFocused: () => noopUnsubscribe
   }
 }

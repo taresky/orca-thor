@@ -9885,6 +9885,7 @@
           },
           "AiVaultPanel": {
             "resumeCommandCopied": "Resume command copied",
+            "resumeSessionUnavailable": "This session can no longer be resumed.",
             "valueCopied": "{{value0}} copied",
             "valueCopyFailed": "Unable to copy {{value0}}",
             "openWorkspaceBeforeResuming": "Open a workspace before resuming a session.",

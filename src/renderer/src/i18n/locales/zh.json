@@ -9885,6 +9885,7 @@
           },
           "AiVaultPanel": {
             "resumeCommandCopied": "恢复命令已复制",
+            "resumeSessionUnavailable": "该会话已无法恢复。",
             "valueCopied": "{{value0}} 已复制",
             "valueCopyFailed": "无法复制 {{value0}}",
             "openWorkspaceBeforeResuming": "恢复会话前请先打开一个工作区。",

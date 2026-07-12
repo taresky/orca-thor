@@ -47,6 +47,7 @@ const snapshot: AgentLaunchSnapshot = {
   mode: 'built-in',
   argv: ['claude'],
   agentEnv: { SECRET_TOKEN: 'do-not-leak' },
+  capturedEnvPolicy: 'full',
   target: {
     platform: 'linux',
     execution: 'native',

@@ -12,6 +12,9 @@ import type {
   AgentLaunchReceipt,
   AgentLaunchRequestError
 } from './agent-launch-contract'
+import type { AgentSessionOwnershipKey } from './agent-session-resume'
+import type { AiVaultAgent } from './ai-vault-types'
+import type { ExecutionHostId } from './execution-host'
 
 /** Requested agent identity, or the host's stored default. A custom id is only
  *  admitted on THIS field, never the legacy launchAgent field. */
@@ -44,6 +47,64 @@ export type AgentLaunchSpawnRequest = {
   promptDelivery?: 'submit' | 'draft'
   sourceRecord?: AgentLaunchSourceRecord
 }
+
+/** Provider-session resume/fork variant, distinct from AgentLaunchSpawnRequest.
+ *  It names only the session ownership key: the host loads the private record
+ *  (snapshot/legacy config) and resolves the launch, ignoring any client prompt,
+ *  command, env, or launch config. `fork` copies the snapshot and appends the
+ *  provider resume argv once; its draft rides the returned draftPrompt into the
+ *  renderer paste writer. Unknown/ambiguous key → invalid_launch_snapshot.
+ *  Context forks are NOT this variant — they are a plain identity-only
+ *  AgentLaunchSpawnRequest carrying the scrollback as a 'draft' prompt. */
+export type AgentLaunchResumeRequest = {
+  resume: {
+    operation: 'resume' | 'fork'
+    sessionKey: AgentSessionOwnershipKey
+  }
+}
+
+/** AI Vault session resume/copy variant (U5 FULL PORT). The client echoes the
+ *  host listing's OWN discovered entry identity — it never authors locator data.
+ *  The host re-validates that identity against a FRESH `runtime.listAiVaultSessions`
+ *  discovery and rebuilds the resume command itself, bypassing the resolver like
+ *  legacy opaque replay (no admission token/receipt). An entry the host's own
+ *  fresh scan does not contain, or a field mismatch, is `invalid_launch_snapshot`.
+ *  `operation: 'resume'` rides pty:spawn/terminal-create and spawns a normal
+ *  terminal; `operation: 'copy'` never spawns — it is served by the host copy
+ *  method that returns the assembled command string as a display artifact (OMP's
+ *  only path). `filePath` is trusted desktop IPC only (OMP transcript path); every
+ *  runtime/paired RPC surface OMITS it and the host re-derives it from its own
+ *  fresh entry. */
+export type AgentLaunchVaultResumeEntry = {
+  executionHostId: ExecutionHostId
+  agent: AiVaultAgent
+  sessionId: string
+  filePath?: string
+}
+
+export type AgentLaunchVaultResumeRequest = {
+  vaultResume: {
+    operation: 'resume' | 'copy'
+    entry: AgentLaunchVaultResumeEntry
+  }
+}
+
+/** Host result of a 'copy' vault-resume (the non-spawning path). Carries only the
+ *  assembled command string as a clipboard/display artifact — never argv/env/
+ *  token. An entry the host's own fresh discovery does not contain is an in-band
+ *  invalid_launch_snapshot, mirroring the resume failure envelope. */
+export type AgentLaunchVaultResumeCopyResult =
+  | { status: 'ok'; command: string }
+  | { status: 'failed'; failure: { code: 'invalid_launch_snapshot' } }
+
+/** The agentLaunch input carried by pty:spawn / terminal-create: a fresh
+ *  selection-based launch, a provider-session resume/fork by session key, or an
+ *  AI Vault session resume. The host discriminates on the presence of `resume` /
+ *  `vaultResume`. */
+export type AgentLaunchInput =
+  | AgentLaunchSpawnRequest
+  | AgentLaunchResumeRequest
+  | AgentLaunchVaultResumeRequest
 
 /** Client-safe result of a host-resolved agent launch, returned alongside a
  *  spawn/terminal-create result. 'launched' carries only the receipt (never

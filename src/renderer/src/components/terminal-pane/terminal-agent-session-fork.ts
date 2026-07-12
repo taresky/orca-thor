@@ -285,16 +285,16 @@ export async function startAgentSessionFork(fork: PreparedAgentSessionFork): Pro
     worktreePath: created.worktree.path,
     projectRuntime: sourceProjectRuntime
   })
+  // Why: a context fork is identity + scrollback-as-draft, not a provider-session
+  // resume. It routes through the host `agentLaunch` boundary like every other
+  // new-tab launch; `promptDelivery: 'draft'` lands the captured context
+  // UNSUBMITTED so the user reviews before sending.
   const result = launchAgentInNewTab({
     agent: fork.agent,
     worktreeId: forkWorktreeId,
     prompt: fork.prompt,
     promptDelivery: 'draft',
     launchSource: 'terminal_context_menu',
-    // Why: fork replays a captured launch via draftPromptFlag native injection,
-    // which the host launch contract cannot express. Keep the legacy client-side
-    // assembly until fork migrates to host snapshot replay (U5).
-    legacyResumeAssembly: true,
     ...(launchPlatform ? { launchPlatform } : {})
   })
   activateAndRevealWorktree(forkWorktreeId, { sidebarRevealBehavior: 'auto' })

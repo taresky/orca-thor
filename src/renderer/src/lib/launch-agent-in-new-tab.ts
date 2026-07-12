@@ -56,13 +56,6 @@ export type LaunchAgentInNewTabArgs = {
   launchPlatform?: NodeJS.Platform
   /** Called after the prompt is actually delivered to the agent input path. */
   onPromptDelivered?: () => void
-  // Why: the U5-held session-fork caller replays a captured launch by assembling
-  // the command/launchConfig client-side (draftPromptFlag native injection is not
-  // expressible in the host launch contract). Until fork migrates to host
-  // snapshot replay (U5), it opts into the legacy assembly; every other caller
-  // routes identity + prompt through the host `agentLaunch` boundary. Delete this
-  // when fork migrates.
-  legacyResumeAssembly?: boolean
 }
 
 export type LaunchAgentInNewTabResult = {
@@ -105,8 +98,7 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
     launchSource,
     quickCommandLabel,
     launchPlatform,
-    onPromptDelivered,
-    legacyResumeAssembly
+    onPromptDelivered
   } = args
   const store = useAppStore.getState()
   const worktree = store.allWorktrees?.().find((entry: { id: string }) => entry.id === worktreeId)
@@ -224,15 +216,37 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
     return null
   }
 
+  // Why: the prompt rides `agentLaunch` only when it folds into the launch
+  // itself (argv/flag agents, native draft flag). Every post-ready paste path
+  // (submit-after-ready, oversized draft, stdin-after-start followup) launches
+  // bare and the renderer delivers the prompt below, so the request carries
+  // `allowEmptyPromptLaunch` instead. A native draft fold must stay UNSUBMITTED,
+  // so forward `promptDelivery: 'draft'` — without it the host defaults to
+  // submit and auto-sends the draft.
+  const promptFoldsIntoLaunch = pasteDraftAfterLaunch === null && hasPrompt
+  const agentLaunch: AgentLaunchSpawnRequest = {
+    selection: { kind: 'agent', agent },
+    ...(promptFoldsIntoLaunch
+      ? {
+          prompt: trimmedPrompt,
+          ...(promptDelivery === 'draft' ? { promptDelivery: 'draft' as const } : {})
+        }
+      : { allowEmptyPromptLaunch: true })
+  }
+
   const runtimeEnvironmentId = getRuntimeEnvironmentIdForWorktree(store, worktreeId)
   if (isWebRuntimeSessionActive(runtimeEnvironmentId) && pasteDraftAfterLaunch === null) {
+    // Why: route the paired-web launch through the same host `agentLaunch`
+    // boundary as the local path — the host owns command/config/token assembly,
+    // so the client never sends an assembled startup plan here (the last
+    // client-assembled launch on this surface).
     launchAgentInWebHostTab({
       agent,
       worktreeId,
       environmentId: runtimeEnvironmentId,
       groupId,
       hasPrompt,
-      startupPlan,
+      agentLaunch,
       onPromptDelivered
     })
     return { tabId: null, startupPlan, pasteDraftAfterLaunch: false }
@@ -260,30 +274,11 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
       )
     })
   })
-  // Why: the prompt rides `agentLaunch` only when it folds into the launch
-  // itself (argv/flag agents, non-paste path). Every paste path (submit-after-
-  // ready, draft, stdin-after-start followup) launches bare and the renderer
-  // delivers the prompt via post-ready bracketed paste below, so the request
-  // carries `allowEmptyPromptLaunch` instead.
-  const promptFoldsIntoLaunch = pasteDraftAfterLaunch === null && hasPrompt
-  const agentLaunch: AgentLaunchSpawnRequest = {
-    selection: { kind: 'agent', agent },
-    ...(promptFoldsIntoLaunch ? { prompt: trimmedPrompt } : { allowEmptyPromptLaunch: true })
-  }
   store.queueTabStartupCommand(tab.id, {
     // The host owns command/config/token assembly on the agentLaunch path; the
-    // fork caller still assembles client-side until it migrates (U5).
-    ...(legacyResumeAssembly
-      ? {
-          command: startupPlan.launchCommand,
-          ...(startupPlan.env ? { env: startupPlan.env } : {}),
-          launchConfig: startupPlan.launchConfig,
-          launchAgent: agent,
-          ...(startupPlan.startupCommandDelivery
-            ? { startupCommandDelivery: startupPlan.startupCommandDelivery }
-            : {})
-        }
-      : { command: '', agentLaunch }),
+    // client only names the requested identity and prompt/launch policy.
+    command: '',
+    agentLaunch,
     ...(agent === 'command-code' && hasPrompt && promptDelivery === 'auto-submit'
       ? { initialAgentStatus: { agent, prompt: trimmedPrompt } }
       : {}),

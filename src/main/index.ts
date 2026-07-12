@@ -158,6 +158,7 @@ import { createHeadlessAutomationOutputSnapshotBuffer } from './automations/head
 import { buildHeadlessAutomationWorktreeCreateArgs } from './automations/headless-workspace-create'
 import { AgentAwakeService } from './agent-awake-service'
 import { initHostAgentLaunchOperationStorePersistence } from './agent-launch/agent-launch-operation-store-persistence'
+import { initHostAgentSessionRecordStorePersistence } from './agent-launch/agent-session-record-store-persistence'
 import { registerSystemResumeBroadcast } from './system-resume-broadcast'
 import {
   getCrashBreadcrumbSnapshot,
@@ -1681,6 +1682,10 @@ app.whenReady().then(async () => {
   // that outlives a crash stays reconcilable by token. Runs before any launch
   // surface (IPC/runtime) can mutate the store.
   initHostAgentLaunchOperationStorePersistence(app.getPath('userData'))
+  // Rehydrate the host-private session resume records (immutable launch snapshots
+  // + legacy replay config, encrypted at rest) so a slept session survives a
+  // restart and resumes by its ownership key. Same lifecycle as the ledger above.
+  initHostAgentSessionRecordStorePersistence(app.getPath('userData'))
   // Why: must run before ClaudeRuntimeAuthService's constructor sync — a Claude
   // CLI that survived the restart inside the daemon still holds the current
   // single-use refresh token, and an unguarded early refresh would rotate it

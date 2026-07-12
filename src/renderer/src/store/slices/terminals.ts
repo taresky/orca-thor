@@ -42,7 +42,7 @@ import { getRepoIdFromWorktreeId, splitWorktreeId } from '../../../../shared/wor
 import { isWslUncPath } from '../../../../shared/wsl-paths'
 import type { ProjectExecutionRuntimeResolution } from '../../../../shared/project-execution-runtime'
 import type { StartupCommandDelivery } from '../../../../shared/codex-startup-delivery'
-import type { AgentLaunchSpawnRequest } from '../../../../shared/agent-launch-spawn-request'
+import type { AgentLaunchInput } from '../../../../shared/agent-launch-spawn-request'
 import { resolveLocalWindowsTerminalShellOverrideForTab } from '../../../../shared/local-windows-terminal-runtime'
 import { WINDOWS_GIT_BASH_SHELL } from '../../../../shared/windows-terminal-shell'
 import type { AgentStartedTelemetry } from '../../lib/worktree-activation'
@@ -488,16 +488,20 @@ export type TerminalSlice = {
     string,
     {
       command: string
-      // Host-owned launch request (identity + prompt); when set the fresh-agent
-      // path sends this and the host resolves the command and mints the token,
-      // superseding command/launchConfig/launchToken/launchAgent below.
-      agentLaunch?: AgentLaunchSpawnRequest
+      // Host-owned launch request; either a fresh identity+prompt selection or a
+      // provider-session resume/fork by session key. When set the host resolves
+      // the command and mints the token, superseding the
+      // command/launchConfig/launchToken/launchAgent/resumeProviderSession below.
+      agentLaunch?: AgentLaunchInput
       /** Renderer-delivered startup input for callers that need xterm paste
        *  semantics before the submit Enter. */
       delivery?: 'terminal-paste'
       startupCommandDelivery?: StartupCommandDelivery
       env?: Record<string, string>
       launchConfig?: SleepingAgentLaunchConfig
+      /** One-release legacy handoff: the recorded execution owner attached
+       *  alongside a pre-U5 record's `launchConfig` for host-side provenance. */
+      legacyResumeRecordedConnectionId?: string | null
       resumeProviderSession?: AgentProviderSessionMetadata
       launchToken?: string
       launchAgent?: TuiAgent
@@ -605,6 +609,11 @@ export type TerminalSlice = {
     options?: { replaceExistingGeneratedTitle?: boolean }
   ) => void
   clearTabLaunchAgent: (tabId: string) => void
+  /** Write-if-absent: record the requested launch identity on a tab that has
+   *  none yet. Used to backfill default-selection launches ({kind:'default'}
+   *  send no id) from the host receipt so a custom default's identity survives
+   *  to capture/resume; never overwrites a caller-set id. */
+  backfillTabLaunchAgent: (tabId: string, agent: TuiAgent) => void
   setRuntimePaneTitle: (tabId: string, paneId: number, title: string) => void
   clearRuntimePaneTitle: (tabId: string, paneId: number) => void
   /** Mark a tab as having unread activity (agent working→idle transition).
@@ -687,14 +696,19 @@ export type TerminalSlice = {
     tabId: string,
     startup: {
       command: string
-      // Host-owned launch request (identity + prompt); when set the fresh-agent
-      // path sends this and the host resolves the command and mints the token,
-      // superseding command/launchConfig/launchToken/launchAgent below.
-      agentLaunch?: AgentLaunchSpawnRequest
+      // Host-owned launch request; either a fresh identity+prompt selection or a
+      // provider-session resume/fork by session key. When set the host resolves
+      // the command and mints the token, superseding the
+      // command/launchConfig/launchToken/launchAgent/resumeProviderSession below.
+      agentLaunch?: AgentLaunchInput
       delivery?: 'terminal-paste'
       startupCommandDelivery?: StartupCommandDelivery
       env?: Record<string, string>
       launchConfig?: SleepingAgentLaunchConfig
+      // Why: one-release legacy handoff — attached only for a pre-U5 sleeping
+      // record so the host can prove its opaque `launchConfig` still targets the
+      // recorded execution owner before replay.
+      legacyResumeRecordedConnectionId?: string | null
       resumeProviderSession?: AgentProviderSessionMetadata
       launchToken?: string
       launchAgent?: TuiAgent
@@ -708,11 +722,12 @@ export type TerminalSlice = {
   consumeTabInitialCwd: (tabId: string) => string | null
   consumeTabStartupCommand: (tabId: string) => {
     command: string
-    agentLaunch?: AgentLaunchSpawnRequest
+    agentLaunch?: AgentLaunchInput
     delivery?: 'terminal-paste'
     startupCommandDelivery?: StartupCommandDelivery
     env?: Record<string, string>
     launchConfig?: SleepingAgentLaunchConfig
+    legacyResumeRecordedConnectionId?: string | null
     resumeProviderSession?: AgentProviderSessionMetadata
     launchToken?: string
     launchAgent?: TuiAgent
@@ -1684,6 +1699,26 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       void _launchAgent
       const nextTabs = [...tabs]
       nextTabs[tabIndex] = tabWithoutLaunchAgent
+      scheduleRuntimeGraphSync()
+      return { tabsByWorktree: { ...s.tabsByWorktree, [ownerWorktreeId]: nextTabs } }
+    })
+  },
+
+  backfillTabLaunchAgent: (tabId, agent) => {
+    set((s) => {
+      const ownerWorktreeId = getTerminalTabOwnerWorktreeId(s.tabsByWorktree, tabId)
+      if (!ownerWorktreeId) {
+        return s
+      }
+      const tabs = s.tabsByWorktree[ownerWorktreeId] ?? []
+      const tabIndex = tabs.findIndex((t) => t.id === tabId)
+      const currentTab = tabs[tabIndex]
+      // Write-if-absent: a caller-set id is authoritative; only fill the gap.
+      if (!currentTab || currentTab.launchAgent) {
+        return s
+      }
+      const nextTabs = [...tabs]
+      nextTabs[tabIndex] = { ...currentTab, launchAgent: agent }
       scheduleRuntimeGraphSync()
       return { tabsByWorktree: { ...s.tabsByWorktree, [ownerWorktreeId]: nextTabs } }
     })

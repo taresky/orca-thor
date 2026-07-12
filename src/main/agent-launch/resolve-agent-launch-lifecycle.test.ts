@@ -46,6 +46,7 @@ function snapshotFor(agent: TuiAgent, base: BuiltInTuiAgent): AgentLaunchSnapsho
     mode: base === agent ? 'built-in' : 'custom',
     argv: ['claude'],
     agentEnv: {},
+    capturedEnvPolicy: 'none',
     target: {
       platform: 'linux',
       execution: 'native',

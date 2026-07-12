@@ -26,7 +26,7 @@ import {
 } from '../../../../shared/terminal-input'
 import { measureClipboardTextByteLength } from '../../../../shared/clipboard-text'
 import { isBuiltInTuiAgent } from '../../../../shared/tui-agent-config'
-import { AgentLaunchSpawnRequestSchema } from './agent-launch-spawn-schema'
+import { AgentLaunchInputSchema } from './agent-launch-spawn-schema'
 import {
   MOBILE_SNAPSHOT_BYTE_BUDGET,
   MOBILE_SUBSCRIBE_SCROLLBACK_ROWS
@@ -741,7 +741,7 @@ const TerminalCreateParams = z.object({
   // Why: legacy field accepts built-in ids only; a custom id is admitted solely
   // on the sanctioned `agentLaunch` path (U3).
   launchAgent: z.string().refine(isBuiltInTuiAgent).optional(),
-  agentLaunch: AgentLaunchSpawnRequestSchema.optional(),
+  agentLaunch: AgentLaunchInputSchema.optional(),
   title: OptionalString,
   focus: z.unknown().optional(),
   rendererBacked: z.unknown().optional(),

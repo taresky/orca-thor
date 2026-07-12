@@ -12,17 +12,27 @@
 import type { BuiltInTuiAgent, GlobalSettings } from '../../shared/types'
 import type { AgentLaunchReceipt } from '../../shared/agent-launch-contract'
 import type {
+  AgentLaunchInput,
   AgentLaunchSpawnOutcome,
   AgentLaunchSpawnRequest
 } from '../../shared/agent-launch-spawn-request'
-import type { ResolvedAgentLaunch } from '../../shared/agent-launch-host-contract'
-import type { SleepingAgentLaunchConfig } from '../../shared/agent-session-resume'
+import type {
+  AgentLaunchSnapshot,
+  LaunchIntent,
+  ResolvedAgentLaunch
+} from '../../shared/agent-launch-host-contract'
+import type {
+  AgentProviderSessionMetadata,
+  SleepingAgentLaunchConfig
+} from '../../shared/agent-session-resume'
 import type { StartupCommandDelivery } from '../../shared/codex-startup-delivery'
 import {
   deriveAgentLaunchHostState,
   type AgentLaunchHostDescriptor
 } from '../agent-launch/agent-launch-host-state'
 import { resolveAgentLaunchSpawn } from '../agent-launch/agent-launch-spawn'
+import { resolveResumeLaunchIngest } from '../agent-launch/agent-launch-resume-ingest'
+import type { AgentSessionRecordStore } from '../agent-launch/agent-session-record-store'
 import type { resolveAgentLaunch } from '../agent-launch/resolve-agent-launch'
 import type {
   AgentLaunchBoundary,
@@ -71,18 +81,74 @@ export type TerminalAgentLaunchDeps = {
    *  boundary's pre-admission preflight. Must not throw for a routine no-trust
    *  agent; a throw maps to trust_preflight_failed with no admission record. */
   markWorkspaceTrusted: (launch: ResolvedAgentLaunch) => Promise<void> | void
+  /** The host-private record store a resume/fork request resolves against. */
+  sessionRecordStore: AgentSessionRecordStore
   /** Injectable total resolver for tests; defaults to the real one. */
   resolve?: typeof resolveAgentLaunch
 }
 
 export type TerminalAgentLaunchArgs = {
-  request: AgentLaunchSpawnRequest
+  /** A fresh selection launch or a provider-session resume/fork by session key. */
+  request: AgentLaunchInput
   clientKind: AuthenticatedClientKind
   descriptor: AgentLaunchHostDescriptor
   scope: string
   worktreePath: string | null
   repoPath: string | null
   principal: AdmissionPrincipal
+}
+
+/** The resume-specific launch inputs merged with host-context target/variables. */
+type TerminalSpawnInput = {
+  request: AgentLaunchSpawnRequest
+  intent: LaunchIntent
+  persistedSnapshot?: AgentLaunchSnapshot
+  resumeProviderSession?: AgentProviderSessionMetadata
+}
+
+/** Map the client agentLaunch input to the spawn input: a resume/fork loads the
+ *  private record by session key (never forwarding a client launch config, so
+ *  mobile/paired legacy replay finds no record → invalid_launch_snapshot); a fresh
+ *  selection builds an interactive intent host-side. */
+function resolveTerminalSpawnInput(
+  args: TerminalAgentLaunchArgs,
+  sessionRecordStore: AgentSessionRecordStore
+):
+  | { ok: true; input: TerminalSpawnInput }
+  | { ok: false; failure: { code: 'invalid_launch_snapshot' } } {
+  const client = mapClientKindToLaunchClient(args.clientKind)
+  if ('resume' in args.request) {
+    // No legacy context is forwarded on this untrusted RPC surface, so opaque
+    // legacy replay never resolves here — a legacy record fails closed, exactly
+    // as the migration rules require for mobile/paired-initiated resumes.
+    const ingest = resolveResumeLaunchIngest(
+      { resume: args.request.resume, client },
+      sessionRecordStore
+    )
+    if (!ingest.ok || ingest.kind !== 'snapshot') {
+      return { ok: false, failure: { code: 'invalid_launch_snapshot' } }
+    }
+    return {
+      ok: true,
+      input: {
+        request: ingest.request,
+        intent: ingest.intent,
+        persistedSnapshot: ingest.persistedSnapshot,
+        resumeProviderSession: ingest.resumeProviderSession
+      }
+    }
+  }
+  if ('vaultResume' in args.request) {
+    // AI Vault resume bypasses the resolver (like legacy replay) and is served on
+    // the runtime by the dedicated copy method plus a still-to-land resume bypass;
+    // the resolver never assembles it. Reaching here means a misroute, so fail
+    // closed rather than treating it as a fresh selection launch.
+    return { ok: false, failure: { code: 'invalid_launch_snapshot' } }
+  }
+  return {
+    ok: true,
+    input: { request: args.request, intent: { kind: 'interactive', client } }
+  }
 }
 
 /** Resolve a terminal `agentLaunch` request into host-resolved spawn fields plus
@@ -102,6 +168,10 @@ export async function resolveTerminalAgentLaunch(
     args.descriptor,
     { worktreePath: args.worktreePath, repoPath: args.repoPath }
   )
+  const spawnInput = resolveTerminalSpawnInput(args, deps.sessionRecordStore)
+  if (!spawnInput.ok) {
+    return { kind: 'failed', outcome: { status: 'failed', failure: spawnInput.failure } }
+  }
   const resolution = await resolveAgentLaunchSpawn(
     {
       getSettings: hostState.getSettings,
@@ -111,12 +181,18 @@ export async function resolveTerminalAgentLaunch(
       ...(deps.resolve ? { resolve: deps.resolve } : {})
     },
     {
-      request: args.request,
-      intent: { kind: 'interactive', client: mapClientKindToLaunchClient(args.clientKind) },
+      request: spawnInput.input.request,
+      intent: spawnInput.input.intent,
       target: hostState.target,
       variables: hostState.variables,
       scope: args.scope,
-      principal: args.principal
+      principal: args.principal,
+      ...(spawnInput.input.persistedSnapshot
+        ? { persistedSnapshot: spawnInput.input.persistedSnapshot }
+        : {}),
+      ...(spawnInput.input.resumeProviderSession
+        ? { resumeProviderSession: spawnInput.input.resumeProviderSession }
+        : {})
     }
   )
   if (!resolution.ok) {

@@ -420,7 +420,7 @@
         "macos"
       ],
       "coveredProviders": [],
-      "coverageNotes": "Local macOS evidence over the ownership/dedupe suite on main@1282f5c2d. Queued/pending resume-claim indexing, same-session and wrong-session hook proofs, and Electron repeat-activation coverage arrive with the pending stack (#7008).",
+      "coverageNotes": "Local macOS evidence over the ownership/dedupe suite on main@1282f5c2d, extended in U5 to the host-side private record store now authoritative for base+provider-session ownership (agent-session-record-store.test.ts). Maturity stays experimental. Queued/pending resume-claim indexing, same-session and wrong-session hook proofs, and Electron repeat-activation coverage arrive with the pending stack (#7008).",
       "motivatingLinks": [
         "https://github.com/stablyai/orca/pull/6800",
         "https://github.com/stablyai/orca/pull/5240",
@@ -430,10 +430,14 @@
       "invariant": "Workspace activation, launch, restore, sleep, hibernate, dedupe, clearing, and reconnect code must not replay or resume a provider session id already owned, queued, pending, or live in that workspace.",
       "oracle": "The current renderer-state slice asserts provider-session claim keys are owned by preserved active tabs, inactive split leaves, visible non-focused split groups, live records, quit records, worktree-sleep records, queued startup payloads, time-bounded resume bridge claims, and same-session live hook evidence; duplicates clear without launching a second resume command. The provider list is the risk scope, not proof that every provider has a live integration gate.",
       "commands": [
-        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/lib/resume-sleeping-agent-session.test.ts"
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/lib/resume-sleeping-agent-session.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/lib/resume-sleeping-agent-session.test.ts src/renderer/src/lib/resume-sleeping-agent-session-base-ownership.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/agent-launch/agent-session-record-store.test.ts"
       ],
       "testFiles": [
-        "src/renderer/src/lib/resume-sleeping-agent-session.test.ts"
+        "src/renderer/src/lib/resume-sleeping-agent-session.test.ts",
+        "src/renderer/src/lib/resume-sleeping-agent-session-base-ownership.test.ts",
+        "src/main/agent-launch/agent-session-record-store.test.ts"
       ],
       "assertionRefs": [
         {
@@ -443,6 +447,22 @@
             "one launch per provider session: skipped duplicates are cleared instead of relaunched",
             "active stable-pane records owned by preserved or visible panes are not resumed again",
             "hibernated stable panes with cleared live PTY bindings are skipped"
+          ]
+        },
+        {
+          "file": "src/renderer/src/lib/resume-sleeping-agent-session-base-ownership.test.ts",
+          "assertions": [
+            "a live custom-id pane owns its base provider session so a second custom id on the same base does not re-resume",
+            "a live custom-id pane on a different resumable base cannot claim another base's session id"
+          ]
+        },
+        {
+          "file": "src/main/agent-launch/agent-session-record-store.test.ts",
+          "assertions": [
+            "two custom ids on one base/provider session resolve to one owner record",
+            "preserves the requested custom identity while keying ownership on the base",
+            "never binds a non-resumable base",
+            "a fork binds a NEW provider session into its own record and never mutates the source"
           ]
         }
       ],
@@ -455,6 +475,24 @@
           "result": "passed",
           "durationSeconds": 1.9,
           "summary": "1 test file(s) passed, 30 tests passed on main@1282f5c2d in a clean checkout."
+        },
+        {
+          "date": "2026-07-11",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/lib/resume-sleeping-agent-session.test.ts src/renderer/src/lib/resume-sleeping-agent-session-base-ownership.test.ts",
+          "result": "passed",
+          "durationSeconds": 1.3,
+          "summary": "2 test file(s), 32 tests passed on branch custom-agents (U5). Adds base-keyed ownership evidence: two custom ids on one base+provider-session collapse to one owner, and a different resumable base cannot claim another base's session id."
+        },
+        {
+          "date": "2026-07-11",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/agent-launch/agent-session-record-store.test.ts",
+          "result": "passed",
+          "durationSeconds": 0.2,
+          "summary": "1 test file, 17 tests passed on branch custom-agents (U5). Extends the gate to the HOST-side private record store now authoritative for base+provider-session ownership: two custom ids collapse to one owner record, ownership keys on the base while preserving the requested custom identity, a non-resumable base never binds, and a fork binds a new provider session into its own record without mutating the source. Evidence extended without promoting experimental maturity."
         }
       ],
       "runtimeBudget": {

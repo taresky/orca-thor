@@ -6,6 +6,7 @@
 // session types but is explicitly redacted from every client transport.
 
 import type { BuiltInTuiAgent, TuiAgent } from './types'
+import type { AgentProviderSessionMetadata } from './agent-session-resume'
 import type { AgentStartupShell } from './tui-agent-startup-shell'
 import type { AgentPromptInjectionMode, DraftPasteReadySignal } from './tui-agent-config'
 import type { StartupCommandDelivery } from './codex-startup-delivery'
@@ -40,6 +41,10 @@ export type AgentLaunchSnapshot = Readonly<{
   // Only user-configured agent env admitted by launch policy; never
   // process/Orca generated env.
   agentEnv: Readonly<Record<string, string>>
+  // Resolved env disposition at capture time. Mobile/paired replay compares this
+  // policy state (not env keys/values) to decide snapshot_definition_changed, so
+  // a value-only edit can never leak through the comparison.
+  capturedEnvPolicy: 'full' | 'withheld' | 'none'
   target: Readonly<{
     platform: NodeJS.Platform // terminal target, never phone/browser OS
     execution: 'native' | 'wsl'
@@ -79,6 +84,11 @@ export type ResolvedAgentLaunch = {
   baseAgent: BuiltInTuiAgent
   displayLabel: string
   argv: AgentArgv
+  /** Provider resume flags appended to the command on a resume/fork replay (e.g.
+   *  `--resume <id>`), derived from the record's provider session — NOT part of
+   *  the immutable snapshot argv and NOT persisted into the durable launch config,
+   *  so it never pollutes a fresh relaunch. Absent on a non-resume launch. */
+  resumeArgvSuffix?: readonly string[]
   agentEnv: Readonly<Record<string, string>>
   variables: {
     values: { repoPath: string | null; worktreePath: string | null }
@@ -138,4 +148,8 @@ export type ResolveAgentLaunchRequest = {
    *  to the pure resolver — never derived inside it. */
   transportConfidentialityAvailable?: boolean
   persistedSnapshot?: AgentLaunchSnapshot
+  /** The record's provider session, supplied only on a resume/fork replay so the
+   *  resolver appends the provider resume flags to the replayed snapshot argv. The
+   *  session key type is implied by `baseAgent`. */
+  resumeProviderSession?: AgentProviderSessionMetadata
 }

@@ -21,6 +21,7 @@ import type {
   LaunchIntent,
   ResolvedAgentLaunch
 } from '../../shared/agent-launch-host-contract'
+import type { AgentProviderSessionMetadata } from '../../shared/agent-session-resume'
 import type { AgentLaunchSpawnRequest } from '../../shared/agent-launch-spawn-request'
 import { normalizeCatalogFromSettings } from './agent-catalog-projections'
 import { STARTUP_COMMAND_TEXT_MAX_CHARS } from '../providers/windows-shell-args'
@@ -61,6 +62,9 @@ export type AgentLaunchSpawnInput = {
   scope: string
   principal: AdmissionPrincipal
   persistedSnapshot?: AgentLaunchSnapshot
+  /** Provider session for a resume/fork replay; drives the resolver's resume-argv
+   *  append. Only the resume ingestion sets it. */
+  resumeProviderSession?: AgentProviderSessionMetadata
 }
 
 export type AgentLaunchSpawnResolution =
@@ -111,7 +115,10 @@ export function buildHostStateResolve(
         ...(input.target.transportConfidentialityAvailable !== undefined
           ? { transportConfidentialityAvailable: input.target.transportConfidentialityAvailable }
           : {}),
-        ...(input.persistedSnapshot ? { persistedSnapshot: input.persistedSnapshot } : {})
+        ...(input.persistedSnapshot ? { persistedSnapshot: input.persistedSnapshot } : {}),
+        ...(input.resumeProviderSession
+          ? { resumeProviderSession: input.resumeProviderSession }
+          : {})
       },
       catalog,
       settings

@@ -9885,6 +9885,7 @@
           },
           "AiVaultPanel": {
             "resumeCommandCopied": "Resume command copied",
+            "resumeSessionUnavailable": "このセッションは再開できなくなりました。",
             "valueCopied": "{{value0}} をコピーしました",
             "valueCopyFailed": "{{value0}} をコピーできません",
             "openWorkspaceBeforeResuming": "Open a workspace before resuming a session.",

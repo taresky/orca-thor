@@ -30,6 +30,7 @@ function makeSnapshot(): AgentLaunchSnapshot {
     mode: 'built-in',
     argv: ['/opt/claude'],
     agentEnv: {},
+    capturedEnvPolicy: 'none',
     target: {
       platform: 'linux',
       execution: 'native',

@@ -22,6 +22,7 @@ function snapshot(): AgentLaunchSnapshot {
     mode: 'built-in',
     argv: ['claude'],
     agentEnv: {},
+    capturedEnvPolicy: 'none',
     target: {
       platform: 'darwin',
       execution: 'native',

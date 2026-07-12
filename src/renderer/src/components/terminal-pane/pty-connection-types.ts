@@ -25,6 +25,9 @@ export type PtyConnectionDeps = {
     launchToken?: string
     launchAgent?: TuiAgent
     agentLaunch?: AgentLaunchSpawnRequest
+    /** One-release legacy handoff: a pre-U5 record's recorded execution owner,
+     *  forwarded with its `launchConfig` so the host can prove provenance. */
+    legacyResumeRecordedConnectionId?: string | null
     draftPrompt?: string
     /** Telemetry payload for `agent_started`. Forwarded to `pty:spawn`
      *  so main fires the event only after the spawn succeeds. */

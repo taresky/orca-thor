@@ -2,6 +2,7 @@
 import type { RuntimeRpcResponse } from '../../../shared/runtime-rpc-envelope'
 import type {
   BrowserTabCreateResult,
+  RuntimeMobileSessionCreateTerminalAgentLaunchFailure,
   RuntimeMobileSessionCreateTerminalResult,
   RuntimeMobileSessionTabMove,
   RuntimeMobileSessionTabMoveResult,
@@ -12,6 +13,7 @@ import type {
 import type { TerminalPaneSplitSource } from '../../../shared/feature-education-telemetry'
 import type { StartupCommandDelivery } from '../../../shared/codex-startup-delivery'
 import type { SleepingAgentLaunchConfig } from '../../../shared/agent-session-resume'
+import type { AgentLaunchSpawnRequest } from '../../../shared/agent-launch-spawn-request'
 import type { TerminalPaneLayoutNode, TuiAgent } from '../../../shared/types'
 import type { AgentLaunchNoticeCode } from '../../../shared/agent-launch-contract'
 import type { AppState } from '../store/types'
@@ -57,6 +59,9 @@ export async function createWebRuntimeSessionTerminal(args: {
   launchConfig?: SleepingAgentLaunchConfig
   agent?: TuiAgent
   launchAgent?: TuiAgent
+  /** Sanctioned host-resolved launch path; the host owns command/config/token
+   *  assembly and this is the only field that admits a custom agent id. */
+  agentLaunch?: AgentLaunchSpawnRequest
   activate?: boolean
   selectWorktree?: boolean
 }): Promise<boolean> {
@@ -86,13 +91,23 @@ export async function createWebRuntimeSessionTerminal(args: {
         ...(args.launchConfig ? { launchConfig: args.launchConfig } : {}),
         agent: args.agent,
         ...(args.launchAgent ? { launchAgent: args.launchAgent } : {}),
+        ...(args.agentLaunch ? { agentLaunch: args.agentLaunch } : {}),
         activate: args.activate !== false
       },
       timeoutMs: 15_000
     })
-    const createdTerminal = unwrapRuntimeRpcResult(
-      response as RuntimeRpcResponse<RuntimeMobileSessionCreateTerminalResult>
+    const created = unwrapRuntimeRpcResult(
+      response as RuntimeRpcResponse<
+        | RuntimeMobileSessionCreateTerminalResult
+        | RuntimeMobileSessionCreateTerminalAgentLaunchFailure
+      >
     )
+    // Why: a pre-spawn host-resolved agentLaunch failure is an RPC success that
+    // created NO tab; treat it as a launch failure for the web-host surface.
+    if (!('tab' in created)) {
+      return false
+    }
+    const createdTerminal = created
     if (args.activate !== false) {
       // Why: record focus intent so the reconcile follows the snapshot's active
       // tab to THIS new terminal, instead of sticky-keeping the prior tab.

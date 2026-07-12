@@ -9885,6 +9885,7 @@
           },
           "AiVaultPanel": {
             "resumeCommandCopied": "Comando para reanudar copiado",
+            "resumeSessionUnavailable": "Esta sesión ya no se puede reanudar.",
             "valueCopied": "{{value0}} copiado",
             "valueCopyFailed": "No se pudo copiar {{value0}}",
             "openWorkspaceBeforeResuming": "Abre un workspace antes de reanudar una sesión.",

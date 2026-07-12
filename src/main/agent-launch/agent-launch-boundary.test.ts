@@ -27,6 +27,7 @@ function makeSnapshot(overrides: Partial<AgentLaunchSnapshot> = {}): AgentLaunch
     mode: 'built-in',
     argv: ['/bin/secretexe', '--flag'],
     agentEnv: { SECRET_ENV: 'topsecret-value' },
+    capturedEnvPolicy: 'full',
     target: {
       platform: 'linux',
       execution: 'native',
