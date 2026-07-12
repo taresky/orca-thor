@@ -79,7 +79,16 @@ export class AgentLaunchBoundary {
     }
 
     const result = await this.coordinator.runExclusive<CriticalResult>(() =>
-      this.admitInsideCoordinator(args, original, originalFingerprint, nowFn)
+      this.admitInsideCoordinator(args.resolve, original, originalFingerprint, () =>
+        this.admissionStore.admit({
+          principal: args.principal,
+          intent: original.policy.intent,
+          scope: args.scope,
+          fingerprint: originalFingerprint,
+          snapshot: original.snapshot,
+          admittedAt: nowFn()
+        })
+      )
     )
     if (result.kind === 'requestError') {
       return { ok: false, requestError: result.requestError }
@@ -213,7 +222,15 @@ export class AgentLaunchBoundary {
 
     const originalFingerprint = original.admissionGuard.fingerprint
     const result = await this.coordinator.runExclusive<CriticalResult>(() =>
-      this.admitReservedInsideCoordinator(args, original, originalFingerprint, nowFn)
+      this.admitInsideCoordinator(args.resolve, original, originalFingerprint, () =>
+        this.admissionStore.admitReserved(args.reservationId, {
+          intent: original.policy.intent,
+          scope: args.scope,
+          fingerprint: originalFingerprint,
+          snapshot: original.snapshot,
+          admittedAt: nowFn()
+        })
+      )
     )
     if (result.kind === 'requestError') {
       this.admissionStore.releaseReservation(args.reservationId)
@@ -294,14 +311,18 @@ export class AgentLaunchBoundary {
     return null
   }
 
+  /** Coordinator critical section shared by the single-shot and two-stage
+   *  paths: re-take the atomic host view, recheck the relevant-input
+   *  fingerprint, then run the store admit step. No trust/fs/network/provider
+   *  I/O runs here. On the two-stage path a mismatch leaves the reservation
+   *  intact for the caller to release. */
   private admitInsideCoordinator(
-    args: ExecuteAgentLaunchArgs,
+    resolve: () => ReturnType<ExecuteAgentLaunchArgs['resolve']>,
     original: ResolvedAgentLaunch,
     originalFingerprint: string,
-    nowFn: () => number
+    admit: () => ReturnType<AgentLaunchAdmissionStore['admit']>
   ): CriticalResult {
-    // Re-take the atomic host view; no trust/fs/network/provider I/O runs here.
-    const reResolution = args.resolve()
+    const reResolution = resolve()
     if (!reResolution.outcome.ok) {
       if ('requestError' in reResolution.outcome) {
         return { kind: 'requestError', requestError: reResolution.outcome.requestError }
@@ -314,53 +335,7 @@ export class AgentLaunchBoundary {
         failure: { code: 'agent_configuration_changed', ...agentIds(original) }
       }
     }
-    const admission = this.admissionStore.admit({
-      principal: args.principal,
-      intent: original.policy.intent,
-      scope: args.scope,
-      fingerprint: originalFingerprint,
-      snapshot: original.snapshot,
-      admittedAt: nowFn()
-    })
-    if (!admission.ok) {
-      return { kind: 'failure', failure: admission.failure }
-    }
-    return {
-      kind: 'admitted',
-      record: admission.record,
-      catalogRevision: reResolution.catalogRevision
-    }
-  }
-
-  /** Coordinator step for the two-stage path: re-take the atomic host view,
-   *  recheck the path-inclusive fingerprint, then convert the held reservation.
-   *  A mismatch leaves the reservation intact for the caller to release. */
-  private admitReservedInsideCoordinator(
-    args: ExecuteReservedAgentLaunchArgs,
-    original: ResolvedAgentLaunch,
-    originalFingerprint: string,
-    nowFn: () => number
-  ): CriticalResult {
-    const reResolution = args.resolve()
-    if (!reResolution.outcome.ok) {
-      if ('requestError' in reResolution.outcome) {
-        return { kind: 'requestError', requestError: reResolution.outcome.requestError }
-      }
-      return { kind: 'failure', failure: mapAdmissionMismatch(reResolution.outcome.failure) }
-    }
-    if (reResolution.outcome.launch.admissionGuard.fingerprint !== originalFingerprint) {
-      return {
-        kind: 'failure',
-        failure: { code: 'agent_configuration_changed', ...agentIds(original) }
-      }
-    }
-    const admission = this.admissionStore.admitReserved(args.reservationId, {
-      intent: original.policy.intent,
-      scope: args.scope,
-      fingerprint: originalFingerprint,
-      snapshot: original.snapshot,
-      admittedAt: nowFn()
-    })
+    const admission = admit()
     if (!admission.ok) {
       return { kind: 'failure', failure: admission.failure }
     }

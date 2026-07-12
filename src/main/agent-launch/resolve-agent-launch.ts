@@ -5,7 +5,8 @@
 
 import type { GlobalSettings } from '../../shared/types'
 import { TUI_AGENT_CONFIG } from '../../shared/tui-agent-config'
-import { resolveStartupShell } from '../../shared/tui-agent-startup-shell'
+import { resolveStartupShell, CMD_UNENCODABLE_CHAR_RE } from '../../shared/tui-agent-startup-shell'
+import type { AgentStartupShell } from '../../shared/tui-agent-startup-shell'
 import type { AgentCatalog } from '../../shared/agent-catalog-normalization'
 import type {
   AgentLaunchResolution,
@@ -39,13 +40,30 @@ function deriveTarget(request: ResolveAgentLaunchRequest): LaunchTarget {
   }
 }
 
+/** A snapshot's structured argv re-quotes into any target shell except `cmd`,
+ *  whose double-quoted form cannot faithfully deliver `% ! ^ "`. A shell change is
+ *  therefore lossless unless a captured element is unencodable in the new shell. */
+function snapshotArgvEncodableInShell(
+  snapshot: AgentLaunchSnapshot,
+  shell: AgentStartupShell
+): boolean {
+  if (shell !== 'cmd') {
+    return true
+  }
+  return !snapshot.argv.some((element) => CMD_UNENCODABLE_CHAR_RE.test(element))
+}
+
 function targetMatchesSnapshot(target: LaunchTarget, snapshot: AgentLaunchSnapshot): boolean {
+  // Shell equality is not required: the snapshot stores structured argv, so a
+  // shell change replays whenever every element re-encodes losslessly in the new
+  // shell. Local-provider↔daemon needs no special case — both resolve to the same
+  // executionHostId, which is not part of command semantics.
   return (
     snapshot.target.platform === target.platform &&
     snapshot.target.execution === target.execution &&
-    snapshot.target.shell === target.shell &&
     snapshot.target.isRemote === target.isRemote &&
-    snapshot.target.executionHostId === target.executionHostId
+    snapshot.target.executionHostId === target.executionHostId &&
+    snapshotArgvEncodableInShell(snapshot, target.shell)
   )
 }
 
