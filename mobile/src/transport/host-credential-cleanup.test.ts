@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  loadPendingHostCredentialCleanup,
   loadPendingHostCredentialCleanupIds,
   resetHostCredentialCleanupForTests,
   retryPendingHostCredentialCleanups,
@@ -167,7 +168,8 @@ describe('host credential cleanup', () => {
 
     await expect(retryPendingHostCredentialCleanups(deleteCredential)).resolves.toEqual({
       clearedCount: 1,
-      remainingIds: []
+      remainingIds: [],
+      storageUnreadable: false
     })
     expect(deleteCredential).toHaveBeenCalledTimes(2)
   })
@@ -182,24 +184,68 @@ describe('host credential cleanup', () => {
     expect(deleteCredential).not.toHaveBeenCalled()
     await expect(retryPendingHostCredentialCleanups(deleteCredential)).resolves.toEqual({
       clearedCount: 1,
-      remainingIds: ['host-1']
+      remainingIds: ['host-1'],
+      storageUnreadable: false
     })
     expect(deleteCredential).toHaveBeenCalledTimes(2)
   })
 
-  it('does not wipe existing pending ids when storage read fails during mutation', async () => {
+  it('surfaces a fallback handle without clobbering durable ids when the queue write fails', async () => {
     storedPendingIds = ['host-a']
     const deleteCredential = vi.fn().mockRejectedValue(new Error('keychain unavailable'))
+    const listener = vi.fn()
+    const unsubscribe = subscribePendingHostCredentialCleanup(listener)
 
     readShouldFail = true
     await scheduleHostCredentialCleanup('host-b', deleteCredential, 20)
     await vi.waitFor(() => expect(deleteCredential).toHaveBeenCalledOnce())
     readShouldFail = false
 
-    // Native delete still runs; durable queue is left untouched (not clobbered).
+    // Durable queue is untouched (not clobbered); the failed-to-record host-b is
+    // still surfaced via the session-scoped fallback so its orphaned token keeps
+    // a retry affordance instead of being silently lost.
     expect(deleteCredential).toHaveBeenCalledOnce()
-    await expect(loadPendingHostCredentialCleanupIds()).resolves.toEqual(['host-a'])
+    expect(listener).toHaveBeenCalled()
+    await expect(loadPendingHostCredentialCleanupIds()).resolves.toEqual(['host-a', 'host-b'])
     expect(asyncStorageMock.setItem).not.toHaveBeenCalled()
+    unsubscribe()
+  })
+
+  it('reports storageUnreadable when the durable queue cannot be read', async () => {
+    storedPendingIds = ['host-a']
+
+    readShouldFail = true
+    await expect(loadPendingHostCredentialCleanup()).resolves.toEqual({
+      ids: [],
+      storageUnreadable: true
+    })
+  })
+
+  it('clears the fallback handle once the native delete finally succeeds', async () => {
+    let resolveDelete: (() => void) | null = null
+    const deleteCredential = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDelete = resolve
+        })
+    )
+
+    readShouldFail = true
+    await scheduleHostCredentialCleanup('host-b', deleteCredential, 1_000)
+    await vi.waitFor(() => expect(deleteCredential).toHaveBeenCalledOnce())
+    readShouldFail = false
+    await expect(loadPendingHostCredentialCleanup()).resolves.toEqual({
+      ids: ['host-b'],
+      storageUnreadable: false
+    })
+
+    resolveDelete?.()
+    await vi.waitFor(async () => {
+      await expect(loadPendingHostCredentialCleanup()).resolves.toEqual({
+        ids: [],
+        storageUnreadable: false
+      })
+    })
   })
 
   it('cleans a new credential when the same host id is paired and removed again', async () => {

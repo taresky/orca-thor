@@ -25,7 +25,7 @@ import {
 } from 'lucide-react-native'
 import { colors, radii, spacing, typography } from '../src/theme/mobile-theme'
 import {
-  loadPendingHostCredentialCleanupIds,
+  loadPendingHostCredentialCleanup,
   subscribePendingHostCredentialCleanup
 } from '../src/transport/host-credential-cleanup'
 import { retryPendingHostCredentialCleanup } from '../src/transport/host-store'
@@ -34,6 +34,7 @@ export default function SettingsScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
   const [pendingCredentialIds, setPendingCredentialIds] = useState<string[]>([])
+  const [credentialStorageUnreadable, setCredentialStorageUnreadable] = useState(false)
   const [retryingCredentialCleanup, setRetryingCredentialCleanup] = useState(false)
   const [credentialRetryFailed, setCredentialRetryFailed] = useState(false)
   const credentialRefreshGenerationRef = useRef(0)
@@ -44,12 +45,13 @@ export default function SettingsScreen() {
       setCredentialRetryFailed(false)
       const refresh = () => {
         const generation = ++credentialRefreshGenerationRef.current
-        void loadPendingHostCredentialCleanupIds().then((ids) => {
+        void loadPendingHostCredentialCleanup().then((state) => {
           if (active && generation === credentialRefreshGenerationRef.current) {
-            setPendingCredentialIds(ids)
-            // Why: neutral copy once the queue is empty so a later pending
-            // set does not inherit a previous Retry failure message.
-            if (ids.length === 0) {
+            setPendingCredentialIds(state.ids)
+            setCredentialStorageUnreadable(state.storageUnreadable)
+            // Why: neutral copy once the queue is confirmed empty so a later
+            // pending set does not inherit a previous Retry failure message.
+            if (state.ids.length === 0 && !state.storageUnreadable) {
               setCredentialRetryFailed(false)
             }
           }
@@ -74,7 +76,8 @@ export default function SettingsScreen() {
     try {
       const result = await retryPendingHostCredentialCleanup()
       setPendingCredentialIds(result.remainingIds)
-      setCredentialRetryFailed(result.remainingIds.length > 0)
+      setCredentialStorageUnreadable(result.storageUnreadable)
+      setCredentialRetryFailed(result.remainingIds.length > 0 || result.storageUnreadable)
     } catch {
       setCredentialRetryFailed(true)
     } finally {
@@ -83,6 +86,10 @@ export default function SettingsScreen() {
   }, [retryingCredentialCleanup])
 
   const pendingCredentialCount = pendingCredentialIds.length
+  // Why: show the cleanup card whenever cleanup is pending OR the durable queue
+  // is unreadable — an unreadable queue can hide an orphaned token, so keep a
+  // retry affordance rather than a silently-empty (hidden) section.
+  const showCredentialCleanup = pendingCredentialCount > 0 || credentialStorageUnreadable
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + spacing.sm }]}>
@@ -153,7 +160,7 @@ export default function SettingsScreen() {
           </Pressable>
         </View>
 
-        {pendingCredentialCount > 0 ? (
+        {showCredentialCleanup ? (
           <View style={[styles.section, styles.sectionSpacer]}>
             <View style={styles.credentialCleanupRow}>
               <KeyRound size={16} color={colors.statusAmber} />
@@ -162,7 +169,9 @@ export default function SettingsScreen() {
                 <Text accessibilityLiveRegion="polite" style={styles.rowHint}>
                   {credentialRetryFailed
                     ? "Cleanup still couldn't be confirmed. Try again later."
-                    : `Couldn't confirm cleanup for ${pendingCredentialCount} credential${pendingCredentialCount === 1 ? '' : 's'} on this device.`}
+                    : pendingCredentialCount > 0
+                      ? `Couldn't confirm cleanup for ${pendingCredentialCount} credential${pendingCredentialCount === 1 ? '' : 's'} on this device.`
+                      : "Couldn't check cleanup status on this device. Retry to be safe."}
                 </Text>
               </View>
               <Pressable

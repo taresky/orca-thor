@@ -164,4 +164,13 @@ describe('host-store list mutations', () => {
     expect(asyncStorageMock.setItem).not.toHaveBeenCalled()
     expect(storedHostsRaw).toBe('{')
   })
+
+  it('resolves instead of rejecting when updateLastConnected hits unreadable storage', async () => {
+    // Why: callers fire updateLastConnected with `void`; a rejection here would
+    // surface as an unhandled promise rejection rather than a caught error.
+    storedHostsRaw = '{'
+    await expect(updateLastConnected(HOST_ONE.id)).resolves.toBeUndefined()
+    expect(asyncStorageMock.setItem).not.toHaveBeenCalled()
+    expect(storedHostsRaw).toBe('{')
+  })
 })

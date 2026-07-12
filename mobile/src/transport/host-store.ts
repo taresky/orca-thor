@@ -232,6 +232,7 @@ export async function removeHost(hostId: string): Promise<void> {
 export async function retryPendingHostCredentialCleanup(): Promise<{
   clearedCount: number
   remainingIds: string[]
+  storageUnreadable: boolean
 }> {
   return retryPendingHostCredentialCleanups(deleteDeviceToken)
 }
@@ -255,15 +256,21 @@ export async function getNextHostName(): Promise<string> {
 }
 
 export async function updateLastConnected(hostId: string): Promise<void> {
-  await mutateStoredHosts((hosts) => {
-    const index = hosts.findIndex((h) => h.id === hostId)
-    if (index < 0) {
-      return hosts
-    }
-    const next = hosts.slice()
-    next[index] = { ...next[index]!, lastConnected: Date.now() }
-    return next
-  })
+  try {
+    await mutateStoredHosts((hosts) => {
+      const index = hosts.findIndex((h) => h.id === hostId)
+      if (index < 0) {
+        return hosts
+      }
+      const next = hosts.slice()
+      next[index] = { ...next[index]!, lastConnected: Date.now() }
+      return next
+    })
+  } catch {
+    // Why: last-connected is a best-effort timestamp and callers fire it with
+    // `void`. Swallow unreadable-storage failures so they don't surface as an
+    // unhandled promise rejection.
+  }
 }
 
 /** Test-only: drain module mutation chain between cases. */
