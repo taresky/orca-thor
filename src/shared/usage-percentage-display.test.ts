@@ -26,9 +26,16 @@ describe('usage percentage display', () => {
     expect(getDisplayedUsagePercentage(Number.NaN, 'remaining')).toBe(0)
   })
 
+  it('clamps non-finite provider values to 0 for bar width and labels', () => {
+    // Why: Math.round/min/max propagate NaN into CSS width (`NaN%`) and copy.
+    expect(clampUsedPercent(Number.NaN)).toBe(0)
+    expect(clampUsedPercent(Number.POSITIVE_INFINITY)).toBe(0)
+    expect(clampUsedPercent(Number.NEGATIVE_INFINITY)).toBe(0)
+  })
+
   it('agrees whether given a raw or pre-clamped used percent (#7574)', () => {
-    // The compact status bar passes the raw usedPercent; the tooltip passes one
-    // already through clampUsedPercent. Both must display the same number.
+    // Finite inputs only: non-finite clamp→0 vs getDisplayedUsagePercentage→0
+    // diverge for remaining (100 vs 0), so that case is covered separately above.
     for (const raw of [20.5, 6.5, 79.5, 0.5, 99.5]) {
       for (const display of ['used', 'remaining'] as const) {
         expect(getDisplayedUsagePercentage(clampUsedPercent(raw), display)).toBe(

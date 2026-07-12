@@ -11,6 +11,9 @@ export function normalizeUsagePercentageDisplay(value: unknown): UsagePercentage
 // share one rounding, and feeding it into getDisplayedUsagePercentage stays a
 // no-op — a pre-clamped value and a raw one resolve identically (#7574).
 export function clampUsedPercent(usedPercent: number): number {
+  if (!Number.isFinite(usedPercent)) {
+    return 0
+  }
   return Math.max(0, Math.min(100, Math.round(usedPercent)))
 }
 
