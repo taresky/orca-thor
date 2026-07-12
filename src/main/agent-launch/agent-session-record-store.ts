@@ -199,6 +199,14 @@ export class AgentSessionRecordStore {
     return this.records.get(getAgentSessionOwnershipKey(key)) ?? null
   }
 
+  /** Requested identities of every durable resume record, for the tombstone
+   *  reference index's `session` owner (plan §266). Each bound resumable session
+   *  registers here, so a custom id still named here keeps its tombstone retained
+   *  until the session is forgotten. */
+  referencedRequestedAgents(): TuiAgent[] {
+    return [...this.records.values()].map((record) => record.requestedAgent)
+  }
+
   /** Accept the one-time legacy launch config the renderer surrenders on first
    *  resume. Ignored when the host already owns a record for the key (already
    *  handed over): "renderer hands it over once; host owns it thereafter". */

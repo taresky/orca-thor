@@ -1,6 +1,6 @@
 // Built-in tombstone-reference owner scanners: each reports how many settings/
-// repo/automation records still point at a given custom-agent id. A scan that
-// throws returns { ok: false } so the tombstone is conservatively retained.
+// repo/automation/session records still point at a given custom-agent id. A scan
+// that throws returns { ok: false } so the tombstone is conservatively retained.
 
 import type { Store } from '../persistence'
 import type { GlobalSettings, TerminalQuickCommand } from '../../shared/types'
@@ -8,6 +8,7 @@ import {
   countReferencedCustomIds,
   type AgentTombstoneReferenceIndex
 } from './agent-tombstone-reference-index'
+import { getHostAgentSessionRecordStore } from './agent-session-record-store-host'
 
 /** Register the desktop's built-in reference owners against the shared index.
  *  Later units add their own owner scanners through the same index. */
@@ -121,6 +122,26 @@ export function registerBuiltInOwnerScanners(
           references.push(meta.agentLaunchFailure?.requestedAgent)
         }
         return { ok: true, referenceCounts: countReferencedCustomIds(references) }
+      } catch {
+        return { ok: false }
+      }
+    }
+  })
+  index.register({
+    // §266 `session` = AI Vault/workspace plus sleeping/resumable sessions. The
+    // host-private record store is the resume authority: every bound resumable
+    // session registers its requested identity there and the record survives pane
+    // dispose, so it is the complete source of custom-id session references.
+    // AI Vault sessions are disk-discovered and hold no persisted catalog id.
+    owner: 'session',
+    scan: () => {
+      try {
+        return {
+          ok: true,
+          referenceCounts: countReferencedCustomIds(
+            getHostAgentSessionRecordStore().referencedRequestedAgents()
+          )
+        }
       } catch {
         return { ok: false }
       }

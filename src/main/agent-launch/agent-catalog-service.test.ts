@@ -1,15 +1,18 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   CustomTuiAgent,
   CustomTuiAgentId,
   GlobalSettings,
   Repo,
   TerminalAgentQuickCommand,
+  TuiAgent,
   WorktreeMeta
 } from '../../shared/types'
 import type { Automation } from '../../shared/automations-types'
 import type { Store } from '../persistence'
 import { AgentCatalogService } from './agent-catalog-service'
+import { getHostAgentSessionRecordStore } from './agent-session-record-store-host'
+import type { HostSessionLaunchRecord } from './agent-session-record-store'
 
 const UUID_A = '01234567-89ab-4cde-8f01-23456789abcd'
 const UUID_B = 'fedcba98-7654-4321-8fed-cba987654321'
@@ -260,6 +263,57 @@ describe('tombstone reference GC across owners', () => {
     expect(state.settings.deletedCustomTuiAgents).toHaveLength(0)
     expect(state.settings.agentCatalogRevision).toBe(2)
     expect(result.catalogRevision).toBe(2)
+  })
+})
+
+describe('session owner (host-private resume records)', () => {
+  const recordStore = getHostAgentSessionRecordStore()
+  const deadId = customId('codex', UUID_B)
+
+  afterEach(() => {
+    // The record store is a host-wide singleton; clear seeded records between tests.
+    recordStore.rebuildRecordsFrom([])
+    vi.restoreAllMocks()
+  })
+
+  function sessionRecord(requestedAgent: TuiAgent): HostSessionLaunchRecord {
+    return {
+      worktreeId: 'wt-session',
+      requestedAgent,
+      baseAgent: 'codex',
+      providerSession: { key: 'session_id', id: 'sess-1' },
+      registeredAt: 1,
+      updatedAt: 1
+    }
+  }
+
+  function serviceWithTombstone(): AgentCatalogService {
+    const state: StoreStubState = {
+      settings: baseSettings({ deletedCustomTuiAgents: [tombstoneFor(deadId)] }),
+      repos: [],
+      automations: []
+    }
+    return new AgentCatalogService(makeStoreStub(state))
+  }
+
+  it('retains the tombstone while a resumable session references the custom id and prunes after it is forgotten', () => {
+    const service = serviceWithTombstone()
+
+    recordStore.rebuildRecordsFrom([sessionRecord(deadId)])
+    expect(service.tombstoneReferenceIndex.countReferences(deadId)).toBe(1)
+    expect(service.getReferenceSummaries(deadId)).toContainEqual({ owner: 'session', count: 1 })
+
+    // Forgetting the last referencing session clears the reference so it can prune.
+    recordStore.rebuildRecordsFrom([])
+    expect(service.tombstoneReferenceIndex.countReferences(deadId)).toBe(0)
+  })
+
+  it('retains the tombstone when the session record store cannot be read', () => {
+    const service = serviceWithTombstone()
+    vi.spyOn(recordStore, 'referencedRequestedAgents').mockImplementation(() => {
+      throw new Error('store unavailable')
+    })
+    expect(service.tombstoneReferenceIndex.countReferences(deadId)).toBe('unknown')
   })
 })
 
