@@ -12,7 +12,7 @@ const MAX_SUGGESTIONS = 3
 const DESTRUCTIVE_INTENT_THRESHOLD = 1
 
 function finalToken(path: string[]): string {
-  return path[path.length - 1]
+  return path.at(-1) ?? ''
 }
 
 // Why: destructiveness is declared on the spec (single source of truth); the
