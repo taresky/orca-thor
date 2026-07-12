@@ -499,6 +499,9 @@ describe('orca cli worktree awareness', () => {
     delete process.env.ORCA_USER_DATA_PATH
     delete process.env.ORCA_WORKSPACE_ID
     delete process.env.ORCA_WORKTREE_ID
+    // Isolate the pane key so claude-teams tests that set it don't leak a
+    // senderPaneKey into later orchestration.send assertions.
+    delete process.env.ORCA_PANE_KEY
     serveOrcaAppMock.mockReset()
     getDefaultUserDataPathMock.mockClear()
     addEnvironmentFromPairingCodeMock.mockReset()
