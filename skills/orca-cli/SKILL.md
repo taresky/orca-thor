@@ -15,7 +15,7 @@ description: >-
 
 # Orca CLI
 
-Use `orca` when Orca's running editor/runtime is the source of truth. On Linux, use `orca-ide` wherever this file says `orca`.
+Use `orca` when Orca's running editor/runtime is the source of truth. Inside Orca-managed terminals, `orca` always resolves to the Orca CLI on every platform. In any other shell on Linux, use `orca-ide` wherever this file says `orca` — outside Orca's terminals, bare `orca` on Linux is usually the GNOME Orca screen reader (`/usr/bin/orca`), and running it starts speech on the user's machine.
 
 **Dev builds (`pnpm dev`):** after `pnpm build:cli`, the dev CLI is exposed as `orca-dev` (the global shim points at this checkout's wrapper + out/cli). Inside a dev Orca's terminals use `orca-dev emulator ...` (or `./config/scripts/orca-dev.mjs emulator ...` for worktree-local invocation that does not depend on the /usr/local/bin symlink). Plain `orca` targets any installed production Orca. The app's own agent preambles use `orca-dev` automatically in dev mode.
 
@@ -24,7 +24,9 @@ Use plain shell tools when Orca state does not matter.
 ## Start Here
 
 ```bash
-command -v orca || command -v orca-ide
+# Prefer orca-ide first: on Linux, a bare `orca` hit outside an Orca-managed
+# terminal is likely the GNOME screen reader, not the Orca CLI.
+command -v orca-ide || command -v orca
 orca status --json
 orca worktree ps --json
 orca terminal list --json
