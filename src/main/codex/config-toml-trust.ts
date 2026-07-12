@@ -215,12 +215,9 @@ export function normalizeCodexProjectPathForLookup(projectPath: string): string 
   if (!usesWindowsPathSeparators(projectPath)) {
     return projectPath
   }
-  return foldWindowsCaseInsensitivePath(normalizeWindowsPathSeparators(projectPath))
-}
-
-// Why: the Linux path under a WSL share is case-sensitive, so folding it would
-// conflate distinct dirs (e.g. .../Repo vs .../repo) onto one trust key.
-function foldWindowsCaseInsensitivePath(slashedPath: string): string {
+  // Why: the Linux path under a WSL share is case-sensitive, so folding it would
+  // conflate distinct dirs (e.g. .../Repo vs .../repo) onto one trust key.
+  const slashedPath = normalizeWindowsPathSeparators(projectPath)
   return foldWslUncPathCaseInsensitiveParts(slashedPath) ?? slashedPath.toLowerCase()
 }
 
@@ -551,6 +548,7 @@ export function normalizeHookTrustKeyForLookup(key: string): string {
 
 function findTrustBlockRanges(content: string, key: string): TrustBlockRange[] {
   const ranges: TrustBlockRange[] = []
+  const normalizedKey = normalizeHookTrustKeyForLookup(key)
   let cursor = 0
   let scanState = createTomlLineScanState()
   while (cursor < content.length) {
@@ -560,10 +558,7 @@ function findTrustBlockRanges(content: string, key: string): TrustBlockRange[] {
     const line = rawLine.replace(/\r$/, '')
     const nextCursor = newlineIdx === -1 ? content.length : newlineIdx + 1
     const headerKey = isTomlStructuralLine(scanState) ? parseHookStateHeaderKey(line) : null
-    if (
-      headerKey !== null &&
-      normalizeHookTrustKeyForLookup(headerKey) === normalizeHookTrustKeyForLookup(key)
-    ) {
+    if (headerKey !== null && normalizeHookTrustKeyForLookup(headerKey) === normalizedKey) {
       const headerLineEnd = rawLine.endsWith('\r') ? lineEnd - 1 : lineEnd
       const after = content.slice(headerLineEnd)
       const nextHeaderRel = findNextTableHeader(after)

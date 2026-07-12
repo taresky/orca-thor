@@ -38,6 +38,12 @@ describe('foldWslUncPathCaseInsensitiveParts', () => {
     )
   })
 
+  it('does not treat a case-variant /MNT dir as the drvfs automount', () => {
+    expect(foldWslUncPathCaseInsensitiveParts('\\\\wsl$\\Ubuntu\\MNT\\c\\Repo')).toBe(
+      '//wsl.localhost/ubuntu/MNT/c/Repo'
+    )
+  })
+
   it('returns null for non-WSL paths', () => {
     expect(foldWslUncPathCaseInsensitiveParts('C:\\Users\\jin')).toBeNull()
     expect(foldWslUncPathCaseInsensitiveParts('//server/share/x')).toBeNull()

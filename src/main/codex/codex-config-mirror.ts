@@ -171,11 +171,21 @@ function mergeSystemCodexConfigIntoRuntime(runtimeConfig: string, systemConfig: 
       .filter((section) => isRuntimeProjectTomlSection(section.header))
       .map((section) => getTomlSectionHeaderKey(section.header))
   )
+  const systemProjectSections = deduplicateProjectTomlSections(getTomlSections(systemConfig)).filter(
+    (section) => isRuntimeProjectTomlSection(section.header)
+  )
   const systemUntrustedProjectHeaders = new Set(
-    deduplicateProjectTomlSections(getTomlSections(systemConfig))
-      .filter((section) => isRuntimeProjectTomlSection(section.header))
+    systemProjectSections
       .filter((section) => getProjectTrustLevel(section.block) === 'untrusted')
       .map((section) => getRevocationTomlSectionHeaderKey(section.header))
+  )
+  // Why: an exact-cased trusted entry in ~/.codex is the user's latest explicit
+  // decision for that exact project; a loosely-matched (case-drifted) revocation
+  // must not override it, or re-granting trust would be reverted every mirror.
+  const systemTrustedProjectHeaders = new Set(
+    systemProjectSections
+      .filter((section) => getProjectTrustLevel(section.block) === 'trusted')
+      .map((section) => getTomlSectionHeaderKey(section.header))
   )
   // Why: ordinary Codex settings should mirror ~/.codex exactly; runtime hook
   // trust and project trust are written under Orca's managed CODEX_HOME and
@@ -188,7 +198,8 @@ function mergeSystemCodexConfigIntoRuntime(runtimeConfig: string, systemConfig: 
       .filter(
         (section) =>
           !isRuntimeProjectTomlSection(section.header) ||
-          !systemUntrustedProjectHeaders.has(getRevocationTomlSectionHeaderKey(section.header))
+          !systemUntrustedProjectHeaders.has(getRevocationTomlSectionHeaderKey(section.header)) ||
+          systemTrustedProjectHeaders.has(getTomlSectionHeaderKey(section.header))
       )
       .map((section) => section.block)
   ])
