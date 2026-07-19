@@ -996,6 +996,7 @@ export default function SessionScreen() {
   // Mirrors Settings ▸ Voice ▸ Dictation Mode so the button matches the setting.
   const [dictationMode, setDictationMode] = useState<'toggle' | 'hold'>('toggle')
   const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const [toastSurface, setToastSurface] = useState<'upper' | 'lower'>('upper')
   const toastOpacityRef = useRef(new Animated.Value(0))
   const toastHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const toastSeqRef = useRef(0)
@@ -1162,10 +1163,18 @@ export default function SessionScreen() {
   }, [])
 
   const showToast = useCallback(
-    (message: string, durationMs = 1200) => {
+    (message: string, durationMs = 1200, surface?: 'upper' | 'lower') => {
       const seq = toastSeqRef.current + 1
       toastSeqRef.current = seq
       clearToastHideTimer()
+      setToastSurface(
+        surface ??
+          (thorSecondaryActive &&
+          activeSessionTab?.type !== 'markdown' &&
+          activeSessionTab?.type !== 'file'
+            ? 'lower'
+            : 'upper')
+      )
       setToastMessage(message)
       Animated.timing(toastOpacityRef.current, {
         toValue: 1,
@@ -1189,7 +1198,7 @@ export default function SessionScreen() {
         }, durationMs)
       })
     },
-    [clearToastHideTimer]
+    [activeSessionTab?.type, clearToastHideTimer, thorSecondaryActive]
   )
   const showNativeChatSendError = useCallback(
     (message: string) => showToast(message, 1600),
@@ -2148,12 +2157,12 @@ export default function SessionScreen() {
       try {
         await persistDiffComments(result.comments)
         triggerSuccess()
-        showToast('Note added')
+        showToast('Note added', 1200, 'upper')
         return true
       } catch (err) {
         setDiffComments(previous)
         triggerError()
-        showToast(err instanceof Error ? err.message : 'Failed to save note', 1600)
+        showToast(err instanceof Error ? err.message : 'Failed to save note', 1600, 'upper')
         return false
       } finally {
         setDiffCommentBusy(false)
@@ -2180,7 +2189,7 @@ export default function SessionScreen() {
       } catch (err) {
         setDiffComments(previous)
         triggerError()
-        showToast(err instanceof Error ? err.message : 'Failed to delete note', 1600)
+        showToast(err instanceof Error ? err.message : 'Failed to delete note', 1600, 'upper')
       } finally {
         setDiffCommentBusy(false)
       }
@@ -2196,10 +2205,10 @@ export default function SessionScreen() {
     try {
       await Clipboard.setStringAsync(formatDiffComments(comments))
       triggerSuccess()
-      showToast('Notes copied')
+      showToast('Notes copied', 1200, 'upper')
     } catch {
       triggerError()
-      showToast("Couldn't copy notes", 1600)
+      showToast("Couldn't copy notes", 1600, 'upper')
     }
   }, [showToast])
 
@@ -2259,7 +2268,7 @@ export default function SessionScreen() {
       }
       await Clipboard.setStringAsync(current.localContent)
       triggerSuccess()
-      showToast('Copied')
+      showToast('Copied', 1200, 'upper')
     },
     [markdownDocs, showToast]
   )
@@ -2379,7 +2388,7 @@ export default function SessionScreen() {
         )
         markdownSaveSeqRef.current.delete(tab.id)
         triggerSuccess()
-        showToast('Saved')
+        showToast('Saved', 1200, 'upper')
       } catch (error) {
         triggerError()
         const message = error instanceof Error ? error.message : 'Save failed'
@@ -3736,7 +3745,7 @@ export default function SessionScreen() {
         // nothing on copy (it only banners on paste), so the in-app toast is
         // the only success signal there.
         if (Platform.OS === 'ios') {
-          showToast('Copied')
+          showToast('Copied', 1200, 'upper')
         }
         terminalRefs.current.get(handle)?.cancelSelect()
       } catch (e) {
@@ -3747,7 +3756,7 @@ export default function SessionScreen() {
           name: err.name,
           message: err.message
         })
-        showToast("Couldn't copy", 1500)
+        showToast("Couldn't copy", 1500, 'upper')
       }
     },
     [showToast]
@@ -3760,7 +3769,7 @@ export default function SessionScreen() {
       }
       // eslint-disable-next-line no-console
       console.warn('[mobile-clip] selection evicted')
-      showToast('Selection cleared (scrolled out of buffer)', 1500)
+      showToast('Selection cleared (scrolled out of buffer)', 1500, 'upper')
       setSelectModeActive(false)
     },
     [showToast]
@@ -5335,7 +5344,7 @@ export default function SessionScreen() {
         ]}
         onClose={() => setDeleteKeyTarget(null)}
       />
-      {thorSecondaryActive ? sessionToast : null}
+      {thorSecondaryActive && toastSurface === 'lower' ? sessionToast : null}
     </>
   )
 
@@ -5457,7 +5466,7 @@ export default function SessionScreen() {
                   onDiscard={() => discardMarkdownLocalContent(activeMarkdownTab)}
                   keyboardLift={keyboardLift}
                 />
-                {!thorSecondaryActive ? sessionToast : null}
+                {!thorSecondaryActive || toastSurface === 'upper' ? sessionToast : null}
               </View>
             ) : activeFileTab ? (
               <View style={styles.markdownFrame}>
@@ -5479,7 +5488,7 @@ export default function SessionScreen() {
                       : undefined
                   }
                 />
-                {!thorSecondaryActive ? sessionToast : null}
+                {!thorSecondaryActive || toastSurface === 'upper' ? sessionToast : null}
               </View>
             ) : activeBrowserTab ? (
               <View style={styles.browserFrame}>
@@ -5499,7 +5508,7 @@ export default function SessionScreen() {
                     owner: `${thorSecondaryContextOwner}:browser`
                   }}
                 />
-                {!thorSecondaryActive ? sessionToast : null}
+                {!thorSecondaryActive || toastSurface === 'upper' ? sessionToast : null}
               </View>
             ) : activePendingTerminalTab ? (
               <View style={styles.emptyState}>
@@ -5566,7 +5575,7 @@ export default function SessionScreen() {
                     owner: `${thorSecondaryContextOwner}:chat`
                   }}
                 />
-                {!thorSecondaryActive ? sessionToast : null}
+                {!thorSecondaryActive || toastSurface === 'upper' ? sessionToast : null}
               </View>
             )}
 
