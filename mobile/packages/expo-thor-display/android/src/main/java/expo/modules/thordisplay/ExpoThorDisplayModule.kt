@@ -9,7 +9,6 @@ import expo.modules.kotlin.modules.ModuleDefinition
 
 class ExpoThorDisplayModule : Module() {
     companion object {
-        private const val ON_CONTROL_EVENT = "onThorControl"
         private const val ON_STATUS_EVENT = "onThorStatus"
     }
 
@@ -18,7 +17,7 @@ class ExpoThorDisplayModule : Module() {
 
     override fun definition() = ModuleDefinition {
         Name("ExpoThorDisplay")
-        Events(ON_CONTROL_EVENT, ON_STATUS_EVENT)
+        Events(ON_STATUS_EVENT)
 
         AsyncFunction("start") { force: Boolean, promise: Promise ->
             val activity = appContext.currentActivity
@@ -41,36 +40,6 @@ class ExpoThorDisplayModule : Module() {
                 } catch (error: Exception) {
                     promise.reject("ERR_THOR_START", error.message, error)
                 }
-            }
-        }
-
-        Function("updateSession") { state: Map<String, Any?> ->
-            val next = ThorSessionState(
-                active = state["active"] as? Boolean ?: false,
-                connectionState = ThorConnectionState.fromWire(state["connectionState"] as? String),
-                terminalTitle = state["terminalTitle"] as? String ?: "",
-                worktreeName = state["worktreeName"] as? String ?: ""
-            )
-            runOnMain {
-                controller?.updateSession(next)
-            }
-        }
-
-        Function("clearSession") {
-            runOnMain {
-                controller?.clearSession()
-            }
-        }
-
-        Function("restoreDraft") { text: String ->
-            runOnMain {
-                controller?.restoreDraft(text)
-            }
-        }
-
-        Function("setSending") { sending: Boolean ->
-            runOnMain {
-                controller?.setSending(sending)
             }
         }
 

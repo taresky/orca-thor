@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { StyleSheet, Text, View } from 'react-native'
+import { StyleSheet, View } from 'react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { colors } from '../theme/mobile-theme'
@@ -20,22 +20,12 @@ export function ThorSecondaryRoot(): React.JSX.Element {
   return (
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
-        <View style={styles.root}>
-          {snapshot.content ?? (
-            <Text style={styles.idle}>Open an Orca session on the upper screen</Text>
-          )}
-        </View>
+        <View style={styles.root}>{snapshot.content}</View>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   )
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bgBase },
-  idle: {
-    flex: 1,
-    color: colors.textMuted,
-    textAlign: 'center',
-    textAlignVertical: 'center'
-  }
+  root: { flex: 1, backgroundColor: colors.bgBase }
 })

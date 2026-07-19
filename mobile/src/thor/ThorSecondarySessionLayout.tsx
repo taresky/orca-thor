@@ -34,9 +34,8 @@ export function ThorSecondarySessionLayout({
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bgBase },
   context: { flex: 1, minHeight: 0 },
-  // Fabric can preserve the previous flex measurement when a secondary root swaps
-  // chrome + dock for a single panel. Pin the replacement to the presentation's
-  // bounds so embedded panels receive a concrete width and height on the same frame.
+  // Why: Fabric may retain the prior flex measurement during a secondary-root swap;
+  // pin the replacement so panels receive concrete bounds in the same frame.
   fullscreenContext: {
     ...StyleSheet.absoluteFillObject
   }

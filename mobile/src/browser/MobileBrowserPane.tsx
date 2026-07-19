@@ -1,4 +1,4 @@
-/* oxlint-disable react-doctor/no-adjust-state-on-prop-change, max-lines -- Why: mobile browser state mirrors one remote screencast session; its controls are also rendered on Thor's secondary React surface without duplicating the session state machine. */
+/* oxlint-disable react-doctor/no-adjust-state-on-prop-change -- Why: mobile browser state mirrors one remote screencast session. */
 // Why: import from 'buffer' (the npm polyfill), not 'node:buffer' — Metro
 // can't resolve Node's builtin in a React Native bundle.
 import { Buffer } from 'buffer'
@@ -1509,7 +1509,6 @@ const styles = StyleSheet.create({
   },
   secondaryControlsRoot: {
     flex: 1,
-    minHeight: 0,
     backgroundColor: colors.bgBase
   },
   secondaryControlsSpacer: {

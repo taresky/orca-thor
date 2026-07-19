@@ -1,42 +1,10 @@
-import type { ReactNode } from 'react'
+import { createThorSecondarySlotStore } from './thor-secondary-slot-store'
 
-export type ThorSecondaryContextSnapshot = {
-  owner: string | null
-  content: ReactNode | null
-}
+export type { ThorSecondarySlotSnapshot as ThorSecondaryContextSnapshot } from './thor-secondary-slot-store'
 
-const EMPTY_SNAPSHOT: ThorSecondaryContextSnapshot = { owner: null, content: null }
+const store = createThorSecondarySlotStore()
 
-let snapshot = EMPTY_SNAPSHOT
-const listeners = new Set<() => void>()
-
-export function getThorSecondaryContextSnapshot(): ThorSecondaryContextSnapshot {
-  return snapshot
-}
-
-export function subscribeThorSecondaryContext(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
-}
-
-export function publishThorSecondaryContext(owner: string, content: ReactNode): void {
-  if (snapshot.owner === owner && snapshot.content === content) {
-    return
-  }
-  snapshot = { owner, content }
-  notify()
-}
-
-export function clearThorSecondaryContext(owner: string): void {
-  if (snapshot.owner !== owner) {
-    return
-  }
-  snapshot = EMPTY_SNAPSHOT
-  notify()
-}
-
-function notify(): void {
-  for (const listener of listeners) {
-    listener()
-  }
-}
+export const getThorSecondaryContextSnapshot = store.getSnapshot
+export const subscribeThorSecondaryContext = store.subscribe
+export const publishThorSecondaryContext = store.publish
+export const clearThorSecondaryContext = store.clear

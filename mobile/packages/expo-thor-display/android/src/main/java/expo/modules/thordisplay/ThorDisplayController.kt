@@ -18,7 +18,6 @@ class ThorDisplayController(
     private var force = false
     private var listening = false
     private var presentation: ThorReactPresentation? = null
-    private var state = ThorSessionState()
 
     fun start(nextActivity: Activity, forceOnNonThor: Boolean): ThorDisplayStatus {
         activity = nextActivity
@@ -39,23 +38,6 @@ class ThorDisplayController(
             displayManager.unregisterDisplayListener(this)
             listening = false
         }
-    }
-
-    fun updateSession(next: ThorSessionState) {
-        state = next
-    }
-
-    fun clearSession() {
-        updateSession(ThorSessionState())
-    }
-
-    fun restoreDraft(text: String) {
-        // Legacy no-op: text input now lives in the shared React Native tree,
-        // so its controlled value never crosses the native Presentation.
-    }
-
-    fun setSending(sending: Boolean) {
-        // Legacy no-op: pending state is rendered by the original RN controls.
     }
 
     override fun onDisplayAdded(displayId: Int) {

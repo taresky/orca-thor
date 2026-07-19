@@ -38,6 +38,7 @@ export type MobileAgentSessionHistoryPanelProps = {
   hostId: string
   worktreeId: string
   name?: string
+  onBack?: () => void
 }
 
 const SCOPE_TABS: { scope: AiVaultScope; label: string }[] = [
@@ -49,7 +50,8 @@ const SCOPE_TABS: { scope: AiVaultScope; label: string }[] = [
 export function MobileAgentSessionHistoryPanel({
   hostId,
   worktreeId,
-  name = ''
+  name = '',
+  onBack
 }: MobileAgentSessionHistoryPanelProps) {
   const router = useRouter()
   const { client, state: connState } = useHostClient(hostId)
@@ -241,7 +243,7 @@ export function MobileAgentSessionHistoryPanel({
         <View style={styles.topBar}>
           <Pressable
             style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
-            onPress={() => router.back()}
+            onPress={() => (onBack ? onBack() : router.back())}
             hitSlop={8}
             accessibilityLabel="Back"
           >

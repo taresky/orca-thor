@@ -3,6 +3,7 @@ import {
   clearThorSecondaryContent,
   getThorSecondaryContentSnapshot,
   publishThorSecondaryContent,
+  refreshThorSecondaryContent,
   subscribeThorSecondaryContent
 } from './thor-secondary-content-store'
 
@@ -47,5 +48,15 @@ describe('thor secondary content store', () => {
     clearThorSecondaryContent('active-session')
 
     expect(getThorSecondaryContentSnapshot()).toEqual({ owner: null, content: null })
+  })
+
+  it('refreshes the snapshot after the primary activity resumes', () => {
+    publishThorSecondaryContent('active-session', 'controls')
+    const before = getThorSecondaryContentSnapshot()
+
+    refreshThorSecondaryContent()
+
+    expect(getThorSecondaryContentSnapshot()).toEqual(before)
+    expect(getThorSecondaryContentSnapshot()).not.toBe(before)
   })
 })

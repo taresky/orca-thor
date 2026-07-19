@@ -1,4 +1,3 @@
-/* oxlint-disable max-lines -- Why: the session route owns the existing terminal, browser, file, markdown, native-chat, and panel state machines; Thor only relocates their actual React subtrees to the secondary surface. */
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Animated, AppState, Linking, type AppStateStatus } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
@@ -85,6 +84,7 @@ import {
 import { MobileSessionHeaderIconButton } from '../../../../src/session/MobileSessionHeaderIconButton'
 import { MobileSessionHeaderMoreActionsSheet } from '../../../../src/session/MobileSessionHeaderMoreActionsSheet'
 import { MOBILE_AI_VAULT_CAPABILITY } from '../../../../src/agent-history/agent-history-capability'
+import { MobileAgentSessionHistoryPanel } from '../../../../src/agent-history/MobileAgentSessionHistoryPanel'
 import type { ConnectionState, RpcFailure, RpcSuccess } from '../../../../src/transport/types'
 import { headlessActivationNeedsHostRenderer } from '../../../../src/worktree/worktree-activation-result'
 import { useMobileDictation } from '../../../../src/hooks/use-mobile-dictation'
@@ -239,6 +239,7 @@ import { useThorDisplaySession } from '../../../../src/thor/use-thor-display-ses
 import { useThorSecondaryContent } from '../../../../src/thor/use-thor-secondary-content'
 import { ThorSecondarySessionLayout } from '../../../../src/thor/ThorSecondarySessionLayout'
 import { ThorSecondaryContextSlot } from '../../../../src/thor/ThorSecondaryContextSlot'
+import { ThorTerminalShortcutSettingsPanel } from '../../../../src/thor/ThorTerminalShortcutSettingsPanel'
 import {
   createMobileSessionCreateWarningState,
   dismissMobileSessionCreateWarningState,
@@ -832,6 +833,7 @@ export default function SessionScreen() {
   // docs/mobile-shared-client-per-host.md.
   const { client, state: connState } = useHostClient(hostId)
   const rpcClientContext = useRpcClientContext()
+  const thorSecondaryActive = useThorDisplaySession()
   const reconnectAttempts = useReconnectAttempt(hostId)
   const lastConnectedAt = useLastConnectedAt(hostId)
   const forceReconnectHost = useForceReconnect()
@@ -845,6 +847,9 @@ export default function SessionScreen() {
   // session content; on narrow it stays null and the icons push full-screen routes.
   const { isWideLayout } = useResponsiveLayout()
   const [activePanel, setActivePanel] = useState<ActivePanel>(null)
+  const [thorSecondaryTakeover, setThorSecondaryTakeover] = useState<
+    'agentHistory' | 'shortcuts' | null
+  >(null)
   const [sessionContentRowWidth, setSessionContentRowWidth] = useState(0)
   const canDockPanel = canDockSessionPanel({
     isWideLayout,
@@ -855,10 +860,10 @@ export default function SessionScreen() {
   // the session row too narrow while a panel is docked, clear activePanel so the
   // icon state and live mounted panel do not survive into overlay/push mode.
   useEffect(() => {
-    if (!canDockPanel && activePanel !== null) {
+    if (!thorSecondaryActive && !canDockPanel && activePanel !== null) {
       setActivePanel(null)
     }
-  }, [canDockPanel, activePanel])
+  }, [activePanel, canDockPanel, thorSecondaryActive])
   // Session-level GitHub remote probe gates the PR dock icon so non-GitHub
   // providers do not open the hosted-review surface. Branch/head/status for the
   // hub are loaded inside MobileSourceControlPanel — skip the unused identity RPCs.
@@ -1103,16 +1108,6 @@ export default function SessionScreen() {
     activeSessionTab?.type !== 'file' &&
     activeSessionTab?.type !== 'browser'
   const liveInputEnabled = activeHandle ? liveInputTerminalHandles.has(activeHandle) : false
-  const thorSecondaryActive = useThorDisplaySession({
-    active: activeSessionTab?.type === 'terminal' && activeHandle != null,
-    client,
-    clientId: deviceTokenRef.current,
-    connected: connState === 'connected',
-    connectionState: connState,
-    terminal: activeHandle,
-    terminalTitle: activeSessionTab ? getMobileSessionTabTitle(activeSessionTab) : '',
-    worktreeName
-  })
   const [browserScreencastSupported, setBrowserScreencastSupported] = useState<boolean | null>(null)
   // Why: hosts without aiVault.v1 reject aiVault.listSessions, so the header
   // entry stays hidden there (mirrors the gated host-list action) instead of
@@ -2713,8 +2708,12 @@ export default function SessionScreen() {
 
   const handleManageShortcuts = useCallback(() => {
     setShowCustomKeyModal(false)
+    if (thorSecondaryActive) {
+      setThorSecondaryTakeover('shortcuts')
+      return
+    }
     router.push('/terminal-settings')
-  }, [router])
+  }, [router, thorSecondaryActive])
 
   useEffect(() => {
     // Why: Expo can reuse this screen across worktrees. Reset pending
@@ -4580,6 +4579,11 @@ export default function SessionScreen() {
   }
 
   const openAgentSessionHistory = () => {
+    setShowHeaderMoreActions(false)
+    if (thorSecondaryActive) {
+      setThorSecondaryTakeover('agentHistory')
+      return
+    }
     const params = new URLSearchParams({ name: worktreeName || '' })
     router.push(`/h/${hostId}/agent-history/${encodeURIComponent(worktreeId)}?${params.toString()}`)
   }
@@ -5052,6 +5056,12 @@ export default function SessionScreen() {
     </SafeAreaView>
   )
 
+  const sessionToast = toastMessage ? (
+    <Animated.View pointerEvents="none" style={[styles.toast, toastAnimatedStyle]}>
+      <Text style={styles.toastText}>{toastMessage}</Text>
+    </Animated.View>
+  ) : null
+
   const thorSessionOverlays = (
     <>
       <MobileSessionHeaderMoreActionsSheet
@@ -5325,7 +5335,43 @@ export default function SessionScreen() {
         ]}
         onClose={() => setDeleteKeyTarget(null)}
       />
+      {thorSecondaryActive ? sessionToast : null}
     </>
+  )
+
+  const createWarningBanner = createWarning ? (
+    <View style={styles.createWarningBanner}>
+      <AlertTriangle size={16} color={colors.statusAmber} strokeWidth={2.2} />
+      <Text style={styles.createWarningText}>{createWarning}</Text>
+      <Pressable
+        style={styles.createWarningDismiss}
+        onPress={() => setCreateWarningState(dismissMobileSessionCreateWarningState)}
+        accessibilityLabel="Dismiss workspace creation warning"
+        hitSlop={8}
+      >
+        <X size={16} color={colors.textMuted} strokeWidth={2.2} />
+      </Pressable>
+    </View>
+  ) : null
+  const createTabButton = (
+    <View style={styles.emptyActions}>
+      <Pressable
+        style={[
+          styles.createButton,
+          (creating || creatingBrowser || creatingMarkdown || connState !== 'connected') &&
+            styles.createButtonDisabled
+        ]}
+        disabled={creating || creatingBrowser || creatingMarkdown || connState !== 'connected'}
+        onPress={() => {
+          setCreateError('')
+          setShowCreateTabDrawer(true)
+        }}
+      >
+        <Text style={styles.createButtonText}>
+          {creating || creatingBrowser || creatingMarkdown ? 'Creating...' : 'Create Tab'}
+        </Text>
+      </Pressable>
+    </View>
   )
 
   const thorSecondaryPanel = activePanel ? (
@@ -5341,15 +5387,36 @@ export default function SessionScreen() {
       />
     </View>
   ) : null
+  const thorSecondaryTakeoverContent =
+    thorSecondaryTakeover === 'agentHistory' ? (
+      <MobileAgentSessionHistoryPanel
+        hostId={hostId}
+        worktreeId={worktreeId}
+        name={worktreeName || ''}
+        onBack={() => setThorSecondaryTakeover(null)}
+      />
+    ) : thorSecondaryTakeover === 'shortcuts' ? (
+      <ThorTerminalShortcutSettingsPanel onBack={() => setThorSecondaryTakeover(null)} />
+    ) : null
+  const thorSecondaryDefaultContext = (
+    <View style={styles.sessionContentMain}>
+      {createWarningBanner}
+      {showEmptyState ? (
+        <View style={styles.emptyState}>{createTabButton}</View>
+      ) : (
+        <ThorSecondaryContextSlot />
+      )}
+    </View>
+  )
   const thorSecondaryContextOwner = `${hostId}:${worktreeId}:${activeSessionTabId ?? 'none'}`
   const thorSecondaryContent = (
     <RpcClientContextBridge value={rpcClientContext}>
       <ThorSecondarySessionLayout
         chrome={thorSessionChrome}
-        context={thorSecondaryPanel ?? <ThorSecondaryContextSlot />}
+        context={thorSecondaryTakeoverContent ?? thorSecondaryPanel ?? thorSecondaryDefaultContext}
         dock={thorCommandDock}
         overlays={thorSessionOverlays}
-        contextFullscreen={activePanel !== null}
+        contextFullscreen={activePanel !== null || thorSecondaryTakeoverContent !== null}
       />
     </RpcClientContextBridge>
   )
@@ -5358,162 +5425,7 @@ export default function SessionScreen() {
   return (
     <View ref={setMobileSessionRootRef} style={styles.container}>
       <View style={styles.kavInner}>
-        {!thorSecondaryActive ? (
-          <SafeAreaView style={styles.sessionChrome} edges={['top']}>
-            <View style={styles.sessionTopBar}>
-              <Pressable
-                style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
-                onPress={requestLeaveSession}
-                hitSlop={8}
-                accessibilityLabel="Back to worktrees"
-              >
-                <ChevronLeft size={22} color={colors.textSecondary} strokeWidth={2.2} />
-              </Pressable>
-
-              <View style={styles.sessionTitleBlock}>
-                <Text style={styles.sessionTitle} numberOfLines={1}>
-                  {worktreeName || 'Terminal'}
-                </Text>
-                <Pressable
-                  style={styles.sessionMetaRow}
-                  disabled={!showConnectionRetry}
-                  onPress={() => {
-                    if (hostId) {
-                      void forceReconnectHost(hostId)
-                    }
-                  }}
-                  accessibilityRole={showConnectionRetry ? 'button' : undefined}
-                  accessibilityLabel={showConnectionRetry ? 'Reconnect to desktop' : undefined}
-                >
-                  <StatusDot state={connState} />
-                  <Text style={styles.sessionMetaText} numberOfLines={1}>
-                    {terminalSummary}
-                  </Text>
-                </Pressable>
-              </View>
-              <MobileSessionHeaderIconButton
-                active={activePanel === 'files'}
-                accessibilityLabel="Open file explorer"
-                icon={Folder}
-                onPress={() => handlePanelTap('files')}
-              />
-              {!isFolderWorkspaceRoute && (
-                <MobileSessionHeaderIconButton
-                  active={activePanel === 'sourceControl'}
-                  accessibilityLabel="Open source control"
-                  icon={GitBranch}
-                  onPress={() => handlePanelTap('sourceControl')}
-                />
-              )}
-              {showHeaderMoreButton ? (
-                <MobileSessionHeaderIconButton
-                  active={activePanel === 'pr'}
-                  accessibilityLabel="More session actions"
-                  icon={MoreHorizontal}
-                  onPress={() => setShowHeaderMoreActions(true)}
-                />
-              ) : null}
-            </View>
-
-            {visibleTabs.length > 0 && (
-              <View style={styles.tabBar}>
-                {/* Why: tab taps must register on the first press while the live
-                  keyboard is open instead of being eaten by keyboard dismissal
-                  (#5106); leaving a non-live tab still closes the keyboard
-                  because the live input unmounts. */}
-                <ScrollView
-                  ref={tabStripRef}
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  style={styles.tabScroll}
-                  contentContainerStyle={styles.tabContent}
-                  keyboardShouldPersistTaps="handled"
-                  scrollEventThrottle={16}
-                  onScroll={(e) => {
-                    tabStripOffsetRef.current = e.nativeEvent.contentOffset.x
-                  }}
-                  onLayout={(e) => {
-                    tabStripViewportWidthRef.current = e.nativeEvent.layout.width
-                    scrollActiveTabIntoView(activeSessionTabIdRef.current, false)
-                  }}
-                  onContentSizeChange={(width) => {
-                    tabStripContentWidthRef.current = width
-                    scrollActiveTabIntoView(activeSessionTabIdRef.current, false)
-                  }}
-                >
-                  {visibleTabs.map((t) => (
-                    <Pressable
-                      key={t.id}
-                      style={[styles.tab, t.id === activeSessionTabId && styles.tabActive]}
-                      onLayout={(e) => {
-                        const { x, width } = e.nativeEvent.layout
-                        tabLayoutsRef.current.set(t.id, { x, width })
-                        if (t.id === activeSessionTabIdRef.current) {
-                          scrollActiveTabIntoView(t.id, false)
-                        }
-                      }}
-                      onPress={() => switchSessionTab(t)}
-                      onLongPress={() => {
-                        triggerMediumImpact()
-                        openSessionTabActionSheetAfterKeyboardDismiss(t)
-                      }}
-                      delayLongPress={400}
-                    >
-                      <View style={styles.tabLabelRow}>
-                        {t.type === 'browser' && (
-                          <Globe size={13} color={colors.textSecondary} strokeWidth={2.1} />
-                        )}
-                        {t.type === 'markdown' && (
-                          <FileText size={13} color={colors.textSecondary} strokeWidth={2.1} />
-                        )}
-                        {t.type === 'file' && (
-                          <File size={13} color={colors.textSecondary} strokeWidth={2.1} />
-                        )}
-                        {t.type === 'terminal' &&
-                          (() => {
-                            const agentId = resolveMobileTerminalTabAgentId(t)
-                            return agentId ? <MobileAgentIcon agentId={agentId} size={13} /> : null
-                          })()}
-                        <Text
-                          style={[
-                            styles.tabText,
-                            t.id === activeSessionTabId && styles.tabTextActive
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {getMobileSessionTabTitle(t)}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  ))}
-                </ScrollView>
-                {/* Why: pinned outside the scroll strip so the new-agent button
-                  stays reachable no matter how far the tabs scroll. */}
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.newTerminalButton,
-                    pressed && styles.newTerminalButtonPressed,
-                    (creating ||
-                      creatingBrowser ||
-                      creatingMarkdown ||
-                      connState !== 'connected') &&
-                      styles.newTerminalButtonDisabled
-                  ]}
-                  disabled={
-                    creating || creatingBrowser || creatingMarkdown || connState !== 'connected'
-                  }
-                  onPress={() => {
-                    setCreateError('')
-                    setShowCreateTabDrawer(true)
-                  }}
-                  accessibilityLabel="New tab"
-                >
-                  <Plus size={16} color={colors.textSecondary} strokeWidth={2.2} />
-                </Pressable>
-              </View>
-            )}
-          </SafeAreaView>
-        ) : null}
+        {!thorSecondaryActive ? thorSessionChrome : null}
 
         {/* Content-row host (KTD2): the header/tab chrome stays a full-width sibling
             above; on wide the post-chrome content shares this row with the docked panel.
@@ -5521,20 +5433,7 @@ export default function SessionScreen() {
             flex-1 left child. On narrow the dock never renders and layout is unchanged. */}
         <View style={styles.sessionContentRow} onLayout={handleSessionContentRowLayout}>
           <View style={styles.sessionContentMain}>
-            {createWarning ? (
-              <View style={styles.createWarningBanner}>
-                <AlertTriangle size={16} color={colors.statusAmber} strokeWidth={2.2} />
-                <Text style={styles.createWarningText}>{createWarning}</Text>
-                <Pressable
-                  style={styles.createWarningDismiss}
-                  onPress={() => setCreateWarningState(dismissMobileSessionCreateWarningState)}
-                  accessibilityLabel="Dismiss workspace creation warning"
-                  hitSlop={8}
-                >
-                  <X size={16} color={colors.textMuted} strokeWidth={2.2} />
-                </Pressable>
-              </View>
-            ) : null}
+            {!thorSecondaryActive ? createWarningBanner : null}
 
             {showLoadingState ? (
               <View style={styles.emptyState}>
@@ -5544,31 +5443,7 @@ export default function SessionScreen() {
               <View style={styles.emptyState}>
                 <Text style={styles.emptyText}>No tabs in this session</Text>
                 {createError ? <Text style={styles.createError}>{createError}</Text> : null}
-                <View style={styles.emptyActions}>
-                  <Pressable
-                    style={[
-                      styles.createButton,
-                      (creating ||
-                        creatingBrowser ||
-                        creatingMarkdown ||
-                        connState !== 'connected') &&
-                        styles.createButtonDisabled
-                    ]}
-                    disabled={
-                      creating || creatingBrowser || creatingMarkdown || connState !== 'connected'
-                    }
-                    onPress={() => {
-                      setCreateError('')
-                      setShowCreateTabDrawer(true)
-                    }}
-                  >
-                    <Text style={styles.createButtonText}>
-                      {creating || creatingBrowser || creatingMarkdown
-                        ? 'Creating...'
-                        : 'Create Tab'}
-                    </Text>
-                  </Pressable>
-                </View>
+                {!thorSecondaryActive ? createTabButton : null}
               </View>
             ) : activeMarkdownTab ? (
               <View style={styles.markdownFrame}>
@@ -5582,11 +5457,7 @@ export default function SessionScreen() {
                   onDiscard={() => discardMarkdownLocalContent(activeMarkdownTab)}
                   keyboardLift={keyboardLift}
                 />
-                {toastMessage && (
-                  <Animated.View pointerEvents="none" style={[styles.toast, toastAnimatedStyle]}>
-                    <Text style={styles.toastText}>{toastMessage}</Text>
-                  </Animated.View>
-                )}
+                {!thorSecondaryActive ? sessionToast : null}
               </View>
             ) : activeFileTab ? (
               <View style={styles.markdownFrame}>
@@ -5608,11 +5479,7 @@ export default function SessionScreen() {
                       : undefined
                   }
                 />
-                {toastMessage && (
-                  <Animated.View pointerEvents="none" style={[styles.toast, toastAnimatedStyle]}>
-                    <Text style={styles.toastText}>{toastMessage}</Text>
-                  </Animated.View>
-                )}
+                {!thorSecondaryActive ? sessionToast : null}
               </View>
             ) : activeBrowserTab ? (
               <View style={styles.browserFrame}>
@@ -5632,11 +5499,7 @@ export default function SessionScreen() {
                     owner: `${thorSecondaryContextOwner}:browser`
                   }}
                 />
-                {toastMessage && (
-                  <Animated.View pointerEvents="none" style={[styles.toast, toastAnimatedStyle]}>
-                    <Text style={styles.toastText}>{toastMessage}</Text>
-                  </Animated.View>
-                )}
+                {!thorSecondaryActive ? sessionToast : null}
               </View>
             ) : activePendingTerminalTab ? (
               <View style={styles.emptyState}>
@@ -5703,347 +5566,11 @@ export default function SessionScreen() {
                     owner: `${thorSecondaryContextOwner}:chat`
                   }}
                 />
-                {toastMessage && (
-                  <Animated.View pointerEvents="none" style={[styles.toast, toastAnimatedStyle]}>
-                    <Text style={styles.toastText}>{toastMessage}</Text>
-                  </Animated.View>
-                )}
+                {!thorSecondaryActive ? sessionToast : null}
               </View>
             )}
 
-            {/* Why: translate instead of resizing so keyboard open/close does not
-            trigger a server-side PTY viewport change. The dock hides in native
-            chat because that view supplies its own composer. */}
-            {!thorSecondaryActive &&
-              !activeMarkdownTab &&
-              !activeFileTab &&
-              !activeBrowserTab &&
-              !showNativeChat && (
-                <View
-                  style={[
-                    styles.commandDock,
-                    { paddingBottom: insets.bottom, transform: [{ translateY: -keyboardLift }] }
-                  ]}
-                >
-                  {/* Accessory keys */}
-                  <View style={styles.accessoryBar}>
-                    {/* Why: a fixed, always-visible escape hatch from the open
-                  keyboard. Kept outside the horizontal ScrollView so it does
-                  not scroll away, and out of the terminal-byte shortcut path so
-                  it cannot be hidden by user shortcut customization (#5106). */}
-                    {keyboardLift > 0 && (
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.keyboardDismissKey,
-                          pressed && styles.accessoryKeyPressed
-                        ]}
-                        onPress={dismissSoftwareKeyboard}
-                        hitSlop={8}
-                        accessibilityRole="button"
-                        accessibilityLabel="Dismiss keyboard"
-                        accessibilityHint="Hides the software keyboard and keeps the current terminal session open."
-                      >
-                        <View style={styles.keyboardDismissGlyph}>
-                          <KeyboardIcon size={15} color={colors.textSecondary} strokeWidth={2} />
-                          <ChevronDown
-                            size={10}
-                            color={colors.textSecondary}
-                            strokeWidth={2.5}
-                            style={styles.keyboardDismissChevron}
-                          />
-                        </View>
-                      </Pressable>
-                    )}
-                    {/* Why: with default tap handling the first tap on any accessory
-                  key dismisses the open keyboard and is swallowed, so live
-                  input lost its keyboard on every Esc/Tab press (#5106). */}
-                    <ScrollView
-                      style={styles.accessoryScroll}
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      contentContainerStyle={styles.accessoryContent}
-                      keyboardShouldPersistTaps="always"
-                    >
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.accessoryKey,
-                          pressed && styles.accessoryKeyPressed,
-                          !canSend && styles.accessoryKeyDisabled
-                        ]}
-                        disabled={!canSend}
-                        onPress={() => {
-                          if (activeHandle) {
-                            void toggleDisplayMode(activeHandle)
-                          }
-                        }}
-                        accessibilityLabel={
-                          isPhoneMode(activeHandle)
-                            ? 'Switch to desktop mode'
-                            : 'Switch to phone mode'
-                        }
-                      >
-                        {isPhoneMode(activeHandle) ? (
-                          <Monitor
-                            size={14}
-                            color={canSend ? colors.textSecondary : colors.textMuted}
-                          />
-                        ) : (
-                          <Smartphone
-                            size={14}
-                            color={canSend ? colors.textSecondary : colors.textMuted}
-                          />
-                        )}
-                      </Pressable>
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.accessoryKey,
-                          liveInputEnabled && styles.accessoryKeyActive,
-                          pressed && styles.accessoryKeyPressed,
-                          !canSend && styles.accessoryKeyDisabled
-                        ]}
-                        disabled={!canSend}
-                        onPress={toggleLiveInput}
-                        accessibilityLabel={
-                          liveInputEnabled
-                            ? 'Switch to buffered command input'
-                            : 'Switch to live terminal input'
-                        }
-                      >
-                        <ChevronsRight
-                          size={14}
-                          color={
-                            liveInputEnabled
-                              ? colors.bgBase
-                              : canSend
-                                ? colors.textSecondary
-                                : colors.textMuted
-                          }
-                        />
-                      </Pressable>
-                      {canPaste && (
-                        <Pressable
-                          style={({ pressed }) => [
-                            styles.accessoryKey,
-                            pressed && styles.accessoryKeyPressed,
-                            !canSend && styles.accessoryKeyDisabled
-                          ]}
-                          disabled={!canSend}
-                          onPress={() => void handlePaste()}
-                          accessibilityLabel="Paste from clipboard"
-                        >
-                          <Text
-                            style={[
-                              styles.accessoryKeyText,
-                              !canSend && styles.accessoryKeyTextDisabled
-                            ]}
-                          >
-                            Paste
-                          </Text>
-                        </Pressable>
-                      )}
-                      {visibleBuiltInAccessoryKeys.map((key) => (
-                        <Pressable
-                          key={key.id}
-                          style={({ pressed }) => [
-                            styles.accessoryKey,
-                            pressed && styles.accessoryKeyPressed,
-                            !canSend && styles.accessoryKeyDisabled
-                          ]}
-                          disabled={!canSend}
-                          onPressIn={() => {
-                            if (!key.repeatable) {
-                              return
-                            }
-                            const input = createTerminalLiveAccessoryInput(key)
-                            void handleAccessoryKey(input)
-                            startAccessoryRepeat(input)
-                          }}
-                          onPressOut={() => {
-                            if (key.repeatable) {
-                              stopAccessoryRepeat()
-                            }
-                          }}
-                          onPress={() => {
-                            if (key.repeatable) {
-                              return
-                            }
-                            void handleAccessoryKey(createTerminalLiveAccessoryInput(key))
-                          }}
-                          accessibilityLabel={key.accessibilityLabel ?? `Send ${key.label}`}
-                        >
-                          <Text
-                            style={[
-                              styles.accessoryKeyText,
-                              !canSend && styles.accessoryKeyTextDisabled
-                            ]}
-                          >
-                            {key.label}
-                          </Text>
-                        </Pressable>
-                      ))}
-                      {customKeys.map((key) => (
-                        <Pressable
-                          key={key.id}
-                          style={({ pressed }) => [
-                            styles.accessoryKey,
-                            styles.customAccessoryKey,
-                            pressed && styles.accessoryKeyPressed,
-                            !canSend && styles.accessoryKeyDisabled
-                          ]}
-                          disabled={!canSend}
-                          onPress={() => void handleAccessoryKey({ bytes: key.bytes })}
-                          onLongPress={() => {
-                            triggerMediumImpact()
-                            setDeleteKeyTarget(key)
-                          }}
-                          delayLongPress={400}
-                          accessibilityLabel={`Send ${key.label}`}
-                        >
-                          <Text
-                            style={[
-                              styles.accessoryKeyText,
-                              !canSend && styles.accessoryKeyTextDisabled
-                            ]}
-                          >
-                            {key.label}
-                          </Text>
-                        </Pressable>
-                      ))}
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.accessoryKey,
-                          pressed && styles.accessoryKeyPressed
-                        ]}
-                        onPress={() => setShowCustomKeyModal(true)}
-                        accessibilityLabel="Add custom shortcut"
-                      >
-                        <Plus size={14} color={colors.textSecondary} strokeWidth={2.2} />
-                      </Pressable>
-                    </ScrollView>
-                  </View>
-
-                  {/* Input bar */}
-                  {liveInputEnabled ? (
-                    <View style={[styles.inputBar, styles.liveInputBar]}>
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.liveInputFocusTarget,
-                          pressed && styles.liveInputFocusTargetPressed,
-                          !canSend && styles.liveInputFocusTargetDisabled
-                        ]}
-                        disabled={!canSend}
-                        onPress={focusLiveInput}
-                        accessibilityRole="button"
-                        accessibilityLabel="Show keyboard for live terminal input"
-                        accessibilityHint="Typed text is sent directly to the active terminal"
-                      >
-                        <KeyboardIcon size={16} color={colors.textSecondary} strokeWidth={2} />
-                        <MobileTerminalLiveInputStatus
-                          dictation={dictation}
-                          isAttaching={isAttaching}
-                        />
-                      </Pressable>
-                      <MobileTerminalInputActions
-                        canSend={canSend}
-                        isAttaching={isAttaching}
-                        dictation={dictation}
-                        dictationMode={dictationMode}
-                        buttonStyle={styles.dictationButton}
-                        activeButtonStyle={styles.dictationButtonActive}
-                        disabledButtonStyle={styles.sendButtonDisabled}
-                        onAttachImage={() => void attachImage('library')}
-                        onAttachFile={() => void attachImage('files')}
-                        onDictationToggle={handleDictationToggle}
-                        onDictationPressIn={handleDictationPressIn}
-                        onDictationPressOut={handleDictationPressOut}
-                        onDictationCancel={cancelDictation}
-                      />
-                      <TextInput
-                        ref={liveInputRef}
-                        style={styles.liveInputCapture}
-                        value={liveInputCapture}
-                        onChangeText={handleLiveInputChange}
-                        onKeyPress={handleLiveInputKeyPress}
-                        onSubmitEditing={handleLiveInputSubmit}
-                        placeholder=""
-                        showSoftInputOnFocus
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                        spellCheck={false}
-                        smartInsertDelete={false}
-                        // Why: iOS textContentType wins over autoComplete and can
-                        // narrow the keyboard surface; keep IME switching available.
-                        autoComplete="off"
-                        keyboardType={getTerminalLiveInputKeyboardType(Platform.OS)}
-                        returnKeyType="default"
-                        blurOnSubmit={false}
-                        editable={canSend}
-                        importantForAutofill="no"
-                      />
-                    </View>
-                  ) : (
-                    <View style={styles.inputBar}>
-                      <TextInput
-                        ref={commandInputRef}
-                        // Why: Android caches the IME inputType at mount, so toggling
-                        // autocomplete must remount there; iOS can update without a focus-costly remount.
-                        key={
-                          Platform.OS === 'android'
-                            ? autocompleteEnabled
-                              ? 'cmd-input-ac-on'
-                              : 'cmd-input-ac-off'
-                            : 'cmd-input'
-                        }
-                        style={styles.textInput}
-                        value={input}
-                        // Why: iOS kills an active dictation/IME session when JS
-                        // writes a value that differs from the native field text;
-                        // store the raw field text and normalize at send time.
-                        onChangeText={setInput}
-                        placeholder="Type a command…"
-                        placeholderTextColor={colors.textMuted}
-                        autoCapitalize="none"
-                        autoCorrect={autocompleteEnabled}
-                        spellCheck={autocompleteEnabled}
-                        smartInsertDelete={false}
-                        // Why: terminal commands are not autofill content, but the
-                        // keyboard must stay default so non-Latin IMEs remain selectable.
-                        autoComplete="off"
-                        keyboardType={getTerminalCommandKeyboardType(
-                          Platform.OS,
-                          autocompleteEnabled
-                        )}
-                        returnKeyType="send"
-                        editable={canSend}
-                        onSubmitEditing={() => void handleSend()}
-                      />
-                      <MobileTerminalInputActions
-                        canSend={canSend}
-                        isAttaching={isAttaching}
-                        dictation={dictation}
-                        dictationMode={dictationMode}
-                        buttonStyle={styles.dictationButton}
-                        activeButtonStyle={styles.dictationButtonActive}
-                        disabledButtonStyle={styles.sendButtonDisabled}
-                        onAttachImage={() => void attachImage('library')}
-                        onAttachFile={() => void attachImage('files')}
-                        onDictationToggle={handleDictationToggle}
-                        onDictationPressIn={handleDictationPressIn}
-                        onDictationPressOut={handleDictationPressOut}
-                        onDictationCancel={cancelDictation}
-                      />
-                      <Pressable
-                        style={[styles.sendButton, !canSend && styles.sendButtonDisabled]}
-                        disabled={!canSend}
-                        onPress={() => void handleSend()}
-                        accessibilityLabel="Send command"
-                      >
-                        <ArrowUp size={18} color={colors.textSecondary} strokeWidth={2.5} />
-                      </Pressable>
-                    </View>
-                  )}
-                </View>
-              )}
+            {!thorSecondaryActive ? thorCommandDock : null}
           </View>
           {!thorSecondaryActive && canDockPanel && activePanel !== null && (
             <SessionDockColumn
@@ -6060,281 +5587,7 @@ export default function SessionScreen() {
         </View>
       </View>
 
-      {!thorSecondaryActive ? (
-        <>
-          <MobileSessionHeaderMoreActionsSheet
-            visible={showHeaderMoreActions}
-            showAgentSessionHistory={showAgentSessionHistoryAction}
-            showChecks={showChecksAction}
-            onOpenAgentSessionHistory={openAgentSessionHistory}
-            onOpenChecks={() => handlePanelTap('pr')}
-            onClose={() => setShowHeaderMoreActions(false)}
-          />
-
-          <ActionSheetModal
-            visible={showCreateTabDrawer}
-            title="New Tab"
-            actions={[
-              ...createTabAgentActions,
-              {
-                label: 'Terminal',
-                icon: SquareTerminal,
-                onPress: () => {
-                  setShowCreateTabDrawer(false)
-                  void handleCreateTerminal()
-                }
-              },
-              {
-                label: 'Browser',
-                icon: Globe,
-                onPress: () => {
-                  setShowCreateTabDrawer(false)
-                  if (browserScreencastSupported !== true) {
-                    showToast('Desktop update required for mobile browser streaming', 1600)
-                    return
-                  }
-                  setShowCreateBrowserModal(true)
-                }
-              },
-              {
-                label: 'Markdown Note',
-                icon: FileText,
-                onPress: () => {
-                  setShowCreateTabDrawer(false)
-                  void handleCreateMarkdownNote()
-                }
-              }
-            ]}
-            onClose={() => setShowCreateTabDrawer(false)}
-          />
-
-          <ActionSheetModal
-            visible={pendingDiffNotesDelivery !== null}
-            title="Send Review Notes"
-            message="Choose an agent session for the current notes."
-            actions={[
-              ...sendDiffNotesAgentActions,
-              {
-                label: 'Copy Notes',
-                icon: Copy,
-                onPress: () => {
-                  const delivery = pendingDiffNotesDelivery
-                  setPendingDiffNotesDelivery(null)
-                  if (!delivery) {
-                    return
-                  }
-                  void Clipboard.setStringAsync(delivery.prompt)
-                    .then(() => {
-                      triggerSuccess()
-                      showToast('Notes copied')
-                    })
-                    .catch(() => {
-                      triggerError()
-                      showToast("Couldn't copy notes", 1500)
-                    })
-                }
-              }
-            ]}
-            onClose={() => setPendingDiffNotesDelivery(null)}
-          />
-
-          <ActionSheetModal
-            visible={actionTarget != null}
-            title={actionTarget?.title || 'Terminal'}
-            actions={getMobileTerminalActionSheetActions({
-              target: actionTarget,
-              tabs: sessionTabs.filter((tab) => tab.type === 'terminal'),
-              isTabChatView: nativeChatController.isTabChatView,
-              nativeChatTranscriptIsLocalReadable,
-              onDismiss: () => setActionTarget(null),
-              onToggleChat: toggleTabChatView,
-              isPhoneMode,
-              onToggleDisplayMode: (handle) => void toggleDisplayMode(handle),
-              onRename: setRenameTarget,
-              onClear: (target) => void handleClearTerminal(target),
-              onClose: (target) => void handleCloseTerminal(target)
-            })}
-            onClose={() => setActionTarget(null)}
-          />
-          <ActionSheetModal
-            visible={markdownActionTarget != null}
-            title={markdownActionTarget?.title || 'Markdown'}
-            actions={[
-              {
-                label: 'Refresh',
-                icon: RefreshCw,
-                onPress: () => {
-                  const target = markdownActionTarget
-                  setMarkdownActionTarget(null)
-                  if (target) {
-                    discardMarkdownLocalContent(target)
-                  }
-                }
-              },
-              {
-                label: 'Copy Path',
-                icon: FileText,
-                onPress: () => {
-                  const target = markdownActionTarget
-                  setMarkdownActionTarget(null)
-                  if (target) {
-                    void Clipboard.setStringAsync(target.relativePath || target.filePath)
-                    showToast('Path copied')
-                  }
-                }
-              },
-              {
-                label: 'Close',
-                destructive: true,
-                onPress: () => {
-                  const target = markdownActionTarget
-                  setMarkdownActionTarget(null)
-                  if (target) {
-                    void handleCloseSessionTab(target)
-                  }
-                }
-              }
-            ]}
-            onClose={() => setMarkdownActionTarget(null)}
-          />
-          <ActionSheetModal
-            visible={fileActionTarget != null}
-            title={fileActionTarget?.title || 'File'}
-            actions={[
-              {
-                label: 'Refresh',
-                icon: RefreshCw,
-                onPress: () => {
-                  const target = fileActionTarget
-                  setFileActionTarget(null)
-                  if (target) {
-                    void readFileTab(target)
-                  }
-                }
-              },
-              {
-                label: 'Close',
-                destructive: true,
-                onPress: () => {
-                  const target = fileActionTarget
-                  setFileActionTarget(null)
-                  if (target) {
-                    void handleCloseSessionTab(target)
-                  }
-                }
-              }
-            ]}
-            onClose={() => setFileActionTarget(null)}
-          />
-          <MobileBrowserTabActionSheet
-            target={browserActionTarget}
-            onClose={() => setBrowserActionTarget(null)}
-            onNavigate={handleBrowserNavigationCommand}
-            onCloseTab={handleCloseSessionTab}
-          />
-          <ActionSheetModal
-            visible={leaveDrafts != null}
-            title="Unsaved markdown changes"
-            message="Copy or discard phone drafts before leaving."
-            actions={[
-              {
-                label: 'Copy All & Leave',
-                icon: FileText,
-                onPress: () => {
-                  const drafts = leaveDrafts ?? []
-                  const combined = drafts
-                    .map((draft) => `# ${draft.title}\n\n${draft.content}`)
-                    .join('\n\n---\n\n')
-                  void Clipboard.setStringAsync(combined)
-                    .then(() => {
-                      setLeaveDrafts(null)
-                      leaveSession()
-                    })
-                    .catch(() => {
-                      triggerError()
-                      showToast("Couldn't copy drafts", 1500)
-                    })
-                }
-              },
-              {
-                label: 'Discard & Leave',
-                destructive: true,
-                onPress: () => {
-                  setLeaveDrafts(null)
-                  leaveSession()
-                }
-              }
-            ]}
-            onClose={() => setLeaveDrafts(null)}
-          />
-          <ConfirmModal
-            visible={discardMarkdownTarget != null}
-            title="Discard Changes"
-            message="Replace the phone draft with the latest desktop file?"
-            confirmLabel="Discard"
-            destructive
-            onConfirm={confirmDiscardMarkdown}
-            onCancel={() => setDiscardMarkdownTarget(null)}
-          />
-          <TextInputModal
-            visible={renameTarget != null}
-            title="Rename Terminal"
-            defaultValue={renameTarget?.title || 'Terminal'}
-            placeholder="Terminal name"
-            onSubmit={(value) => void handleRenameTerminal(value)}
-            onCancel={() => setRenameTarget(null)}
-          />
-          <TextInputModal
-            visible={showCreateBrowserModal}
-            title="New Browser"
-            message="Enter a URL, or leave blank for a new tab."
-            defaultValue=""
-            placeholder="https://example.com"
-            submitLabel="Open"
-            allowEmpty
-            selectTextOnFocus
-            keyboardType={Platform.OS === 'ios' ? 'url' : 'default'}
-            onSubmit={(value) => {
-              void handleCreateBrowser(value).then((created) => {
-                if (created) {
-                  setShowCreateBrowserModal(false)
-                }
-              })
-            }}
-            onCancel={() => setShowCreateBrowserModal(false)}
-          />
-          <CustomKeyModal
-            visible={showCustomKeyModal}
-            onClose={() => setShowCustomKeyModal(false)}
-            onKeysChanged={setCustomKeys}
-            onManageShortcuts={handleManageShortcuts}
-          />
-          <MobileDictationSetupSheet
-            visible={showDictationSetup}
-            client={client}
-            onClose={() => setShowDictationSetup(false)}
-            onReady={() => setShowDictationSetup(false)}
-          />
-          <ActionSheetModal
-            visible={deleteKeyTarget != null}
-            title={deleteKeyTarget?.label ?? 'Shortcut'}
-            message="Remove this custom shortcut?"
-            actions={[
-              {
-                label: 'Remove',
-                destructive: true,
-                onPress: () => {
-                  if (deleteKeyTarget) {
-                    void handleDeleteCustomKey(deleteKeyTarget)
-                  }
-                  setDeleteKeyTarget(null)
-                }
-              }
-            ]}
-            onClose={() => setDeleteKeyTarget(null)}
-          />
-        </>
-      ) : null}
+      {!thorSecondaryActive ? thorSessionOverlays : null}
     </View>
   )
 }
