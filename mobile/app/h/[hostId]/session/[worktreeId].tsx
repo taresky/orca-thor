@@ -226,6 +226,7 @@ import {
 import { resolveMarkdownFloatingActionsBottom } from '../../../../src/session/markdown-floating-actions-layout'
 import { resolveTabStripScrollOffset } from '../../../../src/session/tab-strip-scroll'
 import { activateOpenedSourceControlDiffTab } from '../../../../src/session/opened-mobile-session-tab'
+import { useThorDisplaySession } from '../../../../src/thor/use-thor-display-session'
 import {
   createMobileSessionCreateWarningState,
   dismissMobileSessionCreateWarningState,
@@ -1089,6 +1090,16 @@ export default function SessionScreen() {
     activeSessionTab?.type !== 'file' &&
     activeSessionTab?.type !== 'browser'
   const liveInputEnabled = activeHandle ? liveInputTerminalHandles.has(activeHandle) : false
+  useThorDisplaySession({
+    active: activeSessionTab?.type === 'terminal' && activeHandle != null,
+    client,
+    clientId: deviceTokenRef.current,
+    connected: connState === 'connected',
+    connectionState: connState,
+    terminal: activeHandle,
+    terminalTitle: activeSessionTab ? getMobileSessionTabTitle(activeSessionTab) : '',
+    worktreeName
+  })
   const [browserScreencastSupported, setBrowserScreencastSupported] = useState<boolean | null>(null)
   // Why: hosts without aiVault.v1 reject aiVault.listSessions, so the header
   // entry stays hidden there (mirrors the gated host-list action) instead of

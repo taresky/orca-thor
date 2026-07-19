@@ -1,0 +1,22 @@
+{
+  "name": "@orca/expo-thor-display",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Android secondary-display controls for the AYN Thor Orca companion",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "expo-module build",
+    "clean": "expo-module clean",
+    "lint": "expo-module lint",
+    "test": "expo-module test"
+  },
+  "devDependencies": {
+    "expo-module-scripts": "^55.0.2"
+  },
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}
