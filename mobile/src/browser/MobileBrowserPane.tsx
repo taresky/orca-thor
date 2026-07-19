@@ -81,6 +81,7 @@ type MobileBrowserPaneProps = {
   keyboardLift: number
   bottomInset: number
   onToast: (message: string, durationMs?: number) => void
+  onSecondaryToast?: (message: string, durationMs?: number) => void
   secondaryControls?: ThorSecondaryControlsTarget
 }
 
@@ -143,6 +144,7 @@ export function MobileBrowserPane({
   keyboardLift,
   bottomInset,
   onToast,
+  onSecondaryToast = onToast,
   secondaryControls
 }: MobileBrowserPaneProps) {
   const [browserViewMode, setBrowserViewMode] = useState<MobileBrowserViewMode>(() =>
@@ -944,11 +946,11 @@ export function MobileBrowserPane({
       { suppressError: true }
     )
     if (result !== null) {
-      onToast('Sent')
+      onSecondaryToast('Sent')
     } else {
       setKeyboardValue(text)
     }
-  }, [keyboardValue, onToast, sendBrowserRequest])
+  }, [keyboardValue, onSecondaryToast, sendBrowserRequest])
 
   const sendKeypress = useCallback(
     async (key: string) => {
@@ -1176,7 +1178,7 @@ export function MobileBrowserPane({
   )
 
   const secondaryControlsContent = (
-    <View style={styles.secondaryControlsRoot}>
+    <View style={styles.root}>
       {toolbar}
       <View style={styles.secondaryControlsSpacer} />
       {keyboardDock}
@@ -1505,10 +1507,6 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     minHeight: 0,
-    backgroundColor: colors.bgBase
-  },
-  secondaryControlsRoot: {
-    flex: 1,
     backgroundColor: colors.bgBase
   },
   secondaryControlsSpacer: {

@@ -1167,14 +1167,7 @@ export default function SessionScreen() {
       const seq = toastSeqRef.current + 1
       toastSeqRef.current = seq
       clearToastHideTimer()
-      setToastSurface(
-        surface ??
-          (thorSecondaryActive &&
-          activeSessionTab?.type !== 'markdown' &&
-          activeSessionTab?.type !== 'file'
-            ? 'lower'
-            : 'upper')
-      )
+      setToastSurface(surface ?? 'upper')
       setToastMessage(message)
       Animated.timing(toastOpacityRef.current, {
         toValue: 1,
@@ -1198,11 +1191,20 @@ export default function SessionScreen() {
         }, durationMs)
       })
     },
-    [activeSessionTab?.type, clearToastHideTimer, thorSecondaryActive]
+    [clearToastHideTimer]
+  )
+  const showChromeToast = useCallback(
+    (message: string, durationMs?: number) =>
+      showToast(message, durationMs, thorSecondaryActive ? 'lower' : 'upper'),
+    [showToast, thorSecondaryActive]
+  )
+  const showUpperToast = useCallback(
+    (message: string, durationMs?: number) => showToast(message, durationMs, 'upper'),
+    [showToast]
   )
   const showNativeChatSendError = useCallback(
-    (message: string) => showToast(message, 1600),
-    [showToast]
+    (message: string) => showChromeToast(message, 1600),
+    [showChromeToast]
   )
   const nativeChatTranscriptIsLocalReadable = useMobileNativeChatReadability(client, worktreeId)
   const {
@@ -1239,7 +1241,7 @@ export default function SessionScreen() {
         nativeChatController.setChatComposerText((current) =>
           appendBufferedDictation(current, text)
         )
-        showToast('Dictation inserted')
+        showChromeToast('Dictation inserted')
         return
       }
       // Live mode inserts the transcript straight into its originating PTY as
@@ -1263,13 +1265,13 @@ export default function SessionScreen() {
           }
           const sent = await sendLiveTerminalInput(insertHandle, route.text)
           if (sent) {
-            showToast('Dictation inserted')
+            showChromeToast('Dictation inserted')
           }
         })()
         return
       }
       setInput((current) => appendBufferedDictation(current, route.text))
-      showToast('Dictation inserted')
+      showChromeToast('Dictation inserted')
     },
     onError: (err) => {
       dictationRouteContextRef.current = null
@@ -1280,7 +1282,7 @@ export default function SessionScreen() {
         return
       }
       triggerError()
-      showToast(err.message)
+      showChromeToast(err.message)
     }
   })
 
@@ -1294,9 +1296,9 @@ export default function SessionScreen() {
         dictationRouteContextRef.current = null
       }
       triggerError()
-      showToast(err instanceof Error ? err.message : String(err))
+      showChromeToast(err instanceof Error ? err.message : String(err))
     })
-  }, [activeHandle, dictation, liveInputTerminalHandles, triggerError, showToast])
+  }, [activeHandle, dictation, liveInputTerminalHandles, showChromeToast, triggerError])
 
   const cancelDictation = useCallback(() => {
     dictationRouteContextRef.current = null
@@ -3235,7 +3237,7 @@ export default function SessionScreen() {
       }
       if (!isTerminalLiveInputWithinByteLimit(text)) {
         triggerError()
-        showToast('Input too large (max 256 KiB)', 1500)
+        showChromeToast('Input too large (max 256 KiB)', 1500)
         return false
       }
       const rpc = clientRef.current
@@ -3259,7 +3261,7 @@ export default function SessionScreen() {
         })
         .then(isTerminalSendRpcAccepted, () => false)
     },
-    [showToast]
+    [showChromeToast]
   )
   sendLiveTerminalInputRef.current = sendLiveTerminalInput
 
@@ -3649,9 +3651,9 @@ export default function SessionScreen() {
       await client.sendRequest('terminal.clearBuffer', {
         terminal: target.handle
       })
-      showToast('Terminal cleared')
+      showChromeToast('Terminal cleared')
     } catch {
-      showToast("Couldn't clear terminal", 1500)
+      showChromeToast("Couldn't clear terminal", 1500)
     }
   }
 
@@ -3849,7 +3851,7 @@ export default function SessionScreen() {
     onSuccess: triggerSelection,
     ptyModesRef,
     refreshCanPaste,
-    showToast
+    showToast: showChromeToast
   })
 
   const flushPendingLiveInputBeforeAttachmentSend = useMobileAttachmentInputLeaseGate({
@@ -3858,7 +3860,7 @@ export default function SessionScreen() {
     activeHandleRef,
     activeSessionTabTypeRef,
     nativeChatInputLeaseReadyRef,
-    showToast
+    showToast: showChromeToast
   })
 
   const { attachImage, isAttaching } = useMobileImageAttachment({
@@ -3869,7 +3871,7 @@ export default function SessionScreen() {
     deviceTokenRef,
     beforeTerminalSend: flushPendingLiveInputBeforeAttachmentSend,
     getActiveWorktreeConnectionId,
-    showToast,
+    showToast: showChromeToast,
     onSuccess: triggerSelection,
     onError: triggerError
   })
@@ -4069,12 +4071,12 @@ export default function SessionScreen() {
                   throw new Error('Terminal input is locked by another client.')
                 }
                 triggerSuccess()
-                showToast('Notes sent')
+                showChromeToast('Notes sent')
                 options.onPromptSent?.()
               })
               .catch((err) => {
                 triggerError()
-                showToast(err instanceof Error ? err.message : "Couldn't send notes", 1800)
+                showChromeToast(err instanceof Error ? err.message : "Couldn't send notes", 1800)
               })
           }
         } else {
@@ -4136,7 +4138,7 @@ export default function SessionScreen() {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create markdown note'
       setCreateError(message)
-      showToast(message, 1800)
+      showChromeToast(message, 1800)
     } finally {
       setCreatingMarkdown(false)
     }
@@ -4149,14 +4151,14 @@ export default function SessionScreen() {
     // Why: read via ref so a tap that fires before the capability probe resolves
     // (or from a stale callback) still sees the live support value.
     if (browserScreencastSupportedRef.current !== true) {
-      showToast('Desktop update required for mobile browser streaming', 1600)
+      showChromeToast('Desktop update required for mobile browser streaming', 1600)
       return false
     }
     const url = normalizeBrowserUrl(rawUrl)
     if (!url) {
       const message = 'Enter a valid URL'
       setCreateError(message)
-      showToast(message, 1400)
+      showChromeToast(message, 1400)
       return false
     }
 
@@ -4190,7 +4192,7 @@ export default function SessionScreen() {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create browser'
       setCreateError(message)
-      showToast(message, 1800)
+      showChromeToast(message, 1800)
       return false
     } finally {
       setCreatingBrowser(false)
@@ -4205,7 +4207,7 @@ export default function SessionScreen() {
     method: 'browser.back' | 'browser.forward' | 'browser.reload'
   ) {
     if (!client || !tab.browserPageId) {
-      showToast('Browser page is not available yet.', 1500)
+      showChromeToast('Browser page is not available yet.', 1500)
       return
     }
     try {
@@ -4223,7 +4225,7 @@ export default function SessionScreen() {
       scheduleDelayedAction(() => void fetchSessionTabs(), 250)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Browser command failed'
-      showToast(message, 1600)
+      showChromeToast(message, 1600)
     }
   }
 
@@ -5101,7 +5103,7 @@ export default function SessionScreen() {
             onPress: () => {
               setShowCreateTabDrawer(false)
               if (browserScreencastSupported !== true) {
-                showToast('Desktop update required for mobile browser streaming', 1600)
+                showChromeToast('Desktop update required for mobile browser streaming', 1600)
                 return
               }
               setShowCreateBrowserModal(true)
@@ -5137,11 +5139,11 @@ export default function SessionScreen() {
               void Clipboard.setStringAsync(delivery.prompt)
                 .then(() => {
                   triggerSuccess()
-                  showToast('Notes copied')
+                  showChromeToast('Notes copied')
                 })
                 .catch(() => {
                   triggerError()
-                  showToast("Couldn't copy notes", 1500)
+                  showChromeToast("Couldn't copy notes", 1500)
                 })
             }
           }
@@ -5190,7 +5192,7 @@ export default function SessionScreen() {
               setMarkdownActionTarget(null)
               if (target) {
                 void Clipboard.setStringAsync(target.relativePath || target.filePath)
-                showToast('Path copied')
+                showChromeToast('Path copied')
               }
             }
           },
@@ -5263,7 +5265,7 @@ export default function SessionScreen() {
                 })
                 .catch(() => {
                   triggerError()
-                  showToast("Couldn't copy drafts", 1500)
+                  showChromeToast("Couldn't copy drafts", 1500)
                 })
             }
           },
@@ -5502,7 +5504,8 @@ export default function SessionScreen() {
                   screencastSupported={browserScreencastSupported}
                   keyboardLift={keyboardLift}
                   bottomInset={insets.bottom}
-                  onToast={showToast}
+                  onToast={showUpperToast}
+                  onSecondaryToast={showChromeToast}
                   secondaryControls={{
                     enabled: thorSecondaryActive,
                     owner: `${thorSecondaryContextOwner}:browser`
