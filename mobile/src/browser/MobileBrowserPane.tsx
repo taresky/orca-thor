@@ -1,4 +1,4 @@
-/* oxlint-disable react-doctor/no-adjust-state-on-prop-change -- Why: mobile browser state mirrors a remote desktop screencast session and CDP dialogs, which are external systems that cannot be derived during render. */
+/* oxlint-disable react-doctor/no-adjust-state-on-prop-change, max-lines -- Why: mobile browser state mirrors one remote screencast session; its controls are also rendered on Thor's secondary React surface without duplicating the session state machine. */
 // Why: import from 'buffer' (the npm polyfill), not 'node:buffer' — Metro
 // can't resolve Node's builtin in a React Native bundle.
 import { Buffer } from 'buffer'
@@ -55,6 +55,10 @@ import {
 } from './browser-touch-geometry'
 import { displayBrowserUrl, normalizeBrowserUrl } from './browser-url'
 import { resolveMobileBrowserAddressSync } from './mobile-browser-address-sync'
+import {
+  useThorSecondaryContext,
+  type ThorSecondaryControlsTarget
+} from '../thor/use-thor-secondary-context'
 
 export type MobileBrowserTab = {
   type: 'browser'
@@ -77,6 +81,7 @@ type MobileBrowserPaneProps = {
   keyboardLift: number
   bottomInset: number
   onToast: (message: string, durationMs?: number) => void
+  secondaryControls?: ThorSecondaryControlsTarget
 }
 
 type FrameLayer = 0 | 1
@@ -137,7 +142,8 @@ export function MobileBrowserPane({
   screencastSupported,
   keyboardLift,
   bottomInset,
-  onToast
+  onToast,
+  secondaryControls
 }: MobileBrowserPaneProps) {
   const [browserViewMode, setBrowserViewMode] = useState<MobileBrowserViewMode>(() =>
     getInitialMobileBrowserViewMode(worktreeId, tab.browserPageId)
@@ -1080,54 +1086,108 @@ export function MobileBrowserPane({
     [handleBrowserImageLayer0Error, handleBrowserImageLayer1Error]
   )
 
-  return (
-    <View ref={setRootViewRef} style={styles.root}>
-      <View style={styles.toolbar}>
-        <MobileBrowserToolbarIconButton
-          disabled={controlsDisabled || !tab.canGoBack}
-          label="Back"
-          onPress={goBack}
-        >
-          <ChevronLeft size={15} color={buttonColor(!controlsDisabled && tab.canGoBack)} />
-        </MobileBrowserToolbarIconButton>
-        <MobileBrowserToolbarIconButton
-          disabled={controlsDisabled || !tab.canGoForward}
-          label="Forward"
-          onPress={goForward}
-        >
-          <ChevronRight size={15} color={buttonColor(!controlsDisabled && tab.canGoForward)} />
-        </MobileBrowserToolbarIconButton>
-        <MobileBrowserToolbarIconButton
-          disabled={controlsDisabled}
-          label="Reload"
-          onPress={reloadPage}
-        >
-          <RefreshCw size={15} color={buttonColor(!controlsDisabled)} />
-        </MobileBrowserToolbarIconButton>
+  const toolbar = (
+    <View style={styles.toolbar}>
+      <MobileBrowserToolbarIconButton
+        disabled={controlsDisabled || !tab.canGoBack}
+        label="Back"
+        onPress={goBack}
+      >
+        <ChevronLeft size={15} color={buttonColor(!controlsDisabled && tab.canGoBack)} />
+      </MobileBrowserToolbarIconButton>
+      <MobileBrowserToolbarIconButton
+        disabled={controlsDisabled || !tab.canGoForward}
+        label="Forward"
+        onPress={goForward}
+      >
+        <ChevronRight size={15} color={buttonColor(!controlsDisabled && tab.canGoForward)} />
+      </MobileBrowserToolbarIconButton>
+      <MobileBrowserToolbarIconButton
+        disabled={controlsDisabled}
+        label="Reload"
+        onPress={reloadPage}
+      >
+        <RefreshCw size={15} color={buttonColor(!controlsDisabled)} />
+      </MobileBrowserToolbarIconButton>
+      <TextInput
+        style={styles.addressInput}
+        value={addressValue}
+        onChangeText={setAddressValue}
+        onFocus={() => setAddressFocused(true)}
+        onBlur={() => setAddressFocused(false)}
+        onSubmitEditing={() => void navigateToAddress()}
+        selectTextOnFocus
+        selection={addressSelection}
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType={Platform.OS === 'ios' ? 'url' : 'default'}
+        numberOfLines={1}
+        returnKeyType="go"
+        placeholder="URL"
+        placeholderTextColor={colors.textMuted}
+        editable={!controlsDisabled}
+      />
+      <MobileBrowserViewModeSwitch
+        disabled={controlsDisabled}
+        value={browserViewMode}
+        onChange={selectBrowserViewMode}
+      />
+    </View>
+  )
+
+  const keyboardDock = (
+    <View
+      style={[
+        styles.keyboardDock,
+        { paddingBottom: bottomInset, transform: [{ translateY: -keyboardLift }] }
+      ]}
+    >
+      <MobileBrowserPointerModifiers
+        disabled={controlsDisabled}
+        selectedModifiers={pointerModifiers}
+        onToggle={togglePointerModifier}
+      />
+      <MobileBrowserKeyRow
+        disabled={controlsDisabled}
+        onKeypress={(key) => void sendKeypress(key)}
+      />
+      <View style={styles.inputRow}>
         <TextInput
-          style={styles.addressInput}
-          value={addressValue}
-          onChangeText={setAddressValue}
-          onFocus={() => setAddressFocused(true)}
-          onBlur={() => setAddressFocused(false)}
-          onSubmitEditing={() => void navigateToAddress()}
-          selectTextOnFocus
-          selection={addressSelection}
+          style={styles.keyboardInput}
+          value={keyboardValue}
+          onChangeText={setKeyboardValue}
+          placeholder="Type on page…"
+          placeholderTextColor={colors.textMuted}
           autoCapitalize="none"
           autoCorrect={false}
-          keyboardType={Platform.OS === 'ios' ? 'url' : 'default'}
-          numberOfLines={1}
-          returnKeyType="go"
-          placeholder="URL"
-          placeholderTextColor={colors.textMuted}
           editable={!controlsDisabled}
+          onSubmitEditing={() => void sendKeyboardText()}
         />
-        <MobileBrowserViewModeSwitch
-          disabled={controlsDisabled}
-          value={browserViewMode}
-          onChange={selectBrowserViewMode}
-        />
+        <Pressable
+          style={[styles.sendButton, (controlsDisabled || !keyboardValue) && styles.disabled]}
+          disabled={controlsDisabled || !keyboardValue}
+          onPress={() => void sendKeyboardText()}
+          accessibilityLabel="Send text to browser"
+        >
+          <ArrowUp size={18} color={buttonColor(!controlsDisabled && !!keyboardValue)} />
+        </Pressable>
       </View>
+    </View>
+  )
+
+  const secondaryControlsContent = (
+    <View style={styles.secondaryControlsRoot}>
+      {toolbar}
+      <View style={styles.secondaryControlsSpacer} />
+      {keyboardDock}
+    </View>
+  )
+  useThorSecondaryContext(secondaryControls, secondaryControlsContent)
+  const secondaryControlsEnabled = secondaryControls?.enabled === true
+
+  return (
+    <View ref={setRootViewRef} style={styles.root}>
+      {!secondaryControlsEnabled ? toolbar : null}
 
       <View
         style={styles.viewport}
@@ -1258,43 +1318,7 @@ export function MobileBrowserPane({
         ) : null}
       </View>
 
-      <View
-        style={[
-          styles.keyboardDock,
-          { paddingBottom: bottomInset, transform: [{ translateY: -keyboardLift }] }
-        ]}
-      >
-        <MobileBrowserPointerModifiers
-          disabled={controlsDisabled}
-          selectedModifiers={pointerModifiers}
-          onToggle={togglePointerModifier}
-        />
-        <MobileBrowserKeyRow
-          disabled={controlsDisabled}
-          onKeypress={(key) => void sendKeypress(key)}
-        />
-        <View style={styles.inputRow}>
-          <TextInput
-            style={styles.keyboardInput}
-            value={keyboardValue}
-            onChangeText={setKeyboardValue}
-            placeholder="Type on page…"
-            placeholderTextColor={colors.textMuted}
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={!controlsDisabled}
-            onSubmitEditing={() => void sendKeyboardText()}
-          />
-          <Pressable
-            style={[styles.sendButton, (controlsDisabled || !keyboardValue) && styles.disabled]}
-            disabled={controlsDisabled || !keyboardValue}
-            onPress={() => void sendKeyboardText()}
-            accessibilityLabel="Send text to browser"
-          >
-            <ArrowUp size={18} color={buttonColor(!controlsDisabled && !!keyboardValue)} />
-          </Pressable>
-        </View>
-      </View>
+      {!secondaryControlsEnabled ? keyboardDock : null}
     </View>
   )
 }
@@ -1482,6 +1506,14 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0,
     backgroundColor: colors.bgBase
+  },
+  secondaryControlsRoot: {
+    flex: 1,
+    minHeight: 0,
+    backgroundColor: colors.bgBase
+  },
+  secondaryControlsSpacer: {
+    flex: 1
   },
   toolbar: {
     minHeight: 32,

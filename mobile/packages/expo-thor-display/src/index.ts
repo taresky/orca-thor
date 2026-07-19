@@ -40,3 +40,9 @@ export function addThorControlListener(listener: (event: ThorControlEvent) => vo
 } {
   return ExpoThorDisplayModule?.addListener('onThorControl', listener) ?? { remove: () => {} }
 }
+
+export function addThorStatusListener(listener: (event: ThorDisplayStatus) => void): {
+  remove: () => void
+} {
+  return ExpoThorDisplayModule?.addListener('onThorStatus', listener) ?? { remove: () => {} }
+}

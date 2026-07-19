@@ -20,6 +20,12 @@ export const mobileSessionFrameStyles = StyleSheet.create({
     flex: 1,
     minWidth: 0
   },
+  thorSecondaryPanel: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    minWidth: 0
+  },
   sessionChrome: {
     backgroundColor: colors.bgPanel,
     borderBottomWidth: 1,

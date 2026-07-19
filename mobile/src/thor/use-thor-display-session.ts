@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   addThorControlListener,
+  addThorStatusListener,
   clearThorDisplaySession,
   isThorDisplayModuleAvailable,
   restoreThorDisplayDraft,
@@ -23,7 +24,7 @@ type UseThorDisplaySessionOptions = ThorTerminalSendTarget & {
   worktreeName: string
 }
 
-export function useThorDisplaySession(options: UseThorDisplaySessionOptions): void {
+export function useThorDisplaySession(options: UseThorDisplaySessionOptions): boolean {
   const targetRef = useRef<ThorTerminalSendTarget>(options)
   const displayStateRef = useRef({
     active: options.active,
@@ -33,6 +34,7 @@ export function useThorDisplaySession(options: UseThorDisplaySessionOptions): vo
   })
   const sendQueueRef = useRef<Promise<unknown>>(Promise.resolve())
   const pendingSendCountRef = useRef(0)
+  const [secondaryActive, setSecondaryActive] = useState(false)
   targetRef.current = {
     client: options.client,
     clientId: options.clientId,
@@ -55,9 +57,15 @@ export function useThorDisplaySession(options: UseThorDisplaySessionOptions): vo
     let disposed = false
     // Why: production stays hardware-gated to AYN Thor, while debug builds can
     // exercise the same Presentation UI on Android's simulated second display.
+    const statusSubscription = addThorStatusListener((status) => {
+      if (!disposed) {
+        setSecondaryActive(status.started)
+      }
+    })
     void startThorDisplay(__DEV__)
-      .then(() => {
+      .then((status) => {
         if (!disposed) {
+          setSecondaryActive(status?.started === true)
           // Why: start crosses the native bridge; the first state update can
           // otherwise arrive before the controller exists and be lost.
           updateThorDisplaySession(displayStateRef.current)
@@ -94,6 +102,8 @@ export function useThorDisplaySession(options: UseThorDisplaySessionOptions): vo
     })
     return () => {
       disposed = true
+      setSecondaryActive(false)
+      statusSubscription.remove()
       subscription.remove()
       clearThorDisplaySession()
       stopThorDisplay()
@@ -106,4 +116,6 @@ export function useThorDisplaySession(options: UseThorDisplaySessionOptions): vo
     }
     updateThorDisplaySession(displayStateRef.current)
   }, [options.active, options.connectionState, options.terminalTitle, options.worktreeName])
+
+  return secondaryActive
 }

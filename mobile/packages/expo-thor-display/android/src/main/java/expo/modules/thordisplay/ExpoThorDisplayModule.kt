@@ -2,7 +2,7 @@ package expo.modules.thordisplay
 
 import android.os.Handler
 import android.os.Looper
-import androidx.core.os.bundleOf
+import com.facebook.react.ReactApplication
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -10,6 +10,7 @@ import expo.modules.kotlin.modules.ModuleDefinition
 class ExpoThorDisplayModule : Module() {
     companion object {
         private const val ON_CONTROL_EVENT = "onThorControl"
+        private const val ON_STATUS_EVENT = "onThorStatus"
     }
 
     private var controller: ThorDisplayController? = null
@@ -17,7 +18,7 @@ class ExpoThorDisplayModule : Module() {
 
     override fun definition() = ModuleDefinition {
         Name("ExpoThorDisplay")
-        Events(ON_CONTROL_EVENT)
+        Events(ON_CONTROL_EVENT, ON_STATUS_EVENT)
 
         AsyncFunction("start") { force: Boolean, promise: Promise ->
             val activity = appContext.currentActivity
@@ -26,19 +27,15 @@ class ExpoThorDisplayModule : Module() {
                 promise.reject("ERR_THOR_ACTIVITY", "The Android activity is not available", null)
                 return@AsyncFunction
             }
+            val reactHost = (activity.application as? ReactApplication)?.reactHost
+            if (reactHost == null) {
+                promise.reject("ERR_THOR_REACT_HOST", "The React host is not available", null)
+                return@AsyncFunction
+            }
             runOnMain {
                 try {
-                    val activeController = controller ?: ThorDisplayController(context) { action ->
-                        when (action) {
-                            is ThorControlAction.Submit -> sendEvent(
-                                ON_CONTROL_EVENT,
-                                bundleOf("kind" to "submit", "text" to action.text)
-                            )
-                            is ThorControlAction.Raw -> sendEvent(
-                                ON_CONTROL_EVENT,
-                                bundleOf("kind" to "raw", "text" to action.text)
-                            )
-                        }
+                    val activeController = controller ?: ThorDisplayController(context, reactHost) { status ->
+                        sendEvent(ON_STATUS_EVENT, status.toMap())
                     }.also { controller = it }
                     promise.resolve(activeController.start(activity, force).toMap())
                 } catch (error: Exception) {

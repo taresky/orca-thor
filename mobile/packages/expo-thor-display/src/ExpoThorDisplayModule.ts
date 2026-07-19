@@ -29,10 +29,10 @@ export type ThorDisplayStatus = {
 type NativeSubscription = { remove: () => void }
 
 type ExpoThorDisplayNativeModule = {
-  addListener: (
-    eventName: 'onThorControl',
-    listener: (event: ThorControlEvent) => void
-  ) => NativeSubscription
+  addListener: {
+    (eventName: 'onThorControl', listener: (event: ThorControlEvent) => void): NativeSubscription
+    (eventName: 'onThorStatus', listener: (event: ThorDisplayStatus) => void): NativeSubscription
+  }
   clearSession: () => void
   restoreDraft: (text: string) => void
   setSending: (sending: boolean) => void

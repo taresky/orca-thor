@@ -5,17 +5,19 @@ import android.content.Context
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.view.Display
+import com.facebook.react.ReactHost
 
 class ThorDisplayController(
     private val applicationContext: Context,
-    private val onAction: (ThorControlAction) -> Unit
+    private val reactHost: ReactHost,
+    private val onStatus: (ThorDisplayStatus) -> Unit
 ) : DisplayManager.DisplayListener {
     private val displayManager =
         applicationContext.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
     private var activity: Activity? = null
     private var force = false
     private var listening = false
-    private var presentation: ThorPresentation? = null
+    private var presentation: ThorReactPresentation? = null
     private var state = ThorSessionState()
 
     fun start(nextActivity: Activity, forceOnNonThor: Boolean): ThorDisplayStatus {
@@ -41,7 +43,6 @@ class ThorDisplayController(
 
     fun updateSession(next: ThorSessionState) {
         state = next
-        presentation?.applyState(next)
     }
 
     fun clearSession() {
@@ -49,11 +50,12 @@ class ThorDisplayController(
     }
 
     fun restoreDraft(text: String) {
-        presentation?.restoreDraft(text)
+        // Legacy no-op: text input now lives in the shared React Native tree,
+        // so its controlled value never crosses the native Presentation.
     }
 
     fun setSending(sending: Boolean) {
-        presentation?.setSending(sending)
+        // Legacy no-op: pending state is rendered by the original RN controls.
     }
 
     override fun onDisplayAdded(displayId: Int) {
@@ -73,6 +75,7 @@ class ThorDisplayController(
         if (!force && !isThorDevice()) {
             presentation?.dismiss()
             presentation = null
+            onStatus(status())
             return
         }
 
@@ -80,18 +83,19 @@ class ThorDisplayController(
         if (target == null) {
             presentation?.dismiss()
             presentation = null
+            onStatus(status())
             return
         }
         if (presentation?.display?.displayId == target.displayId && presentation?.isShowing == true) {
-            presentation?.applyState(state)
+            onStatus(status())
             return
         }
 
         presentation?.dismiss()
-        presentation = ThorPresentation(currentActivity, target, onAction).also {
+        presentation = ThorReactPresentation(currentActivity, target, reactHost).also {
             it.show()
-            it.applyState(state)
         }
+        onStatus(status())
     }
 
     private fun status(): ThorDisplayStatus {

@@ -31,6 +31,10 @@ import type { MobileChatPermission } from './mobile-native-chat-permission'
 import { MobileNativeChatQuestion } from './MobileNativeChatQuestion'
 import { mobileChatQuestionKey, type MobileChatQuestion } from './mobile-native-chat-question'
 import type { MobileNativeChatStatus } from './use-mobile-native-chat-session'
+import {
+  useThorSecondaryContext,
+  type ThorSecondaryControlsTarget
+} from '../thor/use-thor-secondary-context'
 
 /** Why the composer input is locked: the transport is disconnected, or the
  *  terminal subscription has not acknowledged its input lease yet. */
@@ -85,6 +89,7 @@ type Props = {
   /** Pixels to lift the composer by when the soft keyboard is open. The route
    *  owns keyboard tracking (the app uses manual lift, not KeyboardAvoidingView). */
   keyboardInset?: number
+  secondaryControls?: ThorSecondaryControlsTarget
 }
 
 export function MobileNativeChatView({
@@ -120,7 +125,8 @@ export function MobileNativeChatView({
   permission,
   onRespondPermission,
   onOpenFile,
-  keyboardInset = 0
+  keyboardInset = 0,
+  secondaryControls
 }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets()
   const listRef = useRef<FlatList<NativeChatMessage>>(null)
@@ -249,9 +255,115 @@ export function MobileNativeChatView({
     return () => clearTimeout(timer)
   }, [rawLockReason])
   const lockReason = lockHeld ? rawLockReason : null
+  const secondaryControlsEnabled = secondaryControls?.enabled === true
+
+  const controls = (
+    <View
+      style={[
+        secondaryControlsEnabled && styles.secondaryControlsRoot,
+        secondaryControlsEnabled
+          ? { paddingBottom: bottomPad, transform: [{ translateY: -keyboardInset }] }
+          : null
+      ]}
+    >
+      {secondaryControlsEnabled ? <View style={styles.secondaryControlsSpacer} /> : null}
+      {showAsk && ask ? (
+        <MobileNativeChatAsk
+          key={askKey ?? 'ask'}
+          prompt={ask}
+          onAnswer={async (selections) => {
+            const accepted = (await onAnswerAsk?.(ask, selections)) ?? false
+            if (accepted) {
+              dismissAsk()
+            }
+            return accepted
+          }}
+          onCancel={async () => {
+            const accepted = (await onCancelAsk?.()) ?? false
+            if (accepted) {
+              dismissAsk()
+            }
+            return accepted
+          }}
+        />
+      ) : permission ? (
+        <MobileNativeChatPermission
+          key={JSON.stringify(permission)}
+          permission={permission}
+          onRespond={async (send) => (await onRespondPermission?.(send)) ?? false}
+        />
+      ) : question ? (
+        <MobileNativeChatQuestion
+          key={mobileChatQuestionKey(question)}
+          question={question}
+          onAnswer={async (text) => (await onAnswerQuestion?.(text)) ?? false}
+        />
+      ) : null}
+      <View style={styles.chromeRow}>
+        <View style={styles.chromeLeft}>
+          {agentWorking ? <MobileAgentWorkingIndicator /> : null}
+          <Pressable
+            style={({ pressed }) => [styles.chromeToggle, pressed && styles.pressed]}
+            onPress={() => setToolsExpanded((v) => !v)}
+            hitSlop={8}
+          >
+            {toolsExpanded ? (
+              <ChevronsDownUp size={14} color={colors.textMuted} strokeWidth={2} />
+            ) : (
+              <ChevronsUpDown size={14} color={colors.textMuted} strokeWidth={2} />
+            )}
+            <Text style={styles.chromeToggleLabel}>{toolsExpanded ? 'Collapse' : 'Tools'}</Text>
+          </Pressable>
+        </View>
+        {agentWorking ? (
+          <Pressable
+            style={({ pressed }) => [styles.stopButton, pressed && styles.pressed]}
+            onPress={onStop}
+            hitSlop={8}
+            accessibilityLabel="Stop the agent"
+          >
+            <Square size={13} color={colors.statusRed} strokeWidth={2.4} fill={colors.statusRed} />
+            <Text style={styles.stopLabel}>Stop</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      {sendFailed ? (
+        <View style={styles.sendError}>
+          <Text style={styles.sendErrorText}>
+            {rawLockReason === 'disconnected'
+              ? 'Message not sent — reconnecting…'
+              : 'Message not sent'}
+          </Text>
+        </View>
+      ) : null}
+      <MobileNativeChatComposer
+        value={composerText}
+        onChangeText={onComposerTextChange}
+        onSend={handleSend}
+        onAttachImage={onAttachImage}
+        isAttaching={isAttaching}
+        onMicPress={onMicPress}
+        micActive={micActive}
+        dictationMode={dictationMode}
+        onMicPressIn={onMicPressIn}
+        onMicPressOut={onMicPressOut}
+        disabled={lockReason !== null}
+        placeholder={
+          lockReason === 'disconnected'
+            ? 'Reconnecting…'
+            : lockReason === 'waiting'
+              ? 'Waiting for terminal…'
+              : 'Message, @files, /commands'
+        }
+        filePaths={filePaths}
+        onNeedFiles={onNeedFiles}
+      />
+    </View>
+  )
+  useThorSecondaryContext(secondaryControls, controls)
 
   return (
-    <View style={[styles.root, { paddingBottom: bottomPad }]}>
+    <View style={[styles.root, { paddingBottom: secondaryControlsEnabled ? 0 : bottomPad }]}>
       {showLoading ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.textSecondary} />
@@ -325,101 +437,7 @@ export function MobileNativeChatView({
           ) : null}
         </GestureHandlerRootView>
       )}
-      {/* Pending agent prompt: a structured AskUserQuestion wins, then a
-          heuristic permission, then a heuristic question. */}
-      {showAsk && ask ? (
-        <MobileNativeChatAsk
-          key={askKey ?? 'ask'}
-          prompt={ask}
-          onAnswer={async (selections) => {
-            const accepted = (await onAnswerAsk?.(ask, selections)) ?? false
-            if (accepted) {
-              dismissAsk()
-            }
-            return accepted
-          }}
-          onCancel={async () => {
-            const accepted = (await onCancelAsk?.()) ?? false
-            if (accepted) {
-              dismissAsk()
-            }
-            return accepted
-          }}
-        />
-      ) : permission ? (
-        <MobileNativeChatPermission
-          key={JSON.stringify(permission)}
-          permission={permission}
-          onRespond={async (send) => (await onRespondPermission?.(send)) ?? false}
-        />
-      ) : question ? (
-        <MobileNativeChatQuestion
-          key={mobileChatQuestionKey(question)}
-          question={question}
-          onAnswer={async (text) => (await onAnswerQuestion?.(text)) ?? false}
-        />
-      ) : null}
-      {/* Chrome row above the composer: the working indicator and the global
-          tool-calls expand/collapse toggle on the left, Stop in the far corner. */}
-      <View style={styles.chromeRow}>
-        <View style={styles.chromeLeft}>
-          {agentWorking ? <MobileAgentWorkingIndicator /> : null}
-          <Pressable
-            style={({ pressed }) => [styles.chromeToggle, pressed && styles.pressed]}
-            onPress={() => setToolsExpanded((v) => !v)}
-            hitSlop={8}
-          >
-            {toolsExpanded ? (
-              <ChevronsDownUp size={14} color={colors.textMuted} strokeWidth={2} />
-            ) : (
-              <ChevronsUpDown size={14} color={colors.textMuted} strokeWidth={2} />
-            )}
-            <Text style={styles.chromeToggleLabel}>{toolsExpanded ? 'Collapse' : 'Tools'}</Text>
-          </Pressable>
-        </View>
-        {agentWorking ? (
-          <Pressable
-            style={({ pressed }) => [styles.stopButton, pressed && styles.pressed]}
-            onPress={onStop}
-            hitSlop={8}
-            accessibilityLabel="Stop the agent"
-          >
-            <Square size={13} color={colors.statusRed} strokeWidth={2.4} fill={colors.statusRed} />
-            <Text style={styles.stopLabel}>Stop</Text>
-          </Pressable>
-        ) : null}
-      </View>
-      {sendFailed ? (
-        <View style={styles.sendError}>
-          <Text style={styles.sendErrorText}>
-            {rawLockReason === 'disconnected'
-              ? 'Message not sent — reconnecting…'
-              : 'Message not sent'}
-          </Text>
-        </View>
-      ) : null}
-      <MobileNativeChatComposer
-        value={composerText}
-        onChangeText={onComposerTextChange}
-        onSend={handleSend}
-        onAttachImage={onAttachImage}
-        isAttaching={isAttaching}
-        onMicPress={onMicPress}
-        micActive={micActive}
-        dictationMode={dictationMode}
-        onMicPressIn={onMicPressIn}
-        onMicPressOut={onMicPressOut}
-        disabled={lockReason !== null}
-        placeholder={
-          lockReason === 'disconnected'
-            ? 'Reconnecting…'
-            : lockReason === 'waiting'
-              ? 'Waiting for terminal…'
-              : 'Message, @files, /commands'
-        }
-        filePaths={filePaths}
-        onNeedFiles={onNeedFiles}
-      />
+      {!secondaryControlsEnabled ? controls : null}
     </View>
   )
 }

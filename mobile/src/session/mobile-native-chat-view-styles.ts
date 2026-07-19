@@ -6,6 +6,14 @@ export const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.bgBase
   },
+  secondaryControlsRoot: {
+    flex: 1,
+    minHeight: 0,
+    backgroundColor: colors.bgBase
+  },
+  secondaryControlsSpacer: {
+    flex: 1
+  },
   chromeRow: {
     flexDirection: 'row',
     alignItems: 'center',

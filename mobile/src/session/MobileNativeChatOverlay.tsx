@@ -1,6 +1,7 @@
 import { StyleSheet, View } from 'react-native'
 import { MobileNativeChatView, type MobileNativeChatInputLockReason } from './MobileNativeChatView'
 import type { MobileNativeChatController } from './use-mobile-native-chat-controller'
+import type { ThorSecondaryControlsTarget } from '../thor/use-thor-secondary-context'
 
 type Props = {
   controller: MobileNativeChatController
@@ -13,6 +14,7 @@ type Props = {
   onMicPressOut: () => void
   inputLockReason: MobileNativeChatInputLockReason | null
   keyboardInset: number
+  secondaryControls?: ThorSecondaryControlsTarget
 }
 
 /** Keeps the terminal mounted underneath chat so its PTY subscription survives
@@ -27,7 +29,8 @@ export function MobileNativeChatOverlay({
   onMicPressIn,
   onMicPressOut,
   inputLockReason,
-  keyboardInset
+  keyboardInset,
+  secondaryControls
 }: Props): React.JSX.Element | null {
   if (!controller.showNativeChat) {
     return null
@@ -69,6 +72,7 @@ export function MobileNativeChatOverlay({
         filePaths={controller.nativeChatFilePaths}
         onNeedFiles={controller.loadNativeChatFiles}
         keyboardInset={keyboardInset}
+        secondaryControls={secondaryControls}
       />
     </View>
   )

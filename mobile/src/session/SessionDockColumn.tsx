@@ -40,7 +40,7 @@ export function SessionDockColumn({
       {/* Dedicated drag handle over the dock's left border — a leaf overlay so the
           inner ScrollView can't intercept the gesture on Android. */}
       <View style={styles.resizeHandle} {...panHandlers} />
-      <DockPanelContent
+      <SessionDockPanelContent
         activePanel={activePanel}
         hostId={hostId}
         worktreeId={worktreeId}
@@ -55,7 +55,7 @@ export function SessionDockColumn({
 
 // Memoized so a resize (width-only change on the parent) does not re-render the
 // embedded panel — its props are width-independent, so React skips it during a drag.
-const DockPanelContent = memo(function DockPanelContent({
+export const SessionDockPanelContent = memo(function SessionDockPanelContent({
   activePanel,
   hostId,
   worktreeId,

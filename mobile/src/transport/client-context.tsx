@@ -57,7 +57,7 @@ export type RpcClientContextValue = {
   primeHosts: (hosts: HostProfile[]) => void
 }
 
-const Ctx = createContext<RpcClientContextValue | null>(null)
+export const RpcClientContext = createContext<RpcClientContextValue | null>(null)
 
 export function RpcClientProvider({ children }: { children: ReactNode }) {
   // Why: entries live in a ref so updates don't force re-renders of the
@@ -381,11 +381,11 @@ export function RpcClientProvider({ children }: { children: ReactNode }) {
     ]
   )
 
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>
+  return <RpcClientContext.Provider value={value}>{children}</RpcClientContext.Provider>
 }
 
 export function useRpcClientContext(): RpcClientContextValue {
-  const ctx = useContext(Ctx)
+  const ctx = useContext(RpcClientContext)
   if (!ctx) {
     throw new Error('useHostClient must be used inside <RpcClientProvider>')
   }
