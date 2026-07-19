@@ -4616,7 +4616,10 @@ export default function SessionScreen() {
         <View
           style={[
             styles.commandDock,
-            { paddingBottom: insets.bottom, transform: [{ translateY: -keyboardLift }] }
+            {
+              paddingBottom: insets.bottom,
+              transform: [{ translateY: thorSecondaryActive ? 0 : -keyboardLift }]
+            }
           ]}
         >
           {/* Accessory keys */}
@@ -4853,6 +4856,7 @@ export default function SessionScreen() {
                 blurOnSubmit={false}
                 editable={canSend}
                 importantForAutofill="no"
+                disableFullscreenUI
               />
             </View>
           ) : (
@@ -4887,6 +4891,7 @@ export default function SessionScreen() {
                 returnKeyType="send"
                 editable={canSend}
                 onSubmitEditing={() => void handleSend()}
+                disableFullscreenUI
               />
               <MobileTerminalInputActions
                 canSend={canSend}

@@ -123,10 +123,7 @@ type BrowserFrameCacheEntry = {
 
 const browserFrameCache = new Map<string, BrowserFrameCacheEntry>()
 
-type BrowserPageParams = {
-  worktree: string
-  page: string
-}
+type BrowserPageParams = { worktree: string; page: string }
 
 type PendingWheelCommand = {
   base: BrowserPageParams
@@ -147,6 +144,7 @@ export function MobileBrowserPane({
   onSecondaryToast = onToast,
   secondaryControls
 }: MobileBrowserPaneProps) {
+  const secondaryControlsEnabled = secondaryControls?.enabled === true
   const [browserViewMode, setBrowserViewMode] = useState<MobileBrowserViewMode>(() =>
     getInitialMobileBrowserViewMode(worktreeId, tab.browserPageId)
   )
@@ -1128,6 +1126,7 @@ export function MobileBrowserPane({
         placeholder="URL"
         placeholderTextColor={colors.textMuted}
         editable={!controlsDisabled}
+        disableFullscreenUI
       />
       <MobileBrowserViewModeSwitch
         disabled={controlsDisabled}
@@ -1141,7 +1140,10 @@ export function MobileBrowserPane({
     <View
       style={[
         styles.keyboardDock,
-        { paddingBottom: bottomInset, transform: [{ translateY: -keyboardLift }] }
+        {
+          paddingBottom: bottomInset,
+          transform: [{ translateY: secondaryControlsEnabled ? 0 : -keyboardLift }]
+        }
       ]}
     >
       <MobileBrowserPointerModifiers
@@ -1164,6 +1166,7 @@ export function MobileBrowserPane({
           autoCorrect={false}
           editable={!controlsDisabled}
           onSubmitEditing={() => void sendKeyboardText()}
+          disableFullscreenUI
         />
         <Pressable
           style={[styles.sendButton, (controlsDisabled || !keyboardValue) && styles.disabled]}
@@ -1185,8 +1188,6 @@ export function MobileBrowserPane({
     </View>
   )
   useThorSecondaryContext(secondaryControls, secondaryControlsContent)
-  const secondaryControlsEnabled = secondaryControls?.enabled === true
-
   return (
     <View ref={setRootViewRef} style={styles.root}>
       {!secondaryControlsEnabled ? toolbar : null}

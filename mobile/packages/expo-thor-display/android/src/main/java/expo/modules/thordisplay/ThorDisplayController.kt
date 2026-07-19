@@ -1,9 +1,13 @@
 package expo.modules.thordisplay
 
 import android.app.Activity
+import android.app.ActivityOptions
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.hardware.display.DisplayManager
 import android.os.Build
+import android.os.Bundle
 import android.view.Display
 import com.facebook.react.ReactHost
 
@@ -112,5 +116,25 @@ class ThorDisplayController(
         // Why: Thor firmware builds have shipped with more than one manufacturer
         // spelling; the product/model/device identity is the stable signal.
         return listOf(model, device, product).any { it.contains("thor") }
+    }
+}
+
+/**
+ * Thor mirrors launcher icons across both displays. This entry point may run on either panel but
+ * always launches the real React Activity on the physical upper/default display.
+ */
+class ThorLauncherActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val mainIntent = Intent(Intent.ACTION_MAIN).apply {
+            component = ComponentName(packageName, "$packageName.MainActivity")
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        }
+        val options = ActivityOptions.makeBasic().apply {
+            launchDisplayId = Display.DEFAULT_DISPLAY
+        }
+        startActivity(mainIntent, options.toBundle())
+        finish()
     }
 }

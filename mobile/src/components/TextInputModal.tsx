@@ -83,6 +83,7 @@ export function TextInputModal({
         returnKeyType="done"
         onSubmitEditing={handleSubmit}
         selectionColor={colors.accentBlue}
+        disableFullscreenUI
       />
 
       <View style={styles.actions}>

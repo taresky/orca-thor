@@ -135,6 +135,7 @@ export function MobileNativeChatQuestion({ question, onAnswer }: Props): React.J
           onSubmitEditing={submitFreeText}
           returnKeyType="send"
           multiline
+          disableFullscreenUI
         />
         <Pressable
           accessibilityLabel="Send reply"

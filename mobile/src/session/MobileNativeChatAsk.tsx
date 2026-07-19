@@ -152,6 +152,7 @@ export function MobileNativeChatAsk({ prompt, onAnswer, onCancel }: Props): Reac
             placeholderTextColor={colors.textMuted}
             multiline
             autoFocus
+            disableFullscreenUI
           />
         ) : null}
       </ScrollView>

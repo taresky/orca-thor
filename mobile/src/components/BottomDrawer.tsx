@@ -24,7 +24,10 @@ import Animated, {
 } from 'react-native-reanimated'
 import { colors, spacing } from '../theme/mobile-theme'
 import { resolveBottomDrawerMounted } from './bottom-drawer-mount-state'
-import { useInsideBottomDrawerModalHost } from './bottom-drawer-modal-host'
+import {
+  useBottomDrawerModalHostMode,
+  useInsideBottomDrawerModalHost
+} from './bottom-drawer-modal-host'
 import { useResponsiveLayout } from '../layout/responsive-layout'
 
 const DISMISS_THRESHOLD = 80
@@ -114,6 +117,7 @@ function MountedBottomDrawer({
   // transforms below) is unchanged, so phone behavior stays identical.
   const { isWideLayout, modalMaxWidth } = useResponsiveLayout()
   const insideModalHost = useInsideBottomDrawerModalHost()
+  const modalHostMode = useBottomDrawerModalHostMode()
 
   useEffect(() => {
     if (visible) {
@@ -262,7 +266,7 @@ function MountedBottomDrawer({
         translateY:
           interpolate(progress.value, [0, 1], [screenHeight, 0], Extrapolation.CLAMP) +
           translateY.value -
-          keyboardOffset.value
+          (modalHostMode === 'inline' ? 0 : keyboardOffset.value)
       }
     ]
   }))

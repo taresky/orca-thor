@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { colors } from '../theme/mobile-theme'
+import { BottomDrawerInlineHost } from '../components/bottom-drawer-modal-host'
 import {
   getThorSecondaryContentSnapshot,
   subscribeThorSecondaryContent
@@ -20,7 +21,9 @@ export function ThorSecondaryRoot(): React.JSX.Element {
   return (
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
-        <View style={styles.root}>{snapshot.content}</View>
+        <BottomDrawerInlineHost>
+          <View style={styles.root}>{snapshot.content}</View>
+        </BottomDrawerInlineHost>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   )

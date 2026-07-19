@@ -137,7 +137,6 @@ export function MobileNativeChatView({
   const { askKey, showAsk, dismissAsk } = useMobileNativeChatAskDismiss(ask)
   // Lift the composer clear of the keyboard, plus the bottom safe-area so it
   // never sits under the home indicator / nav bar (mirrors the terminal dock).
-  const bottomPad = keyboardInset > 0 ? keyboardInset + insets.bottom : insets.bottom
   const [atBottom, setAtBottom] = useState(true)
   const sendScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const { fontScale, pinchGesture } = useMobileNativeChatPinchGesture()
@@ -256,13 +255,16 @@ export function MobileNativeChatView({
   }, [rawLockReason])
   const lockReason = lockHeld ? rawLockReason : null
   const secondaryControlsEnabled = secondaryControls?.enabled === true
+  const effectiveKeyboardInset = secondaryControlsEnabled ? 0 : keyboardInset
+  const bottomPad =
+    effectiveKeyboardInset > 0 ? effectiveKeyboardInset + insets.bottom : insets.bottom
 
   const controls = (
     <View
       style={[
         secondaryControlsEnabled && styles.secondaryControlsRoot,
         secondaryControlsEnabled
-          ? { paddingBottom: bottomPad, transform: [{ translateY: -keyboardInset }] }
+          ? { paddingBottom: bottomPad, transform: [{ translateY: -effectiveKeyboardInset }] }
           : null
       ]}
     >

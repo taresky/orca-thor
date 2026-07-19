@@ -14,12 +14,7 @@ import {
 
 const CUSTOM_ACCESSORY_KEYS_STORAGE_KEY = 'orca:custom-accessory-keys'
 
-export type CustomKey = {
-  id: string
-  label: string
-  bytes: string
-  enter: boolean
-}
+export type CustomKey = { id: string; label: string; bytes: string; enter: boolean }
 
 type Step = 'choose-type' | 'shortcut-combo' | 'special-keys' | 'text-macro'
 
@@ -299,6 +294,7 @@ export function CustomKeyModal({ visible, onClose, onKeysChanged, onManageShortc
               autoCapitalize="characters"
               autoCorrect={false}
               maxLength={1}
+              disableFullscreenUI
             />
             <Pressable
               style={({ pressed }) => [styles.moreLink, pressed && styles.moreLinkPressed]}
@@ -372,6 +368,7 @@ export function CustomKeyModal({ visible, onClose, onKeysChanged, onManageShortc
               placeholderTextColor={colors.textMuted}
               autoCapitalize="none"
               autoCorrect={false}
+              disableFullscreenUI
             />
             <Text style={styles.fieldLabel}>Command</Text>
             <TextInput
@@ -382,6 +379,7 @@ export function CustomKeyModal({ visible, onClose, onKeysChanged, onManageShortc
               placeholderTextColor={colors.textMuted}
               autoCapitalize="none"
               autoCorrect={false}
+              disableFullscreenUI
             />
             <View style={styles.switchRow}>
               <Text style={styles.switchLabel}>Press Enter</Text>

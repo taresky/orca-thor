@@ -176,6 +176,7 @@ export function MobileNativeChatComposer({
           multiline
           editable={!disabled}
           textAlignVertical="top"
+          disableFullscreenUI
         />
         {onMicPress ? (
           <Pressable
