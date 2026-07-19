@@ -24,6 +24,13 @@ class ThorPresentation(
     display: Display,
     private val onAction: (ThorControlAction) -> Unit
 ) : Presentation(context, display, android.R.style.Theme_DeviceDefault_NoActionBar) {
+    companion object {
+        // Thor leaves about 275dp above WeType; these values preserve a roomy input
+        // and a full-size Send target inside that measured compact viewport.
+        private const val IME_COMPACT_HEIGHT_DP = 300
+        private const val SEND_BUTTON_WIDTH_DP = 140
+    }
+
     private lateinit var statusLabel: TextView
     private lateinit var targetLabel: TextView
     private lateinit var input: EditText
@@ -118,13 +125,14 @@ class ThorPresentation(
             setBackgroundColor(ThorPalette.background)
         }
 
-        root.addView(TextView(context).apply {
+        val brandLabel = TextView(context).apply {
             text = "ORCA · THOR"
             setTextColor(ThorPalette.textSecondary)
             textSize = ThorPalette.metaTextSize
             typeface = Typeface.create(geistTypeface, Typeface.BOLD)
             letterSpacing = 0.05f
-        }, matchWidthWrapHeight())
+        }
+        root.addView(brandLabel, matchWidthWrapHeight())
 
         targetLabel = TextView(context).apply {
             setTextColor(ThorPalette.textPrimary)
@@ -142,6 +150,11 @@ class ThorPresentation(
             statusLabel,
             marginLayoutParams(top = ThorPalette.spacingXs, bottom = ThorPalette.spacingMd)
         )
+
+        val composer = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
 
         input = EditText(context).apply {
             hint = "Message or command"
@@ -181,10 +194,22 @@ class ThorPresentation(
                 }
             }
         }
-        root.addView(input, matchWidthWrapHeight())
+        composer.addView(
+            input,
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
 
         sendButton = createButton("Send", primary = true) { submitText() }
-        root.addView(sendButton, marginLayoutParams(top = ThorPalette.spacingSm))
+        composer.addView(
+            sendButton,
+            LinearLayout.LayoutParams(
+                dp(SEND_BUTTON_WIDTH_DP),
+                LinearLayout.LayoutParams.MATCH_PARENT
+            ).apply {
+                marginStart = dp(ThorPalette.spacingSm)
+            }
+        )
+        root.addView(composer, matchWidthWrapHeight())
 
         val firstKeys = listOf(
             KeySpec("Esc", "\u001b"),
@@ -200,11 +225,14 @@ class ThorPresentation(
             KeySpec("Enter", "\r")
         )
         val createdKeys = mutableListOf<Button>()
-        root.addView(
+        val accessoryControls = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        accessoryControls.addView(
             createKeyRow(firstKeys, createdKeys),
             marginLayoutParams(top = ThorPalette.spacingMd)
         )
-        root.addView(
+        accessoryControls.addView(
             createKeyRow(secondKeys, createdKeys),
             marginLayoutParams(top = ThorPalette.spacingSm)
         )
@@ -220,12 +248,36 @@ class ThorPresentation(
             createdKeys += button
             replies.addView(button, weightedButtonLayoutParams())
         }
-        root.addView(replies, marginLayoutParams(top = ThorPalette.spacingSm))
+        accessoryControls.addView(replies, marginLayoutParams(top = ThorPalette.spacingSm))
 
         val keyboardButton = createButton("Show keyboard", primary = false) { showKeyboard() }
         createdKeys += keyboardButton
-        root.addView(keyboardButton, marginLayoutParams(top = ThorPalette.spacingSm))
+        accessoryControls.addView(keyboardButton, marginLayoutParams(top = ThorPalette.spacingSm))
+        root.addView(accessoryControls, matchWidthWrapHeight())
         keyButtons = createdKeys
+
+        var compactForIme = false
+        root.addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
+            val shouldCompact = bottom - top < dp(IME_COMPACT_HEIGHT_DP)
+            root.post {
+                if (shouldCompact == compactForIme) {
+                    return@post
+                }
+                compactForIme = shouldCompact
+                val chromeVisibility = if (shouldCompact) View.GONE else View.VISIBLE
+                brandLabel.visibility = chromeVisibility
+                targetLabel.visibility = chromeVisibility
+                statusLabel.visibility = chromeVisibility
+                accessoryControls.visibility = chromeVisibility
+                root.setPadding(
+                    dp(ThorPalette.spacingLg),
+                    dp(if (shouldCompact) ThorPalette.spacingSm else ThorPalette.spacingMd),
+                    dp(ThorPalette.spacingLg),
+                    dp(ThorPalette.spacingMd)
+                )
+                root.requestLayout()
+            }
+        }
         return root
     }
 
