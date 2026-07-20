@@ -39,6 +39,10 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { sliceCheckLogTail } from './check-job-log-tail-slice'
+import {
+  classifyPRRefreshError,
+  safePRRefreshErrorMessage
+} from './pr-refresh-error-classification'
 import { getPRConflictSummary } from './conflict-summary'
 import { getSshFilesystemProvider } from '../providers/ssh-filesystem-dispatch'
 import { joinWorktreeRelativePath } from '../runtime/runtime-relative-paths'
@@ -47,7 +51,6 @@ import {
   execFileAsync,
   ghExecFileAsync,
   gitExecFileAsync,
-  extractExecError,
   acquire,
   release,
   getOwnerRepo,
@@ -63,6 +66,9 @@ import {
   type LocalGitExecOptions,
   type OwnerRepo
 } from './gh-utils'
+// Import the pure error-parsing helpers from the lightweight module, not
+// `./gh-utils`, so tests that mock gh-utils still resolve the real functions.
+import { extractExecError, parseRetryAfterMs } from '../git/exec-error'
 import {
   isCommitPartOfMergedPR,
   type MergedPRCommitMembership
@@ -181,61 +187,28 @@ async function assertRateLimitBudget(bucket: RateLimitBucketKind): Promise<void>
   }
 }
 
-function classifyPRRefreshError(
-  err: unknown
-): Extract<PRRefreshOutcome, { kind: 'upstream-error' }>['errorType'] {
-  const message = err instanceof Error ? err.message : String(err)
-  // Why: GitHub-unreachable buckets (5xx outage / network / rate limit) share
-  // one detector with the Tasks work-item path so both surfaces attribute an
-  // outage to GitHub identically. Rate-limit responses also carry "HTTP 403",
-  // so this must run before the permission check below.
-  const unavailable = classifyGitHubUnavailable(message)
-  if (unavailable) {
-    return unavailable
-  }
-  const lower = message.toLowerCase()
-  if (lower.includes('http 403') || lower.includes('resource not accessible')) {
-    return 'permission'
-  }
-  if (lower.includes('http 404') || lower.includes('could not resolve to a repository')) {
-    return 'repo_unavailable'
-  }
-  return /auth|login|credential/i.test(message) ? 'auth' : 'unknown'
-}
-
-function safePRRefreshErrorMessage(
-  errorType: Extract<PRRefreshOutcome, { kind: 'upstream-error' }>['errorType']
-): string {
-  switch (errorType) {
-    case 'rate_limited':
-      return 'GitHub rate limit is low. Try again after the limit resets.'
-    case 'auth':
-      return 'GitHub authentication is unavailable. Check your gh login.'
-    case 'network':
-      return 'GitHub is unreachable right now. Check your network and try again.'
-    case 'server_error':
-      return "GitHub's API is temporarily unavailable (server error). This is a GitHub-side issue."
-    case 'permission':
-      return 'GitHub did not allow access to this pull request.'
-    case 'repo_unavailable':
-      return 'The GitHub repository is unavailable or cannot be resolved.'
-    case 'gh_unavailable':
-      return 'GitHub CLI is unavailable.'
-    case 'unknown':
-      return 'GitHub pull request refresh failed.'
-  }
-}
-
 function prRefreshUpstreamError(
   err: unknown
 ): Extract<PRRefreshOutcome, { kind: 'upstream-error' }> {
   const errorType = classifyPRRefreshError(err)
-  return {
+  const outcome: Extract<PRRefreshOutcome, { kind: 'upstream-error' }> = {
     kind: 'upstream-error',
     errorType,
     message: safePRRefreshErrorMessage(errorType),
     fetchedAt: Date.now()
   }
+  // Why: a rate limit that carries a Retry-After is a real cooldown — surface it
+  // as the retry schedule so the renderer disables manual Retry until the reset
+  // and shows a truthful auto-retry time, instead of retrying into another 429.
+  if (errorType === 'rate_limited') {
+    const retryAfterMs = parseRetryAfterMs(extractExecError(err).stderr)
+    if (retryAfterMs !== null && retryAfterMs > 0) {
+      const retryAt = Date.now() + retryAfterMs
+      outcome.nextAutoRetryAt = retryAt
+      outcome.retryDisabledUntil = retryAt
+    }
+  }
+  return outcome
 }
 
 function isNoPullRequestError(err: unknown): boolean {
@@ -1093,7 +1066,9 @@ async function resolvePrWorkItemSource(
   localGitOptions: LocalGitExecOptions = {}
 ): Promise<ResolvedPrWorkItemSource> {
   const [originCandidate, upstreamCandidate] = await Promise.all([
-    getOwnerRepo(repoPath, connectionId, localGitOptions),
+    // Why: this caller combines both remotes itself, so it needs origin
+    // specifically (getOwnerRepo is upstream-first since #7331).
+    getOwnerRepoForRemote(repoPath, 'origin', connectionId, localGitOptions),
     getOwnerRepoForRemote(repoPath, 'upstream', connectionId, localGitOptions)
   ])
   const source =
@@ -1647,7 +1622,15 @@ export async function getRepoSlug(
   connectionId?: string | null,
   options: HostedReviewExecutionOptions = {}
 ): Promise<{ owner: string; repo: string } | null> {
-  return getOwnerRepo(repoPath, connectionId, ...hostedReviewLocalGitOptionArgs(options))
+  // Why: the slug is the checkout's own identity (renderer display, icon
+  // autodetect), so it must stay origin-based — getOwnerRepo became
+  // upstream-first for PR reads in #7331.
+  return getOwnerRepoForRemote(
+    repoPath,
+    'origin',
+    connectionId,
+    ...hostedReviewLocalGitOptionArgs(options)
+  )
 }
 
 /**
@@ -1665,7 +1648,9 @@ export async function getRepoUpstream(
 ): Promise<OwnerRepo | null> {
   const localGitArgs = hostedReviewLocalGitOptionArgs(options)
   const localGitOptions = localGitArgs[0] ?? {}
-  const origin = await getOwnerRepo(repoPath, connectionId, ...localGitArgs)
+  // Why: must be origin specifically — the fork-parent fast-path below compares
+  // it against the upstream remote (getOwnerRepo is upstream-first since #7331).
+  const origin = await getOwnerRepoForRemote(repoPath, 'origin', connectionId, ...localGitArgs)
   if (!origin) {
     return null
   }
@@ -1877,9 +1862,16 @@ export async function createGitHubPullRequest(
 
   // Why: github.com-only slug parsing returns null for GHES, so fall back to the
   // enterprise resolver (gh-authenticated custom host) before giving up (#8312).
+  // Creation targets origin: the head branch is unqualified, so `gh pr create`
+  // must run against the repo the branch was pushed to, not the fork parent
+  // (getOwnerRepo became upstream-first for PR reads in #7331).
   const ownerRepo =
-    (await getOwnerRepo(repoPath, connectionId, ...hostedReviewLocalGitOptionArgs(options))) ??
-    (await getEnterpriseGitHubRepoSlug(repoPath, connectionId, options))
+    (await getOwnerRepoForRemote(
+      repoPath,
+      'origin',
+      connectionId,
+      ...hostedReviewLocalGitOptionArgs(options)
+    )) ?? (await getEnterpriseGitHubRepoSlug(repoPath, connectionId, options))
   if (!ownerRepo) {
     return {
       ok: false,
@@ -2037,9 +2029,8 @@ export async function getWorkItem(
         return issue
       }
     } catch (err) {
-      // Why: the issue lookup now targets `upstream` while the PR lookup targets `origin`,
-      // so a transient upstream failure (5xx, rate limit, network flake) on issue #N would
-      // silently fall through to origin's PR #N — potentially a completely unrelated item.
+      // Why: a transient failure (5xx, rate limit, network flake) on issue #N would
+      // silently fall through to PR #N — potentially a completely unrelated item.
       // Only fall through when the issue genuinely doesn't exist (404); re-throw everything
       // else so the outer catch returns null and the caller sees a real failure instead of
       // a wrong item. classifyGhError centralizes the 404/"not found" pattern-matching.

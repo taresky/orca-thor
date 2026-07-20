@@ -539,6 +539,7 @@ function createDeps(overrides: Record<string, unknown> = {}) {
     isActiveRef: { current: true },
     isVisibleRef: { current: true },
     onPtyExitRef: { current: vi.fn() },
+    onAgentExitedRef: { current: vi.fn() },
     onPtyErrorRef: { current: vi.fn() },
     clearTabPtyId: vi.fn(),
     consumeSuppressedPtyExit: vi.fn(() => false),
@@ -2541,6 +2542,34 @@ describe('connectPanePty', () => {
     expect(manager.closePane).not.toHaveBeenCalled()
   })
 
+  it('rebinds a provider replacement without granting fresh-spawn exit protection', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport('terminal-old')
+    transportFactoryQueue.push(transport)
+    const manager = createManager(1)
+    const deps = createDeps()
+
+    connectPanePty(createPane(1) as never, manager as never, deps as never)
+    const onPtyRebind = createdTransportOptions[0]?.onPtyRebind as
+      | ((ptyId: string, replacedPtyId: string) => void)
+      | undefined
+    const onPtyExit = createdTransportOptions[0]?.onPtyExit as ((ptyId: string) => void) | undefined
+    expect(onPtyRebind).toBeTypeOf('function')
+    expect(onPtyExit).toBeTypeOf('function')
+
+    onPtyRebind?.('terminal-reconnected', 'terminal-old')
+    onPtyExit?.('terminal-reconnected')
+
+    expect(deps.syncPanePtyLayoutBinding).toHaveBeenCalledWith(1, 'terminal-reconnected')
+    expect(deps.updateTabPtyId).toHaveBeenCalledWith(
+      'tab-1',
+      'terminal-reconnected',
+      'terminal-old'
+    )
+    expect(deps.onPtyExitRef.current).toHaveBeenCalledWith('terminal-reconnected')
+    expect(manager.closePane).not.toHaveBeenCalled()
+  })
+
   it('closes a split pane when an established PTY exits after output', async () => {
     const { connectPanePty } = await import('./pty-connection')
     const capturedDataCallback: { current: ((data: string) => void) | null } = { current: null }
@@ -3919,6 +3948,130 @@ describe('connectPanePty', () => {
 
     expect(createdTransportOptions[0]?.command).toBe('codex')
     expect(transport.connect).toHaveBeenCalledWith(expect.objectContaining({ cols: 120, rows: 50 }))
+  })
+
+  it('spawns the delayed main setup-split pane when its sibling owns the tab PTY fallback', async () => {
+    const frameCallbacks: FrameRequestCallback[] = []
+    globalThis.requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+      frameCallbacks.push(callback)
+      return frameCallbacks.length
+    })
+    const runNextFrame = (): void => {
+      const callback = frameCallbacks.shift()
+      if (!callback) {
+        throw new Error('expected a queued animation frame')
+      }
+      callback(0)
+    }
+
+    const { connectPanePty } = await import('./pty-connection')
+    let mainPtyId: string | null = null
+    const mainTransport = createMockTransport()
+    mainTransport.getPtyId.mockImplementation(() => mainPtyId)
+    mainTransport.attach.mockImplementation(({ existingPtyId }: { existingPtyId: string }) => {
+      mainPtyId = existingPtyId
+    })
+    mainTransport.connect.mockImplementation(async () => {
+      mainPtyId = 'pty-main'
+      const onPtySpawn = createdTransportOptions[0]?.onPtySpawn as
+        | ((ptyId: string) => void)
+        | undefined
+      onPtySpawn?.(mainPtyId)
+      return mainPtyId
+    })
+    let setupPtyId: string | null = null
+    const setupTransport = createMockTransport()
+    setupTransport.getPtyId.mockImplementation(() => setupPtyId)
+    setupTransport.connect.mockImplementation(async () => {
+      setupPtyId = 'pty-setup'
+      const onPtySpawn = createdTransportOptions[1]?.onPtySpawn as
+        | ((ptyId: string) => void)
+        | undefined
+      onPtySpawn?.(setupPtyId)
+      return setupPtyId
+    })
+    transportFactoryQueue.push(mainTransport, setupTransport)
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: { 'wt-1': [{ id: 'tab-1', ptyId: null }] },
+      ptyIdsByTabId: { 'tab-1': [] }
+    }
+    const updateStoreTabPtyId = vi.fn((_tabId: string, ptyId: string) => {
+      mockStoreState.tabsByWorktree['wt-1'][0].ptyId = ptyId
+      const livePtyIds = mockStoreState.ptyIdsByTabId?.['tab-1'] ?? []
+      if (!livePtyIds.includes(ptyId)) {
+        livePtyIds.push(ptyId)
+      }
+    })
+
+    const mainPane = createPane(1)
+    const setupPane = createPane(2)
+    let splitMounted = false
+    const root = createMeasuredElement({ rect: () => createRect(1200, 800) })
+    const split = createMeasuredElement({
+      className: () => (splitMounted ? 'pane-split is-vertical' : ''),
+      rect: () => createRect(1200, 800)
+    })
+    const mainContainer = createMeasuredElement({
+      parentElement: () => (splitMounted ? split : root),
+      rect: () => (splitMounted ? createRect(600, 800) : createRect(1200, 800))
+    })
+    const setupContainer = createMeasuredElement({
+      parentElement: () => split,
+      rect: () => createRect(599, 800, 601, 0)
+    })
+    mainPane.container = mainContainer
+    setupPane.container = setupContainer
+    const manager = createManager(2)
+    manager.getPanes = vi.fn(() => [mainPane, setupPane])
+    const sharedTransportsRef = { current: new Map() }
+
+    connectPanePty(
+      mainPane as never,
+      manager as never,
+      createDeps({
+        startup: { command: 'codex', waitForSetupSplitDirection: 'vertical' },
+        paneTransportsRef: sharedTransportsRef,
+        updateTabPtyId: updateStoreTabPtyId
+      }) as never
+    )
+    connectPanePty(
+      setupPane as never,
+      manager as never,
+      createDeps({
+        startup: { command: 'bash setup-runner.sh' },
+        paneTransportsRef: sharedTransportsRef,
+        updateTabPtyId: updateStoreTabPtyId
+      }) as never
+    )
+
+    for (let frame = 0; frame < 40 && setupTransport.connect.mock.calls.length === 0; frame++) {
+      runNextFrame()
+    }
+    expect(setupTransport.connect).toHaveBeenCalledTimes(1)
+    expect(mockStoreState.tabsByWorktree['wt-1'][0].ptyId).toBe('pty-setup')
+    expect(mainTransport.connect).not.toHaveBeenCalled()
+
+    splitMounted = true
+    for (
+      let frame = 0;
+      frame < 20 &&
+      mainTransport.connect.mock.calls.length === 0 &&
+      mainTransport.attach.mock.calls.length === 0;
+      frame++
+    ) {
+      runNextFrame()
+    }
+
+    expect(mainTransport.attach).not.toHaveBeenCalled()
+    expect(mainTransport.connect).toHaveBeenCalledTimes(1)
+    expect(mainTransport.connect).toHaveBeenCalledWith(
+      expect.not.objectContaining({ sessionId: expect.any(String) })
+    )
+    expect(createdTransportOptions[0]?.command).toBe('codex')
+    expect(createdTransportOptions[1]?.command).toBe('bash setup-runner.sh')
+    expect(mainPtyId).toBe('pty-main')
+    expect(setupPtyId).toBe('pty-setup')
   })
 
   it('does not reuse a sibling split pane pending spawn after remount', async () => {
@@ -17578,64 +17731,84 @@ describe('connectPanePty', () => {
     // land in the first advance window, confirming exit before the replacement
     // hook owner is set and racing the very veto this test asserts.
     const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5)
-    const getForegroundProcess = vi.mocked(window.api.pty.getForegroundProcess)
-    getForegroundProcess.mockResolvedValue('codex')
-    const paneKey = makePaneKey('tab-1', LEAF_1)
-    const pane = createPane(1)
-    const manager = createManager(1)
-    const deps = createDeps()
+    try {
+      const getForegroundProcess = vi.mocked(window.api.pty.getForegroundProcess)
+      // Why: call-count alone is flaky — one advanceTimersToNextTimerAsync can start
+      // multiple getForegroundProcess reads (completion cadence + pane tracker /
+      // confirmForegroundProcess alias). Gate the 2nd+ null sample until the
+      // replacement hook owner is installed so the confirming sample always sees it.
+      let idleMode = false
+      let nullSamplesStarted = 0
+      let releaseConfirmingNullSample: (() => void) | undefined
+      const confirmingNullSampleGate = new Promise<void>((resolve) => {
+        releaseConfirmingNullSample = resolve
+      })
+      getForegroundProcess.mockImplementation(async () => {
+        if (!idleMode) {
+          return 'codex'
+        }
+        nullSamplesStarted += 1
+        if (nullSamplesStarted >= 2) {
+          await confirmingNullSampleGate
+        }
+        return null
+      })
+      const paneKey = makePaneKey('tab-1', LEAF_1)
+      const pane = createPane(1)
+      const manager = createManager(1)
+      const deps = createDeps()
 
-    connectPanePty(pane as never, manager as never, deps as never)
-    await flushAsyncTicks()
-    const titleHandler = createdTransportOptions[0]?.onTitleChange as
-      | ((title: string, rawTitle: string) => void)
-      | undefined
-    const idleHandler = createdTransportOptions[0]?.onAgentBecameIdle as
-      | ((title: string) => void)
-      | undefined
-    if (!titleHandler || !idleHandler) {
-      throw new Error('Expected title and idle handlers to be registered')
-    }
-
-    titleHandler('Codex working', 'Codex working')
-    await vi.advanceTimersByTimeAsync(2_500)
-    const inspectionsBeforeIdle = getForegroundProcess.mock.calls.length
-    getForegroundProcess.mockResolvedValue(null)
-    // Why: active process polling is jittered, so a fixed window can consume
-    // both null samples before the replacement hook row is installed.
-    for (
-      let attempts = 0;
-      getForegroundProcess.mock.calls.length === inspectionsBeforeIdle;
-      attempts += 1
-    ) {
-      if (attempts >= 10) {
-        throw new Error('Expected the first idle process inspection')
+      connectPanePty(pane as never, manager as never, deps as never)
+      await flushAsyncTicks()
+      const titleHandler = createdTransportOptions[0]?.onTitleChange as
+        | ((title: string, rawTitle: string) => void)
+        | undefined
+      const idleHandler = createdTransportOptions[0]?.onAgentBecameIdle as
+        | ((title: string) => void)
+        | undefined
+      if (!titleHandler || !idleHandler) {
+        throw new Error('Expected title and idle handlers to be registered')
       }
-      await vi.advanceTimersToNextTimerAsync()
-    }
-    expect(getForegroundProcess).toHaveBeenCalledTimes(inspectionsBeforeIdle + 1)
 
-    mockStoreState.agentStatusByPaneKey[paneKey] = {
-      state: 'working',
-      prompt: 'replacement agent turn',
-      updatedAt: Date.now(),
-      stateStartedAt: Date.now(),
-      agentType: 'claude',
-      paneKey,
-      stateHistory: []
-    }
-    idleHandler('Claude done')
-    await vi.advanceTimersByTimeAsync(800)
-    await vi.advanceTimersByTimeAsync(AGENT_TASK_COMPLETE_NOTIFICATION_MAX_WAIT_MS)
+      titleHandler('Codex working', 'Codex working')
+      await vi.advanceTimersByTimeAsync(2_500)
+      idleMode = true
+      for (let attempts = 0; nullSamplesStarted < 1; attempts += 1) {
+        if (attempts >= 10) {
+          throw new Error('Expected the first idle process inspection')
+        }
+        await vi.advanceTimersToNextTimerAsync()
+      }
+      // Why: let the first null sample apply pendingProcessExitAgent before the
+      // replacement owner is installed; later samples stay gated until then.
+      await flushAsyncTicks()
 
-    expect(deps.dispatchNotification).not.toHaveBeenCalledWith(
-      expect.objectContaining({ source: 'agent-task-complete' })
-    )
-    expect(pane.terminal.write).not.toHaveBeenCalledWith(
-      RESET_TERMINAL_CURSOR_STYLE,
-      expect.any(Function)
-    )
-    randomSpy.mockRestore()
+      mockStoreState.agentStatusByPaneKey[paneKey] = {
+        state: 'working',
+        prompt: 'replacement agent turn',
+        updatedAt: Date.now(),
+        stateStartedAt: Date.now(),
+        agentType: 'claude',
+        paneKey,
+        stateHistory: []
+      }
+      releaseConfirmingNullSample?.()
+      idleHandler('Claude done')
+      await vi.advanceTimersByTimeAsync(800)
+      await vi.advanceTimersByTimeAsync(AGENT_TASK_COMPLETE_NOTIFICATION_MAX_WAIT_MS)
+
+      expect(deps.dispatchNotification).not.toHaveBeenCalledWith(
+        expect.objectContaining({ source: 'agent-task-complete' })
+      )
+      expect(pane.terminal.write).not.toHaveBeenCalledWith(
+        RESET_TERMINAL_CURSOR_STYLE,
+        expect.any(Function)
+      )
+    } finally {
+      // Why: any assertion failure above must not pin Math.random for later tests
+      // in this large suite.
+      randomSpy.mockRestore()
+    }
   })
 
   it('preserves replacement-agent title side effects through the process replacement veto', async () => {
@@ -18425,6 +18598,7 @@ describe('connectPanePty', () => {
     agentExitedHandler()
 
     expect(deps.setCacheTimerStartedAt).toHaveBeenCalledWith(makePaneKey('tab-1', LEAF_1), null)
+    expect(deps.onAgentExitedRef.current).toHaveBeenCalledWith(LEAF_1)
     expect(mockStoreState.removeAgentStatus).not.toHaveBeenCalled()
   })
 
