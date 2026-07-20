@@ -4442,6 +4442,10 @@ export default function SessionScreen() {
         ? Math.max(0, keyboardHeight - insets.bottom)
         : keyboardHeight
       : 0
+  // The session tree is owned by the upper Activity, so its safe-area inset belongs to the
+  // upper display. Lower-screen controls run in an immersive Presentation and must not inherit
+  // the upper navigation-bar reservation.
+  const controlDockBottomInset = thorSecondaryActive ? 0 : insets.bottom
   const activeTerminalKeyboardLift = (() => {
     if (keyboardLift <= 0 || !activeHandle) {
       return 0
@@ -4617,7 +4621,7 @@ export default function SessionScreen() {
           style={[
             styles.commandDock,
             {
-              paddingBottom: insets.bottom,
+              paddingBottom: controlDockBottomInset,
               transform: [{ translateY: thorSecondaryActive ? 0 : -keyboardLift }]
             }
           ]}
@@ -5508,7 +5512,7 @@ export default function SessionScreen() {
                   tab={activeBrowserTab}
                   screencastSupported={browserScreencastSupported}
                   keyboardLift={keyboardLift}
-                  bottomInset={insets.bottom}
+                  bottomInset={controlDockBottomInset}
                   onToast={showUpperToast}
                   onSecondaryToast={showChromeToast}
                   secondaryControls={{
