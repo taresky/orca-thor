@@ -52,11 +52,13 @@ The arm64 APK is written to `mobile/dist/orca-thor-android-arm64.apk`.
 
 ## Keep up with upstream
 
-Keep the Thor work on its own branch and rebase it onto official Orca updates:
+The fork's `main` branch is the stable Thor build. Keep `upstream` pointed at official Orca and
+merge upstream updates into the fork before starting a new feature branch:
 
 ```sh
-git fetch origin
-git rebase origin/main
+git fetch upstream
+git switch main
+git merge upstream/main
 cd mobile
 pnpm install
 pnpm test
@@ -64,5 +66,5 @@ pnpm typecheck
 pnpm build:thor:android
 ```
 
-All intentional fork changes live under `mobile/`, which keeps conflicts away from the macOS app in
-normal upstream updates.
+Create new work on a focused branch from the verified `main` branch. All intentional fork changes
+live under `mobile/`, which keeps conflicts away from the desktop app in normal upstream updates.

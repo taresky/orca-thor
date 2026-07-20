@@ -2,6 +2,12 @@
   <a href="https://onOrca.dev"><img src="resources/build/icon.png" alt="Orca" width="64" valign="middle" /></a> Orca
 </h1>
 
+> [!IMPORTANT]
+> This repository is the unofficial **Orca Thor** community fork for the AYN Thor dual-screen
+> Android handheld. The desktop app and protocol remain compatible with upstream Orca. See the
+> [Thor Android documentation](mobile/THOR_FORK.md) for scope, installation, and build details.
+> The official project is [stablyai/orca](https://github.com/stablyai/orca).
+
 <p align="center">
   <a href="https://github.com/stablyai/orca/stargazers"><img src="https://badgen.net/github/stars/stablyai/orca?label=%E2%98%85" alt="GitHub stars" /></a>
   <a href="https://github.com/stablyai/orca/releases"><img src="docs/assets/readme-downloads.svg" alt="Total downloads across all releases" /></a>
